@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pomp (placeholder UI)</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --pomp-bg: #1e1e1e; --pomp-fg: #d4d4d4; --pomp-muted-fg: #9d9d9d; --pomp-border: #3c3c3c;
+    --pomp-panel-bg: #252526; --pomp-input-bg: #3c3c3c; --pomp-input-fg: #d4d4d4; --pomp-input-border: #3c3c3c;
+    --pomp-focus-border: #007fd4; --pomp-button-bg: #0e639c; --pomp-button-fg: #ffffff; --pomp-button-hover-bg: #1177bb;
+    --pomp-button-secondary-bg: #3a3d41; --pomp-button-secondary-fg: #ffffff; --pomp-link: #3794ff; --pomp-accent: #007acc;
+    --pomp-error: #f48771; --pomp-warning: #cca700; --pomp-success: #89d185; --pomp-code-bg: #2a2a2a;
+    --pomp-selection-bg: rgba(38, 79, 120, 0.7); --pomp-scrollbar: rgba(121, 121, 121, 0.4);
+    --pomp-diff-add-bg: rgba(155, 185, 85, 0.2); --pomp-diff-del-bg: rgba(255, 0, 0, 0.2);
+  }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column; box-sizing: border-box; padding: 10px; gap: 8px;
+    background: var(--pomp-bg); color: var(--pomp-fg);
+    font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+  }
+  h1 { font-size: 14px; margin: 0; }
+  .muted { color: var(--pomp-muted-fg); }
+  #log {
+    flex: 1; overflow: auto; margin: 0; padding: 8px; background: var(--pomp-code-bg);
+    border: 1px solid var(--pomp-border); border-radius: 4px; font: 12px/1.4 Consolas, monospace; white-space: pre-wrap;
+    scrollbar-color: var(--pomp-scrollbar) transparent;
+  }
+  .row { display: flex; gap: 6px; }
+  textarea {
+    flex: 1; resize: none; background: var(--pomp-input-bg); color: var(--pomp-input-fg);
+    border: 1px solid var(--pomp-input-border); border-radius: 4px; padding: 6px; font: inherit;
+  }
+  textarea:focus { outline: none; border-color: var(--pomp-focus-border); }
+  button {
+    background: var(--pomp-button-bg); color: var(--pomp-button-fg); border: 0; border-radius: 4px; padding: 0 14px; cursor: pointer;
+  }
+  button:hover { background: var(--pomp-button-hover-bg); }
+  button.secondary { background: var(--pomp-button-secondary-bg); color: var(--pomp-button-secondary-fg); }
+  .in { color: var(--pomp-success); }
+  .out { color: var(--pomp-link); }
+  .err { color: var(--pomp-error); }
+  ::selection { background: var(--pomp-selection-bg); }
+</style>
+</head>
+<body>
+  <h1>Pomp <span class="muted">- placeholder UI (the real chat UI is not bundled in this build)</span></h1>
+  <pre id="log"></pre>
+  <div class="row">
+    <textarea id="input" rows="2" placeholder="Type a message (Enter sends, Shift+Enter = newline)"></textarea>
+    <button id="send">Send</button>
+    <button id="new" class="secondary" title="session/new">New</button>
+  </div>
+<script>
+(function () {
+  "use strict";
+  var log = document.getElementById("log");
+  var input = document.getElementById("input");
+  var host = window.chrome && window.chrome.webview;
+  var counter = 0;
+
+  function line(cls, text) {
+    var span = document.createElement("span");
+    span.className = cls;
+    span.textContent = text + "\n";
+    log.appendChild(span);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function post(type, payload) {
+    var msg = { type: type, payload: payload || {} };
+    if (!host) { line("err", "! window.chrome.webview is not available"); return; }
+    host.postMessage(msg);
+    line("out", "-> " + JSON.stringify(msg));
+  }
+
+  function applyTheme(payload) {
+    var colors = (payload && payload.colors) || {};
+    Object.keys(colors).forEach(function (name) {
+      document.documentElement.style.setProperty(name, colors[name]);
+    });
+    if (payload && payload.kind) { document.documentElement.style.colorScheme = payload.kind; }
+    if (payload && payload.fontFamily) { document.body.style.fontFamily = payload.fontFamily; }
+    if (payload && payload.fontSizePx) { document.body.style.fontSize = payload.fontSizePx + "px"; }
+  }
+
+  function send() {
+    var text = input.value.trim();
+    if (!text) { return; }
+    input.value = "";
+    counter += 1;
+    line("out", "you: " + text);
+    post("chat/send", { clientMessageId: "placeholder-" + counter, text: text, includeEditorContext: true });
+  }
+
+  if (host) {
+    host.addEventListener("message", function (e) {
+      var m = e.data;
+      if (m && m.type === "theme/changed") { applyTheme(m.payload); }
+      line("in", "<- " + (typeof m === "string" ? m : JSON.stringify(m)));
+      if (m && m.type === "chat/notice" && m.payload) { line("muted", "notice[" + m.payload.level + "]: " + m.payload.message); }
+    });
+  }
+
+  document.getElementById("send").addEventListener("click", send);
+  document.getElementById("new").addEventListener("click", function () { post("session/new"); });
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  // Host -> page focus request (docs: host command "Pomp: Toggle Focus"); unknown types are ignored by other pages.
+  window.addEventListener("message", function () {});
+
+  post("ui/ready");
+  input.focus();
+})();
+</script>
+</body>
+</html>

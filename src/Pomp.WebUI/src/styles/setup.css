@@ -1,0 +1,803 @@
+/* Accounts · model panel (connected accounts + usage / add an account / API key / model). Built for narrow panes: down to 190 px
+   wide the controls stack, inputs take the full width and long labels wrap (never a horizontal scrollbar). Theme variables only. */
+
+/* Account content lives inside its full-height tab page. */
+.setup-panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 560px;
+  min-height: 0;
+  max-height: 100%;
+  border: 1px solid var(--pomp-focus-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-panel-bg);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  outline: none;
+  /* Korean wraps between words, not inside them ("목/록"); a single token longer than the pane still breaks (overflow-wrap). */
+  word-break: keep-all;
+}
+
+.setup-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 3px 6px 3px 12px;
+  border-bottom: 1px solid var(--pomp-border);
+  font-weight: 600;
+}
+
+.setup-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.setup-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* Content keeps its natural height and the body scrolls (instead of squashing sections into each other in a short pane). */
+.setup-body > * {
+  flex-shrink: 0;
+}
+
+.setup-intro {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.setup-section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.setup-section.view-section { display: block; }
+.setup-section > .view-section-body { display: flex; flex-direction: column; gap: 7px; }
+.setup-section + .setup-section, .login-stack + .setup-section { padding-top: 0; }
+.setup-body .view-section-header { align-items: center; }
+
+.setup-h {
+  margin: 0;
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.setup-h-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.setup-sub {
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+}
+
+.setup-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.setup-panel .hint {
+  overflow-wrap: anywhere;
+}
+
+.setup-panel .hint.warn {
+  color: var(--pomp-warning);
+}
+
+/* Editor-only selection shares the panel's compact control tokens; its labels remain readable at 190px. */
+.editor-model-hint { margin: 0; }
+.editor-model-choices { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.editor-model-choice { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; min-height: var(--pomp-control-height); padding: 5px 7px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: transparent; color: var(--pomp-fg); text-align: left; cursor: pointer; }
+.editor-model-choice:hover:not(:disabled) { background: var(--pomp-hover-bg); }
+.editor-model-choice[aria-checked="true"] { border-color: var(--pomp-focus-border); background: var(--pomp-active-bg); }
+.editor-model-choice:disabled { opacity: .55; cursor: default; }
+.editor-model-label { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.editor-model-provider { display: block; margin-top: 2px; color: var(--pomp-muted-fg); font-size: .85em; }
+.editor-model-radio { flex: none; width: 12px; height: 12px; border: 1px solid var(--pomp-muted-fg); border-radius: 50%; }
+/* Selected: the ring takes the colour of the row's outline and the dot the text colour. Not the accent: the host maps it from the selected document
+   tab's background, which in some themes is about as pale or as dark as the row and the circle would vanish into it. The gap between ring and dot
+   is transparent, so it is the row's own tint (a --pomp-bg ring showed as a darker circle on the selected row). */
+.editor-model-choice[aria-checked="true"] .editor-model-radio { border-color: var(--pomp-focus-border); background: radial-gradient(circle, var(--pomp-fg) 0 3px, transparent 3.5px); }
+.editor-model > .picker-pop { margin-top: 0; }
+
+/* Buttons may wrap their label here (the base .btn never does): long provider names must fit a 190 px pane. */
+.setup-panel .btn {
+  min-width: 0;
+  max-width: 100%;
+  padding-block: 4px;
+  white-space: normal;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+a.btn {
+  text-decoration: none;
+}
+
+.btn.small {
+  min-height: var(--pomp-bar-height);
+  padding: 0 8px;
+  font-size: 0.92em;
+}
+
+.icon-btn.tiny {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.setup-loading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  background: color-mix(in srgb, var(--pomp-accent) 9%, transparent);
+}
+
+.setup-running-text {
+  flex: 1 1 9em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Disclosure headers (all providers, API key) ------------------------------------------------------------------- */
+
+.fold-h {
+  margin: 0;
+}
+
+.fold {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--pomp-fg);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fold:hover {
+  color: var(--pomp-accent);
+}
+
+.fold-caret {
+  color: var(--pomp-muted-fg);
+  transition: transform 0.12s ease;
+}
+
+.fold-caret.open {
+  transform: rotate(90deg);
+}
+
+.fold-count {
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+  font-weight: 400;
+}
+
+/* ---- Sign-in card -------------------------------------------------------------------------------------------------- */
+
+.login-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.login-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  background: color-mix(in srgb, var(--pomp-accent) 9%, transparent);
+  overflow-wrap: anywhere;
+}
+
+.login-card.ok {
+  border-color: color-mix(in srgb, var(--pomp-success) 55%, transparent);
+  background: color-mix(in srgb, var(--pomp-success) 10%, transparent);
+}
+
+.login-card.failed {
+  border-color: color-mix(in srgb, var(--pomp-error) 55%, transparent);
+  background: color-mix(in srgb, var(--pomp-error) 10%, transparent);
+}
+
+.login-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.login-title > .icon {
+  margin-top: 2px;
+}
+
+.login-title > .spinner {
+  margin-top: 3px;
+}
+
+.login-card.ok .login-title > .icon {
+  color: var(--pomp-success);
+}
+
+.login-card.failed .login-title > .icon {
+  color: var(--pomp-error);
+}
+
+.login-title-text {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.login-title .icon-btn.tiny {
+  margin-left: auto;
+}
+
+.login-instructions,
+.login-progress,
+.login-detail {
+  font-size: 0.95em;
+}
+
+.login-progress,
+.login-host {
+  color: var(--pomp-muted-fg);
+}
+
+.login-link {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.login-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-top: 7px;
+  border-top: 1px solid var(--pomp-border);
+}
+
+.login-prompt-label {
+  overflow-wrap: anywhere;
+}
+
+/* The section is the card: a sign-in in progress sits in it without a second box; a result keeps its colored box. */
+.login-section .login-card:not(.ok):not(.failed) { padding: 0; border: 0; background: transparent; }
+.login-section .login-link > .setup-actions { gap: 6px; }
+
+/* ---- Connected accounts and usage ---------------------------------------------------------------------------------- */
+
+/* Connected accounts: rows flush with the card (avatar · name + kind badge · e-mail · sign out), each with its usage below. */
+.acct-section > .view-section-body { gap: 0; }
+.acct-inset { padding: 8px 10px; }
+.acct-empty { --ui-empty-rows: 2; }
+.acct-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.acct {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 8px 10px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--pomp-border) 65%, transparent);
+}
+
+.acct:last-child { border-bottom: 0; }
+
+.acct-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+.acct-who {
+  display: flex;
+  flex: 1 1 8em;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.acct-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  min-width: 0;
+}
+
+.acct-name {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* An account's sign-out: the button ends the head's line; the question, the error and the note take lines of their own. */
+.acct-head > .acct-logout {
+  flex: none;
+  margin-left: auto;
+}
+
+.acct-head > .acct-confirm,
+.acct-head > .acct-note,
+.acct-head > .setup-msg {
+  flex: 1 1 100%;
+}
+
+.acct-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--pomp-error) 55%, transparent);
+  border-radius: var(--pomp-radius);
+  background: color-mix(in srgb, var(--pomp-error) 8%, transparent);
+  overflow-wrap: anywhere;
+}
+
+.acct-confirm:focus {
+  outline: none;
+}
+
+.acct-confirm-title {
+  font-weight: 600;
+}
+
+/* An account's head opens and closes its usage like a section header; a closed one shows its tightest limit. */
+button.acct-toggle {
+  display: flex;
+  flex: 1 1 8em;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.acct-toggle > svg {
+  flex: none;
+  margin-top: 3px;
+}
+
+button.acct-toggle:disabled {
+  cursor: default;
+}
+
+button.acct-toggle > .acct-who {
+  min-width: min(8em, calc(100% - 5em));
+}
+
+.acct-summary.usage-row,
+.acct .acct-summary.usage-row {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: row;
+  align-self: center;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  margin-left: auto;
+  color: var(--pomp-muted-fg);
+  font-size: .85em;
+  white-space: nowrap;
+}
+
+.acct-summary-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.acct-summary > strong {
+  flex: none;
+  color: var(--usage-color);
+  font-weight: 600;
+}
+
+.acct-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.acct-report {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.acct-report + .acct-report {
+  padding-top: 6px;
+  border-top: 1px dashed var(--pomp-border);
+}
+
+.acct-label {
+  min-width: 0;
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acct-usage-status { font-size: .92em; }
+.acct-foot { min-height: 30px; padding-top: 4px; padding-bottom: 4px; }
+.acct-foot .usage-status { color: var(--pomp-muted-fg); font-size: .92em; }
+
+/* In the account rows a limit is one line — name · bar · value — with the reset time under the bar; the rows of an account share
+   their columns (subgrid), so the bars line up. */
+.acct .subscription-usage { display: grid; grid-template-columns: minmax(0, max-content) minmax(40px, 1fr) minmax(2.8em, max-content); column-gap: 8px; row-gap: 5px; }
+.acct .usage-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; row-gap: 1px; align-items: center; }
+.acct .usage-line { display: contents; }
+.acct .usage-name { grid-column: 1; grid-row: 1; min-width: 0; max-width: 12em; overflow: hidden; color: var(--pomp-muted-fg); font-size: .92em; text-overflow: ellipsis; white-space: nowrap; }
+.acct .usage-window { margin-left: 4px; }
+.acct .usage-value { grid-column: 3; grid-row: 1; text-align: right; font-size: .92em; }
+.acct .usage-bar { grid-column: 2; grid-row: 1; height: 5px; }
+.acct .usage-reset { grid-column: 2 / 4; grid-row: 2; font-size: .85em; }
+.acct .usage-row:not(:has(.usage-bar)) .usage-value { grid-column: 2 / 4; text-align: left; }
+.acct .usage-slot-head { grid-column: 1 / -1; padding-top: 2px; }
+
+.usage-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The colour of a limit follows its status: ok / warning / exhausted (unknown is muted). */
+.usage-row,
+.picker-usage {
+  --usage-color: var(--pomp-success);
+}
+
+.usage-row.warning,
+.picker-usage.warning {
+  --usage-color: var(--pomp-warning);
+}
+
+.usage-row.exhausted,
+.picker-usage.exhausted {
+  --usage-color: var(--pomp-error);
+}
+
+.usage-row.unknown,
+.picker-usage.unknown {
+  --usage-color: var(--pomp-muted-fg);
+}
+
+.usage-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.usage-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.usage-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.usage-window {
+  margin-left: 5px;
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+}
+
+.usage-value {
+  flex: none;
+  color: var(--usage-color);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.usage-bar {
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--pomp-radius-sm);
+  background: color-mix(in srgb, var(--pomp-fg) 16%, transparent);
+}
+
+.usage-bar.thin {
+  height: 3px;
+}
+
+.usage-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--pomp-radius-sm);
+  background: var(--usage-color);
+}
+
+.usage-reset {
+  color: var(--pomp-muted-fg);
+  font-size: 0.9em;
+}
+
+/* One subscription's limits in fixed places (5 hours, weekly, per model, other). */
+.subscription-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.usage-slot-head {
+  margin-top: 2px;
+  color: var(--pomp-muted-fg);
+  font-size: 0.88em;
+  font-weight: 600;
+}
+
+.usage-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--pomp-accent);
+  border-radius: var(--pomp-radius-sm);
+  color: var(--pomp-accent);
+  font-size: 0.82em;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+
+/* ---- Add an account ------------------------------------------------------------------------------------------------ */
+
+/* Provider tiles: two columns where they fit (each at least 13em), one in a narrow pane. */
+.prov-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 13em), 1fr));
+  gap: 6px;
+  padding: 8px 8px 8px 10px;
+  min-width: 0;
+}
+
+.prov-cell { display: flex; min-width: 0; }
+
+.setup-panel .prov-tile {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-panel-bg);
+  color: var(--pomp-fg);
+  text-align: left;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.setup-panel .prov-tile:hover:not(:disabled) { border-color: var(--pomp-focus-border); background: var(--pomp-hover-bg); }
+.setup-panel .prov-tile:focus-visible { outline: 1px solid var(--pomp-focus-border); outline-offset: 1px; }
+.setup-panel .prov-tile:disabled { opacity: .55; cursor: default; }
+.setup-panel .prov-tile.connected { border-color: color-mix(in srgb, var(--pomp-success) 55%, var(--pomp-border)); }
+
+.prov-tile-text {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.prov-tile-name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prov-tile-method {
+  overflow: hidden;
+  color: var(--pomp-muted-fg);
+  font-size: .85em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Every provider here signs in to a subscription plan: the title carries that once instead of a badge on each tile. */
+.prov-add-title { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.prov-add-title > .ui-badge { flex: none; font-weight: normal; }
+.prov-tile > .ui-badge { flex: none; }
+.prov-tile-check { display: inline-flex; flex: none; color: var(--pomp-success); }
+.prov-section.required .prov-tile { min-height: 46px; }
+.prov-empty { --ui-empty-rows: 1; }
+
+/* ---- API key ------------------------------------------------------------------------------------------------------- */
+
+.setup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+}
+
+.setup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.setup-field > span {
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+}
+
+.setup-panel select.field {
+  min-width: 0;
+  max-width: 100%;
+  font: inherit; /* base.css only makes buttons and text fields follow the page font */
+  text-overflow: ellipsis;
+}
+
+.setup-panel input.field {
+  min-width: 0;
+}
+
+/* Saved keys: one table row per provider (avatar · name + "API key" · env var and date), the add form above the table. */
+.key-form { border-bottom: 1px solid var(--pomp-border); }
+.key-provider-cell { display: flex; align-items: center; gap: 8px; }
+.key-provider-text { display: flex; flex: 1 1 0; flex-direction: column; min-width: 0; }
+.key-provider-name { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; }
+.key-section .ui-tr { min-height: 40px; }
+
+/* A result or an error that belongs to the control above it. */
+.setup-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+.setup-msg > .icon {
+  margin-top: 3px;
+}
+
+.setup-msg.error {
+  color: var(--pomp-error);
+}
+
+.setup-msg.ok {
+  color: var(--pomp-success);
+}
+
+.setup-msg-body {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.setup-msg-detail {
+  color: var(--pomp-muted-fg);
+}
+
+.setup-msg > .icon-btn.tiny {
+  margin-top: 1px;
+}
+
+/* The panel body scrolls as a whole: an expanded detail grows instead of getting a scrollbar of its own. */
+.setup-panel .clamp.open {
+  max-height: none;
+  overflow: visible;
+}
+
+.setup-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--pomp-warning) 55%, transparent);
+  border-radius: var(--pomp-radius);
+  background: color-mix(in srgb, var(--pomp-warning) 12%, transparent);
+}
+
+.setup-notice > .icon {
+  color: var(--pomp-warning);
+}
+
+.setup-notice-text {
+  flex: 1 1 10em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Narrow pane: the panel is the whole pane (no margin, no frame), with tighter padding. */
+@media (max-width: 360px) {
+  .setup-panel {
+    height: 100%;
+    max-width: none;
+    border-width: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .setup-head {
+    padding-left: 8px;
+  }
+
+  .setup-body {
+    padding: 8px 8px 12px;
+  }
+}

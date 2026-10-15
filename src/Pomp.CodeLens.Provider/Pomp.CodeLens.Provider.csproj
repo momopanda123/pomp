@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>netstandard2.0</TargetFramework></PropertyGroup>
+  <ItemGroup>
+    <!-- CodeLens service provides its SDK assemblies. Do not ship competing SDK/runtime copies. -->
+    <PackageReference Include="Microsoft.VisualStudio.Language" Version="16.10.230" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" PrivateAssets="all" ExcludeAssets="runtime" />
+    <ProjectReference Include="../Pomp.CodeLens.Contracts/Pomp.CodeLens.Contracts.csproj" />
+  </ItemGroup>
+</Project>

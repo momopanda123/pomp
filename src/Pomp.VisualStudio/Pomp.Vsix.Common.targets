@@ -1,0 +1,293 @@
+<Project>
+  <!--
+    Build logic shared by Pomp.Vsix.VS2017, Pomp.Vsix.VS2019 and Pomp.Vsix.VS2022. Imported at the very end of each project,
+    after Microsoft.NET.Sdk's targets and before Microsoft.VsSDK.targets (imported at the bottom of this file).
+
+    Flavour switches set by the importing project:
+      PompVsFlavor           VS2017 | VS2019 | VS2022
+      PompLoaderArch         x86 | x64    architecture of the devenv.exe process (selects WebView2Loader.dll)
+      PompShipNewtonsoftJson true | false whether Newtonsoft.Json.dll is packaged (VS 2017 and VS 2019 only)
+
+    The omp engine: every VSIX ships the omp build pinned in engines\omp\engine.props as omp\omp.exe, with omp\engine.json (version,
+    SHA-256, size) that POMP checks before it starts the engine (docs/architecture.md "엔진 버전"). The build downloads it into
+    artifacts\engines\omp\<version>\ once and fails when its SHA-256 differs from the pinned one (POMP1011 / POMP1012).
+
+    Optional command-line properties:
+      -p:PompOmpExe=<path>   take the pinned engine from this file instead of the download cache (it must still have the pinned SHA-256).
+                             Must be the ABSOLUTE path of an existing file, otherwise the build fails (POMP1001 / POMP1002);
+                             build\build.ps1 -OmpExe resolves and escapes it.
+      -p:PompBundleOmp=false a development package without an engine (POMP then uses an installed omp and says it is not verified).
+  -->
+
+  <PropertyGroup>
+    <PompSharedDir>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)'))</PompSharedDir>
+    <PompSrcDir>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\'))</PompSrcDir>
+    <PompWebUiDist>$(PompSrcDir)Pomp.WebUI\dist\</PompWebUiDist>
+    <PompOmpExtensionDir>$(PompSrcDir)Pomp.OmpExtension\</PompOmpExtensionDir>
+  </PropertyGroup>
+
+  <Import Project="$(PompSrcDir)..\engines\omp\engine.props" />
+  <PropertyGroup>
+    <PompBundleOmp Condition="'$(PompBundleOmp)' == ''">true</PompBundleOmp>
+    <PompOmpCacheDir>$([System.IO.Path]::GetFullPath('$(PompSrcDir)..\artifacts\engines\omp\$(PompOmpVersion)\'))</PompOmpCacheDir>
+  </PropertyGroup>
+
+  <!-- VSIX packaging switches (Microsoft.VSSDK.BuildTools on an SDK-style project). -->
+  <PropertyGroup>
+    <GeneratePkgDefFile>true</GeneratePkgDefFile>
+    <UseCodebase>true</UseCodebase>
+    <IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
+    <IncludeDebugSymbolsInVSIXContainer>false</IncludeDebugSymbolsInVSIXContainer>
+    <IncludeDebugSymbolsInLocalVSIXDeployment>false</IncludeDebugSymbolsInLocalVSIXDeployment>
+    <CopyBuildOutputToOutputDirectory>true</CopyBuildOutputToOutputDirectory>
+    <CopyOutputSymbolsToOutputDirectory>false</CopyOutputSymbolsToOutputDirectory>
+    <VSSDKTargetPlatformRegRootSuffix>Exp</VSSDKTargetPlatformRegRootSuffix>
+    <!-- Never auto-deploy from command-line/Release builds; F5 (Debug) inside Visual Studio deploys to the Experimental instance. -->
+    <DeployExtension Condition="'$(BuildingInsideVisualStudio)' != 'true'">false</DeployExtension>
+    <DeployExtension Condition="'$(Configuration)' == 'Release'">false</DeployExtension>
+    <!--
+      Deploy to the Experimental instance only from the IDE generation this flavour was built for. A Debug "Build Solution" builds
+      every flavour, and each one only installs in its own version range (the x86 VS 2019 flavour can never load in 64-bit VS), so
+      deploying the others would leave dead copies in that IDE's Experimental hive. VisualStudioVersion is 16.0 in VS 2019, 17.0 in
+      VS 2022 and 18.0 in VS 2026; an empty or unknown value counts as 0 = never deploy.
+    -->
+    <PompIdeMajor>$([System.Text.RegularExpressions.Regex]::Match('$(VisualStudioVersion)', '^[0-9]+').Value)</PompIdeMajor>
+    <PompIdeMajor Condition="'$(PompIdeMajor)' == ''">0</PompIdeMajor>
+    <PompFlavorIdeMajor Condition="'$(PompVsFlavor)' == 'VS2017'">15</PompFlavorIdeMajor>
+    <PompFlavorIdeMajor Condition="'$(PompVsFlavor)' == 'VS2019'">16</PompFlavorIdeMajor>
+    <PompFlavorIdeMajor Condition="'$(PompVsFlavor)' == 'VS2022'">17</PompFlavorIdeMajor>
+    <DeployExtension Condition="'$(PompIdeMajor)' != '$(PompFlavorIdeMajor)'">false</DeployExtension>
+    <!-- Explicit instead of relying on the VSSDK default: F5 (Debug) must deploy the flavour of the running IDE to its Experimental instance. -->
+    <DeployExtension Condition="'$(PompVsFlavor)' != 'VS2019' And '$(BuildingInsideVisualStudio)' == 'true' And '$(Configuration)' == 'Debug' And '$(PompIdeMajor)' == '$(PompFlavorIdeMajor)'">true</DeployExtension>
+    <!--
+      The package payload is listed explicitly below (PompVsixPayload). BuildTools 16.x does not pick up SDK-style
+      PackageReference assemblies at all and 17.x suppresses a fixed list, so relying on the automatic copy-local
+      logic would make the two flavours diverge. Project references (Pomp.Contracts, Pomp.Core, Pomp.Tools)
+      are still packaged through their output groups.
+    -->
+    <IncludeCopyLocalReferencesInVSIXContainer>false</IncludeCopyLocalReferencesInVSIXContainer>
+    <IncludePackageReferencesInVSIXContainer>false</IncludePackageReferencesInVSIXContainer>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <DebugType>portable</DebugType>
+    <SatelliteResourceLanguages>en;ko</SatelliteResourceLanguages>
+    <!-- Analyzer noise policy: keep the VSTHRD threading analyzers on, they are the point of the exercise. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.ComponentModel.Composition" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <!-- MenuCommandService (base of OleMenuCommandService) lives here. -->
+    <Reference Include="System.Design" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared Visual Studio source (no project file lives in ..\Pomp.VisualStudio). -->
+    <Compile Include="..\Pomp.VisualStudio\**\*.cs" Exclude="..\Pomp.VisualStudio\**\obj\**;..\Pomp.VisualStudio\**\bin\**" Link="Shared\%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="$(PompSharedDir)VSPackage.resx" LogicalName="$(RootNamespace).VSPackage.resources" />
+    <EmbeddedResource Include="$(PompSharedDir)VSPackage.ko.resx" LogicalName="$(RootNamespace).VSPackage.resources" />
+    <VSCTCompile Include="..\\Pomp.VisualStudio\\Pomp.vsct" Link="Shared\\Pomp.vsct">
+      <ResourceName>Menus.ctmenu</ResourceName>
+    </VSCTCompile>
+  </ItemGroup>
+
+  <!-- ===================================================================================================== -->
+  <!-- WebView2 native loader: keep only the architecture of the hosting devenv.exe.                          -->
+  <!-- Microsoft.Web.WebView2.Core (1.0.1245.22) loads <dir of Core.dll>\runtimes\win-<arch>\native\           -->
+  <!-- WebView2Loader.dll on .NET Framework, so that layout is what the VSIX carries. VS 2022+ redirect the    -->
+  <!-- managed assemblies to their own copy (with their own loader next to it), which makes ours a fallback.  -->
+  <!-- ===================================================================================================== -->
+  <ItemGroup>
+    <Content Remove="@(Content->WithMetadataValue('Link', 'runtimes\win-x86\native\WebView2Loader.dll'))" Condition="'$(PompLoaderArch)' != 'x86'" />
+    <Content Remove="@(Content->WithMetadataValue('Link', 'runtimes\win-x64\native\WebView2Loader.dll'))" Condition="'$(PompLoaderArch)' != 'x64'" />
+    <Content Remove="@(Content->WithMetadataValue('Link', 'runtimes\win-arm64\native\WebView2Loader.dll'))" />
+  </ItemGroup>
+
+  <!-- ===================================================================================================== -->
+  <!-- Explicit package payload (managed assemblies that must ship because Visual Studio may not provide     -->
+  <!-- them at the version we compile against).                                                               -->
+  <!-- ===================================================================================================== -->
+  <Target Name="PompAddPackagePayloadToVsix" BeforeTargets="GetVsixSourceItems" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <_PompPayloadCandidate Include="@(ReferenceCopyLocalPaths)" Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.dll'" />
+      <PompVsixPayload Include="@(_PompPayloadCandidate)" Condition="'%(_PompPayloadCandidate.Filename)' == 'Microsoft.Web.WebView2.Core' Or '%(_PompPayloadCandidate.Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+      <PompVsixPayload Include="@(_PompPayloadCandidate)" Condition="'$(PompShipNewtonsoftJson)' == 'true' And '%(_PompPayloadCandidate.Filename)' == 'Newtonsoft.Json'" />
+      <Content Include="@(PompVsixPayload)" Link="%(Filename)%(Extension)" IncludeInVSIX="true" />
+    </ItemGroup>
+  </Target>
+
+  <!-- ===================================================================================================== -->
+  <!-- Static content: icon, web UI, omp-side extension, optional omp.exe.                                    -->
+  <!-- ===================================================================================================== -->
+  <ItemGroup>
+    <Content Include="..\Pomp.VisualStudio\Resources\PompIcon.png" Link="Resources\PompIcon.png" IncludeInVSIX="true" />
+    <Content Include="..\Pomp.VisualStudio\Resources\PompPreview.png" Link="Resources\PompPreview.png" IncludeInVSIX="true" />
+    <!-- Referenced by <License> in source.extension.vsixmanifest (shown by the VSIX installer and the Marketplace). -->
+    <Content Include="$(PompSrcDir)..\LICENSE.txt" Link="LICENSE.txt" IncludeInVSIX="true" />
+  </ItemGroup>
+
+  <!--
+    WebUI\ : the real UI bundle when src\Pomp.WebUI\dist holds a complete build (index.html and its assets), otherwise the
+    protocol-speaking placeholder. The placeholder cannot answer approvals or stop a turn, so a Release package refuses it unless
+    -p:PompAllowPlaceholderUi=true is given (see PompCheckWebUi).
+  -->
+  <PropertyGroup>
+    <PompWebUiDir>$(PompSrcDir)Pomp.WebUI\</PompWebUiDir>
+    <PompUseWebUiDist Condition="Exists('$(PompWebUiDist)index.html') And Exists('$(PompWebUiDist)assets')">true</PompUseWebUiDist>
+    <PompUseWebUiDist Condition="'$(PompUseWebUiDist)' == ''">false</PompUseWebUiDist>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(PompUseWebUiDist)' == 'true'">
+    <Content Include="$(PompWebUiDist)**\*" Link="WebUI\%(RecursiveDir)%(Filename)%(Extension)" IncludeInVSIX="true" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(PompUseWebUiDist)' != 'true'">
+    <Content Include="$(PompSharedDir)Resources\WebUIPlaceholder\index.html" Link="WebUI\index.html" IncludeInVSIX="true" />
+  </ItemGroup>
+
+  <!-- omp-extension\ : omp-side extension / hook / skill sources, plus the catalog skills' kits (css, tsx, js); no node_modules, no build output. -->
+  <ItemGroup Condition="Exists('$(PompOmpExtensionDir)')">
+    <Content Include="$(PompOmpExtensionDir)**\*.mjs;$(PompOmpExtensionDir)**\*.ts;$(PompOmpExtensionDir)**\*.tsx;$(PompOmpExtensionDir)**\*.js;$(PompOmpExtensionDir)**\*.css;$(PompOmpExtensionDir)**\*.md;$(PompOmpExtensionDir)**\*.yml;$(PompOmpExtensionDir)**\*.json"
+             Exclude="$(PompOmpExtensionDir)**\node_modules\**;$(PompOmpExtensionDir)dist\**;$(PompOmpExtensionDir)bin\**;$(PompOmpExtensionDir)obj\**;$(PompOmpExtensionDir)**\package-lock.json"
+             Link="omp-extension\%(RecursiveDir)%(Filename)%(Extension)"
+             IncludeInVSIX="true" />
+  </ItemGroup>
+
+  <!--
+    omp\omp.exe : only when -p:PompOmpExe=<absolute path> points to an existing file (hybrid strategy, docs/architecture.md section 7).
+    "Absolute" means fully qualified: a drive letter with a separator (C:\...) or a UNC path (\\server\share\...). Path.IsPathRooted also
+    accepts C:omp.exe (relative to the current directory of drive C) and \omp.exe (relative to the current drive), whose meaning depends
+    on where the build runs; .NET Framework MSBuild has no Path.IsPathFullyQualified, hence the pattern.
+  -->
+  <PropertyGroup Condition="'$(PompOmpExe)' != ''">
+    <PompOmpExeIsFullPath>$([System.Text.RegularExpressions.Regex]::IsMatch('$(PompOmpExe)', '^([A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+)'))</PompOmpExeIsFullPath>
+  </PropertyGroup>
+  <!--
+    The pinned omp engine, its manifest and its licence texts go into every VSIX (unless PompBundleOmp=false). The download happens once
+    per version; every build re-checks the SHA-256 of what it packages, so a corrupted cache or a wrong -p:PompOmpExe never ships.
+  -->
+  <Target Name="PompPrepareOmpEngine" BeforeTargets="BeforeBuild" DependsOnTargets="PompValidateOmpExe" Condition="'$(PompBundleOmp)' == 'true'">
+    <PropertyGroup>
+      <_PompOmpEngine Condition="'$(PompOmpExe)' != ''">$(PompOmpExe)</_PompOmpEngine>
+      <_PompOmpEngine Condition="'$(PompOmpExe)' == ''">$(PompOmpCacheDir)omp.exe</_PompOmpEngine>
+      <_PompOmpNotices>$(PompOmpCacheDir)THIRD-PARTY-NOTICES.txt</_PompOmpNotices>
+      <!-- The VSIX keeps each file's own name (Link only gives the folder): the packaged files are staged under their final names. -->
+      <_PompOmpStage>$(MSBuildProjectDirectory)\$(IntermediateOutputPath)pomp-omp\</_PompOmpStage>
+      <_PompOmpManifest>$(_PompOmpStage)engine.json</_PompOmpManifest>
+    </PropertyGroup>
+    <MakeDir Directories="$(PompOmpCacheDir)" />
+    <Message Importance="high" Condition="'$(PompOmpExe)' == '' And !Exists('$(_PompOmpEngine)')" Text="Downloading omp $(PompOmpVersion) ($(PompOmpAsset)) into $(PompOmpCacheDir)" />
+    <DownloadFile Condition="'$(PompOmpExe)' == '' And !Exists('$(_PompOmpEngine)')" SourceUrl="$(PompOmpReleaseUrl)$(PompOmpAsset)" DestinationFolder="$(PompOmpCacheDir)" DestinationFileName="omp.exe" Retries="2" />
+    <DownloadFile Condition="!Exists('$(_PompOmpNotices)')" SourceUrl="$(PompOmpReleaseUrl)THIRD-PARTY-NOTICES.txt" DestinationFolder="$(PompOmpCacheDir)" DestinationFileName="THIRD-PARTY-NOTICES.txt" Retries="2" />
+    <GetFileHash Files="$(_PompOmpEngine)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Hash" PropertyName="_PompOmpActualSha256" />
+    </GetFileHash>
+    <GetFileHash Files="$(_PompOmpNotices)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Hash" PropertyName="_PompOmpNoticesActualSha256" />
+    </GetFileHash>
+    <PropertyGroup>
+      <_PompOmpHashOk>$([System.String]::Equals('$(_PompOmpActualSha256.ToLowerInvariant())', '$(PompOmpSha256.ToLowerInvariant())'))</_PompOmpHashOk>
+      <_PompOmpNoticesHashOk>$([System.String]::Equals('$(_PompOmpNoticesActualSha256.ToLowerInvariant())', '$(PompOmpNoticesSha256.ToLowerInvariant())'))</_PompOmpNoticesHashOk>
+    </PropertyGroup>
+    <!-- A bad download must not stay in the cache: the next build fetches it again. -->
+    <Delete Condition="'$(_PompOmpHashOk)' != 'true' And '$(PompOmpExe)' == ''" Files="$(_PompOmpEngine)" />
+    <Delete Condition="'$(_PompOmpNoticesHashOk)' != 'true'" Files="$(_PompOmpNotices)" />
+    <Error Code="POMP1011" Condition="'$(_PompOmpHashOk)' != 'true'"
+           Text="omp engine '$(_PompOmpEngine)' has SHA-256 $(_PompOmpActualSha256), but engines\omp\engine.props pins omp $(PompOmpVersion) as $(PompOmpSha256). The VSIX must ship exactly the pinned engine." />
+    <Error Code="POMP1012" Condition="'$(_PompOmpNoticesHashOk)' != 'true'"
+           Text="omp's THIRD-PARTY-NOTICES.txt has SHA-256 $(_PompOmpNoticesActualSha256), expected $(PompOmpNoticesSha256) (engines\omp\engine.props)." />
+    <WriteLinesToFile File="$(_PompOmpManifest)" Overwrite="true" WriteOnlyWhenDifferent="true"
+                      Lines="{&quot;version&quot;:&quot;$(PompOmpVersion)&quot;,&quot;sha256&quot;:&quot;$(PompOmpSha256.ToLowerInvariant())&quot;,&quot;size&quot;:$(PompOmpSize),&quot;asset&quot;:&quot;$(PompOmpAsset)&quot;,&quot;source&quot;:&quot;$(PompOmpReleaseUrl)$(PompOmpAsset)&quot;}" />
+    <!-- An engine given with -p:PompOmpExe may have any file name: it is staged as omp.exe (copied only when it changed). -->
+    <Copy Condition="'$(PompOmpExe)' != ''" SourceFiles="$(PompOmpExe)" DestinationFiles="$(_PompOmpStage)omp.exe" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(PompSrcDir)..\engines\omp\LICENSE.upstream" DestinationFiles="$(_PompOmpStage)LICENSE.txt" SkipUnchangedFiles="true" />
+    <PropertyGroup>
+      <_PompOmpPackaged Condition="'$(PompOmpExe)' != ''">$(_PompOmpStage)omp.exe</_PompOmpPackaged>
+      <_PompOmpPackaged Condition="'$(PompOmpExe)' == ''">$(_PompOmpEngine)</_PompOmpPackaged>
+    </PropertyGroup>
+    <ItemGroup>
+      <Content Include="$(_PompOmpPackaged)" Link="omp\omp.exe" IncludeInVSIX="true" />
+      <Content Include="$(_PompOmpManifest)" Link="omp\engine.json" IncludeInVSIX="true" />
+      <Content Include="$(_PompOmpStage)LICENSE.txt" Link="omp\LICENSE.txt" IncludeInVSIX="true" />
+      <Content Include="$(_PompOmpNotices)" Link="omp\THIRD-PARTY-NOTICES.txt" IncludeInVSIX="true" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    Bundling omp.exe is an explicit opt-in, so a value that cannot be used must fail the build instead of silently producing a VSIX
+    without omp\omp.exe. A relative value would be resolved against the project directory (not the caller's), so it is rejected too.
+  -->
+  <Target Name="PompValidateOmpExe" Condition="'$(PompOmpExe)' != ''">
+    <Error Code="POMP1002" Condition="'$(PompOmpExeIsFullPath)' != 'true'"
+           Text="PompOmpExe='$(PompOmpExe)' is not a fully qualified path (C:\... or \\server\share\...). Relative, drive-relative (C:omp.exe) and root-relative (\omp.exe) paths depend on where the build runs; pass a full path (build\build.ps1 -OmpExe resolves it for you)." />
+    <Error Code="POMP1001" Condition="'$(PompOmpExeIsFullPath)' == 'true' And !$([System.IO.File]::Exists('$(PompOmpExe)'))"
+           Text="PompOmpExe='$(PompOmpExe)' does not exist or is not a file; the VSIX would silently ship without omp\omp.exe." />
+  </Target>
+
+  <!--
+    The chat UI that gets packaged must be the current one. A Release package needs the real bundle (never the placeholder, unless
+    PompAllowPlaceholderUi=true), and a bundle older than any WebUI source is an error in Release and a warning in Debug. The target
+    body runs only when MSBuild finds an input newer than dist\index.html (Inputs/Outputs), which is exactly the stale case.
+  -->
+  <ItemGroup>
+    <_PompWebUiSource Include="$(PompWebUiDir)src\**\*;$(PompWebUiDir)index.html;$(PompWebUiDir)package.json;$(PompWebUiDir)package-lock.json;$(PompWebUiDir)vite.config.ts;$(PompWebUiDir)tsconfig*.json" />
+  </ItemGroup>
+  <!--
+    omp-extension\vendor\ (minimatch + yaml bundled for the rule extensions) is generated from the pinned lockfile and not committed:
+    build\build.ps1 runs "npm ci" (scripts ignored) and "npm run build:vendor" in src\Pomp.OmpExtension. Without it the project rules
+    and resources extensions cannot load, so a Release package must not be built without it.
+  -->
+  <Target Name="PompCheckOmpExtensionVendor" BeforeTargets="BeforeBuild" Condition="Exists('$(PompOmpExtensionDir)') And !Exists('$(PompOmpExtensionDir)vendor\rule-deps.mjs')">
+    <Error Code="POMP1007" Condition="'$(Configuration)' == 'Release'"
+           Text="src\Pomp.OmpExtension\vendor\rule-deps.mjs is missing. Run 'npm ci --ignore-scripts' and 'npm run build:vendor' in src\Pomp.OmpExtension (build\build.ps1 does both)." />
+    <Warning Code="POMP1007" Condition="'$(Configuration)' != 'Release'"
+             Text="src\Pomp.OmpExtension\vendor\rule-deps.mjs is missing; the project rules and resources extensions will not load. Run 'npm ci --ignore-scripts' and 'npm run build:vendor' in src\Pomp.OmpExtension." />
+  </Target>
+  <Target Name="PompCheckWebUi" BeforeTargets="BeforeBuild">
+    <Error Code="POMP1003" Condition="'$(PompUseWebUiDist)' != 'true' And '$(Configuration)' == 'Release' And '$(PompAllowPlaceholderUi)' != 'true'"
+           Text="The chat UI is not built (src\Pomp.WebUI\dist\index.html and assets). A Release VSIX would ship the placeholder page, which cannot answer approvals. Run 'npm ci' and 'npm run build' in src\Pomp.WebUI (build\build.ps1 does both), or pass -p:PompAllowPlaceholderUi=true." />
+    <Warning Code="POMP1005" Condition="'$(PompUseWebUiDist)' != 'true' And ('$(Configuration)' != 'Release' Or '$(PompAllowPlaceholderUi)' == 'true')"
+             Text="The chat UI is not built (src\Pomp.WebUI\dist); the VSIX gets the placeholder page. Run 'npm ci' and 'npm run build' in src\Pomp.WebUI for the real UI." />
+  </Target>
+  <Target Name="PompCheckWebUiFresh" BeforeTargets="BeforeBuild" Condition="'$(PompUseWebUiDist)' == 'true'"
+          Inputs="@(_PompWebUiSource)" Outputs="$(PompWebUiDist)index.html">
+    <Error Code="POMP1004" Condition="'$(Configuration)' == 'Release'"
+           Text="src\Pomp.WebUI changed after src\Pomp.WebUI\dist was built; the Release VSIX would ship an outdated chat UI. Run 'npm run build' in src\Pomp.WebUI (build\build.ps1 does it)." />
+    <Warning Code="POMP1004" Condition="'$(Configuration)' != 'Release'"
+             Text="src\Pomp.WebUI changed after src\Pomp.WebUI\dist was built; this VSIX contains the older chat UI. Run 'npm run build' in src\Pomp.WebUI." />
+  </Target>
+
+  <!--
+    Hashes catch deleted inputs, preserved timestamps and incomplete/modified assets that timestamp checks cannot. MSBuild runs a
+    target once per build, so the check has two targets: one before the build and one right before the VSIX collects its files
+    (dist\ may change while the build runs).
+  -->
+  <Target Name="PompCheckWebUiIntegrity" BeforeTargets="BeforeBuild" Condition="'$(PompUseWebUiDist)' == 'true'">
+    <Exec Command="node &quot;$(PompWebUiDir)scripts\bundle-integrity.mjs&quot; --verify"
+          WorkingDirectory="$(PompWebUiDir)" IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true" StandardErrorImportance="High">
+      <Output TaskParameter="ExitCode" PropertyName="_PompUiIntegrityExitCode" />
+    </Exec>
+    <Error Code="POMP1006" Condition="'$(_PompUiIntegrityExitCode)' != '0' And '$(Configuration)' == 'Release'"
+           Text="The UI fingerprint or asset integrity check failed (or Node is unavailable). Run npm run build in src\Pomp.WebUI before packaging." />
+    <Warning Code="POMP1006" Condition="'$(_PompUiIntegrityExitCode)' != '0' And '$(Configuration)' != 'Release'"
+             Text="The UI fingerprint or asset integrity check failed (or Node is unavailable). This Debug VSIX may contain an invalid UI bundle." />
+  </Target>
+  <Target Name="PompCheckWebUiIntegrityBeforePackaging" BeforeTargets="GetVsixSourceItems" Condition="'$(PompUseWebUiDist)' == 'true'">
+    <Exec Command="node &quot;$(PompWebUiDir)scripts\bundle-integrity.mjs&quot; --verify"
+          WorkingDirectory="$(PompWebUiDir)" IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true" StandardErrorImportance="High">
+      <Output TaskParameter="ExitCode" PropertyName="_PompUiPackagingIntegrityExitCode" />
+    </Exec>
+    <Error Code="POMP1006" Condition="'$(_PompUiPackagingIntegrityExitCode)' != '0' And '$(Configuration)' == 'Release'"
+           Text="The UI bundle changed or failed its integrity check while the VSIX was being built. Run npm run build in src\Pomp.WebUI, then build again." />
+    <Warning Code="POMP1006" Condition="'$(_PompUiPackagingIntegrityExitCode)' != '0' And '$(Configuration)' != 'Release'"
+             Text="The UI bundle changed or failed its integrity check while the VSIX was being built. This Debug VSIX may contain an invalid UI bundle." />
+  </Target>
+
+  <!-- Microsoft.VSSDK.BuildTools: pkgdef generation, VSCT compilation, VSIX container. -->
+  <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets" Condition="'$(VSToolsPath)' != ''" />
+</Project>

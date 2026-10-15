@@ -1,0 +1,51 @@
+# Sample omp config overlay for the pomp Visual Studio host.
+# Pass it with:  omp --config <absolute path to this file>   (the file must exist, be valid YAML,
+# and have a mapping at the root; omp treats any overlay problem as a hard startup error).
+#
+# Host tools registered through RPC `set_host_tools` keep their EXACT names in omp's tool
+# registry (no prefix; verified in packages/coding-agent/src/modes/rpc/host-tools.ts and
+# session-tools.ts), so these keys are the final registered names. Host tools declare no
+# approval tier, which omp treats as "exec": under --approval-mode always-ask each call would
+# prompt. The pomp host gates these tools itself (PermissionGate), so allow them here to avoid
+# double prompts. omp's own tools (read/edit/write/bash/...) are NOT listed and keep the
+# session's approval mode.
+tools:
+  approval:
+    get_editor_context: allow
+    read_buffer: allow
+    edit_buffer_hashline: allow
+    query_solution: allow
+    read_error_list: allow
+    build_solution: allow
+    list_breakpoints: allow
+    get_debug_state: allow
+    list_bookmarks: allow
+    add_project_file: allow
+    rename_project_file: allow
+    get_msbuild_properties: allow
+    read_output_window: allow
+    manage_tests: allow
+    manage_git: allow
+    manage_breakpoints: allow
+    control_debugger: allow
+    add_bookmark: allow
+    # remove_project_file: withheld pending Windows recycle safety verification
+    manage_nuget: allow
+
+# ---------------------------------------------------------------------------------------------
+# Optional. Uncomment only if you do not load the package with `-e <Pomp.OmpExtension dir>`.
+#
+# `-e <dir>` registers the extension modules AND lets omp discover <dir>/skills/*/SKILL.md.
+# If the host instead passes the two .ts files individually (`-e file.ts`), skills are not
+# discovered from the package, so point omp at the skills folder here:
+#
+# skills:
+#   customDirectories:
+#     - C:\path\to\Pomp.OmpExtension\skills
+#
+# By default omp mounts "discoverable" tools behind xd:// devices (tools.xdev: true). Host tools
+# are discoverable unless set_host_tools sends loadMode: "essential" for them (recommended, see
+# README). To expose every tool top-level instead, at the cost of larger tool schemas per request,
+# add this key to the existing `tools:` mapping above (do not repeat the `tools:` key):
+#
+#   xdev: false

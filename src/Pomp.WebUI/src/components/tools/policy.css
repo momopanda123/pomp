@@ -1,0 +1,13 @@
+/* Tools › 권한: three tables (allowed actions, trusted repositories, project policy rules) and the rule form. */
+.permissions-view > .ui-note { margin: 0 0 8px; }
+.perm-path { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.perm-path > .icon { flex: none; color: var(--pomp-muted-fg); }
+.perm-path > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.perm-date { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.permissions-view .ui-toolbar { gap: 4px 14px; }
+.permissions-view .ui-form p { margin: 0; }
+.policy-fieldset { display: flex; flex-direction: column; gap: 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.policy-form .ui-seg { align-self: flex-start; }
+.tools-scroll-body .policy-form .ui-seg > button { min-height: var(--pomp-control-height); height: auto; }
+.policy-form textarea.ui-mono, .policy-form input.ui-mono { font-family: var(--pomp-font-mono); }
+.policy-form p { margin: 0; }

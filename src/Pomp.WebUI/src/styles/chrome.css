@@ -1,0 +1,467 @@
+/* App frame: status bar, connection banner, composer, modal dialogs, diff view. */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+
+.main {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The connection dot moves into the one-row tab bar. */
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--pomp-muted-fg);
+}
+
+.state-running .dot {
+  background: var(--pomp-success);
+}
+
+.state-starting .dot,
+.state-handshaking .dot,
+.state-reconnecting .dot,
+.state-stopping .dot {
+  background: var(--pomp-warning);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.state-failed .dot {
+  background: var(--pomp-error);
+}
+
+/* The engine is fine but has no model provider yet: a call to action, not an error. */
+.state-setup .dot {
+  background: var(--pomp-warning);
+}
+
+/* ---- Connection banner -------------------------------------------------------------------- */
+
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  /* safety net: a banner never takes the chat's place, it scrolls instead. In a short window (status bar, composer with its model and
+     thinking chips) it also leaves room for the chat. */
+  max-height: max(6em, min(45vh, calc(100vh - 340px)));
+  padding: 6px 10px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--pomp-border);
+  font-size: 0.95em;
+}
+
+.banner.warning {
+  background: color-mix(in srgb, var(--pomp-warning) 15%, var(--pomp-bg));
+}
+
+.banner.error {
+  background: color-mix(in srgb, var(--pomp-error) 15%, var(--pomp-bg));
+}
+
+.banner.error > .icon {
+  color: var(--pomp-error);
+}
+
+.banner-text {
+  display: flex;
+  flex: 1 1 14em;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.banner-detail {
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+.banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Workspace trust: the files omp would run, one per row (path, what it is, open in VS); the narrow pane wraps each row. */
+.workspace-trust-files {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-trust-files > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  min-width: 0;
+}
+
+.workspace-trust-files code {
+  overflow-wrap: anywhere;
+}
+
+.workspace-trust-kind {
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+.workspace-trust-error {
+  color: var(--pomp-error);
+}
+
+/* Long text (raw process output): three lines, and a "Details" toggle only when something is cut off. Expanded, it is still
+   height-capped and scrolls, so it cannot push the chat off a short pane. */
+.clamped {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.clamp {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.clamp.open {
+  display: block;
+  max-height: min(40vh, 16em);
+  overflow-y: auto;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+}
+
+/* In the banner, leave room for the title and the buttons: with the banner's own cap (45vh) this keeps it to one scroll area. */
+.banner .clamp.open {
+  max-height: max(4.5em, calc(45vh - 8em));
+}
+
+.clamp-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pomp-link);
+  font-size: 0.92em;
+  cursor: pointer;
+}
+
+.clamp-toggle:hover {
+  text-decoration: underline;
+}
+
+/* ---- Composer ----------------------------------------------------------------------------- */
+
+.composer {
+  padding: 6px 8px 8px;
+  border-top: 1px solid var(--pomp-border);
+  background: var(--pomp-bg);
+}
+
+/* Computed default input height: ~28px at the default 13px font (two button-box
+   pixels above a single 1.4 line plus 6+6 vertical padding). The JS autosizer
+   overwrites style.height per content, so the minimum must stay style-free. */
+.composer-input {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  max-height: 200px;
+  padding: 4px 8px;
+  overflow-y: auto;
+  border: 1px solid var(--pomp-input-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-input-bg);
+  color: var(--pomp-input-fg);
+  line-height: 1.4;
+  resize: none;
+}
+
+.composer-input:focus {
+  outline: none;
+  border-color: var(--pomp-focus-border);
+}
+
+.composer-input:disabled {
+  opacity: 0.6;
+}
+
+.composer-input::placeholder {
+  color: var(--pomp-muted-fg);
+  opacity: 0.85;
+}
+
+/* The empty field keeps one line: its hint is cut with an ellipsis instead of wrapping. */
+.composer-input:placeholder-shown {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Why the message was not sent (too long, host unreachable); the draft stays in the field. */
+.composer-error,
+.dialog-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 5px;
+  color: var(--pomp-error);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+.composer-error .icon,
+.dialog-error .icon {
+  flex: none;
+  margin-top: 3px;
+}
+
+.composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+/* Keep the destination readable; the model controls wrap instead of reducing it to an icon. */
+.composer .composer-bar { flex-wrap: wrap; }
+.composer .composer-bar .pickers-composer { flex: 1 1 150px; min-width: min(100%, 150px); }
+
+/* Host-backed mentions and attachment drafts. */
+/* The input and its Send (and Stop while a reply runs) share one row; the buttons stay at the bottom as the input grows. */
+.composer-field { position: relative; display: flex; align-items: flex-end; gap: 4px; min-width: 0; }
+.composer-input-shell { position: relative; flex: 1 1 auto; min-width: 0; }
+.composer-ghost { position: absolute; overflow: hidden; pointer-events: none; border-radius: var(--pomp-radius); }
+.composer-ghost-mirror { min-height: 100%; color: transparent; }
+.composer-ghost-prefix { color: transparent; }
+.composer-ghost-text { color: var(--pomp-muted-fg); opacity: 0.7; }
+.composer-send { display: flex; flex: none; gap: 3px; }
+/* Matches the default single-line input row (28px input incl. border) while it grows with it. */
+.composer-send-btn { width: 28px; min-width: 28px; height: 28px; padding: 0; justify-content: center; }
+
+/* Bottom toolbar order, left to right: permission mode, destination picker, then the model controls. */
+.composer-bar .permission-mode-anchor { order: -1; }
+.composer-bar .send-target-anchor { order: 0; }
+.composer-bar .pickers-composer { order: 1; }
+.mention-popup {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 4px);
+  left: 0;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--pomp-focus-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-panel-bg);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+}
+.mention-head, .mention-status { padding: 4px 8px; font-size: 0.9em; }
+.mention-head { border-bottom: 1px solid var(--pomp-border); font-weight: 600; }
+.mention-list { max-height: min(28vh, 240px); overflow: auto; }
+.mention-option {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--pomp-fg);
+  text-align: left;
+  font-family: var(--pomp-font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.mention-option:hover, .mention-option.selected { background: var(--pomp-selection-bg); }
+.mention-status, .file-directory { color: var(--pomp-muted-fg); }
+.composer-warning { display: flex; align-items: baseline; gap: 5px; margin: 4px 0; color: var(--pomp-warning); font-size: 0.92em; overflow-wrap: anywhere; }
+
+.hint {
+  color: var(--pomp-muted-fg);
+  font-size: 0.9em;
+}
+
+/* ---- Diff view ---------------------------------------------------------------------------- */
+
+.diff {
+  overflow: hidden;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-code-bg);
+}
+
+.diff-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  justify-content: space-between;
+  padding: 3px 9px;
+  border-bottom: 1px solid var(--pomp-border);
+  background: color-mix(in srgb, var(--pomp-fg) 6%, transparent);
+  color: var(--pomp-muted-fg);
+  font-size: 0.88em;
+}
+
+.diff-stat {
+  display: inline-flex;
+  gap: 8px;
+  font-family: var(--pomp-font-mono);
+}
+
+.diff-stat .add {
+  color: var(--pomp-success);
+}
+
+.diff-stat .del {
+  color: var(--pomp-error);
+}
+
+.diff-scroll {
+  max-height: min(46vh, 420px);
+  overflow: auto;
+}
+
+.diff-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-family: var(--pomp-font-mono);
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.diff-table td {
+  padding: 0;
+  vertical-align: top;
+}
+
+.diff-row {
+  --row-bg: transparent;
+  background: var(--row-bg);
+}
+
+.diff-row.add {
+  --row-bg: var(--pomp-diff-add-bg);
+}
+
+.diff-row.del {
+  --row-bg: var(--pomp-diff-del-bg);
+}
+
+.diff-row.hunk {
+  --row-bg: color-mix(in srgb, var(--pomp-accent) 14%, transparent);
+  color: var(--pomp-muted-fg);
+}
+
+.diff-row.file {
+  color: var(--pomp-muted-fg);
+  font-weight: 600;
+}
+
+.diff-row.meta {
+  color: var(--pomp-muted-fg);
+  font-style: italic;
+}
+
+/* Line numbers stay visible while long lines scroll horizontally; the layered background keeps them opaque. */
+.diff-table .ln {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  padding: 0 6px;
+  border-right: 1px solid var(--pomp-border);
+  background: linear-gradient(var(--row-bg), var(--row-bg)), var(--pomp-code-bg);
+  color: var(--pomp-muted-fg);
+  text-align: right;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.diff-table .ln span {
+  display: inline-block;
+  min-width: calc(var(--digits, 3) * 1ch);
+}
+
+.diff-table .ln span + span {
+  margin-left: 8px;
+}
+
+.diff-table .code {
+  padding: 0 10px 0 4px;
+  white-space: pre;
+}
+
+.diff-table .sign {
+  display: inline-block;
+  width: 1.6ch;
+  color: var(--pomp-muted-fg);
+  user-select: none;
+}
+
+.diff-row.add .sign {
+  color: var(--pomp-success);
+}
+
+.diff-row.del .sign {
+  color: var(--pomp-error);
+}
+
+.diff-more,
+.diff-empty {
+  padding: 4px 9px;
+  color: var(--pomp-muted-fg);
+  font-size: 0.9em;
+}
+
+.diff-modes { display: inline-flex; gap: 2px; }
+.diff-modes .btn { min-height: var(--pomp-bar-height); padding: 1px 5px; font-size: 1em; }
+.diff-modes [aria-pressed="true"] { background: var(--pomp-selection-bg); color: var(--pomp-fg); }
+.diff-table.split { width: 100%; table-layout: fixed; }
+.diff-table.split .split-number { width: calc((var(--digits, 3) + 2) * 1ch); }
+.diff-table.split .ln { position: static; }
+.diff-table.split .code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff-table.split th { padding: 2px 6px; color: var(--pomp-muted-fg); text-align: left; font-weight: 400; border-bottom: 1px solid var(--pomp-border); }
+.diff-table.split th + th, .diff-table.split td:nth-child(3) { border-left: 1px solid var(--pomp-border); }
+.diff-table.split .add { background: var(--pomp-diff-add-bg); }
+.diff-table.split .del { background: var(--pomp-diff-del-bg); }
+.diff-table.split .empty { margin: 0; padding: 0; background: color-mix(in srgb, var(--pomp-fg) 3%, transparent); }
+.diff-table.split .add .sign { color: var(--pomp-success); }
+.diff-table.split .del .sign { color: var(--pomp-error); }
+
+/* An invisible bidi/zero-width character in an approval preview, shown as a marker instead of acting on the text. */
+.ctl {
+  padding: 0 1px;
+  border: 1px dashed currentColor;
+  border-radius: var(--pomp-radius-sm);
+  color: var(--pomp-warning);
+  font-size: 0.85em;
+}
+
+/* Short tool windows: the "conversation is lost" sentence of the connection banner is the first thing to give way. */
+@media (max-height: 480px) {
+  .banner .banner-detail.lost {
+    display: none;
+  }
+}

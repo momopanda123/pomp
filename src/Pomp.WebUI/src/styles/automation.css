@@ -1,0 +1,18 @@
+/* Agents › Automation: one rule list and one run history. Colors come from the theme variables. */
+.automation { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.automation-list-wrap { container-type: inline-size; min-width: 0; }
+.automation-list .ui-cell > strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.automation-badges { display: none; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+/* Narrow panes: the signal and action badges move under the name and their columns go away. */
+@container (max-width: 400px) {
+  .automation-list { grid-template-columns: 2px minmax(0, 1fr) 34px 88px 0px; }
+  .automation-list .automation-col, .automation-list .ui-cell:has(> .automation-col) { display: none; }
+  .automation-list .automation-badges { display: flex; }
+}
+.automation-policy { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 6px 6px 10px; border-bottom: 1px solid var(--pomp-border);
+  background: color-mix(in srgb, var(--pomp-warning) 8%, transparent); }
+.automation-policy > .ui-grow, .automation-confirm > .ui-grow { flex: 1 1 10em; min-width: 0; }
+.automation-confirm { background: color-mix(in srgb, var(--pomp-error) 7%, transparent); }
+.automation-fieldset { display: flex; flex-direction: column; gap: 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.automation-form .ui-seg { align-self: flex-start; }
+.automation-form textarea.ui-mono { font-size: 12px; }

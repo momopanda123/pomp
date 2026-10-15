@@ -1,0 +1,24 @@
+/* Tools › 대화 설정: the tool table (a row per group, its tools indented under it) and the computer-use card. */
+.conv-tools .ui-table { border-top: 0; }
+/* The tools of a group sit in a nested row group, which has to be a subgrid too so its rows line up with the header. */
+.conv-tool-group > [role='rowgroup']:not([hidden]) { display: grid; grid-template-columns: subgrid; }
+.tools-scroll-body button.conv-group-toggle { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 0; height: auto; padding: 2px 4px 2px 0;
+  border: 0; border-radius: var(--pomp-radius-sm, 3px); background: transparent; color: var(--pomp-fg); text-align: left; white-space: nowrap; cursor: pointer; }
+.tools-scroll-body button.conv-group-toggle:hover { color: var(--pomp-fg); background: var(--pomp-hover-bg); }
+.conv-group-toggle > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.conv-group-toggle > .icon { flex: none; color: var(--pomp-muted-fg); }
+.conv-count { color: var(--pomp-muted-fg); font-variant-numeric: tabular-nums; text-align: right; }
+.conv-partial .conv-count { color: var(--pomp-fg); }
+.conv-switch { display: flex; justify-content: flex-end; overflow: visible; }
+.conv-group-row { background: color-mix(in srgb, var(--pomp-fg) 2%, transparent); }
+.conv-tool-row { min-height: 30px; }
+.conv-tool-row > .ui-cell:first-child { padding-left: 18px; }
+.conv-tool-name { font-size: .95em; }
+.conv-changed .conv-tool-name { color: var(--pomp-accent); }
+/* Every row keeps its line (groups nest rows, so the table's last-child rule would drop one per group); the footer draws no second line. */
+.conv-tools .ui-tr:not(.ui-th) { border-bottom: 1px solid color-mix(in srgb, var(--pomp-border) 65%, transparent); }
+.conv-tools .conv-foot { border-top: 0; }
+.conv-foot .btn { flex: none; }
+.computer-section .confirm-popover.inline { margin-top: 0; }
+.computer-section .computer-reason { margin: 0; padding: 0; }
+.computer-section .view-section-status .spinner { display: inline-block; }

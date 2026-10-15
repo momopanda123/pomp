@@ -1,0 +1,152 @@
+/* Case cards inside an assistant reply: one card per case with its own comment box, one send for all. */
+
+.case-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin: 4px 0 8px;
+}
+
+.case-cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.case-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius-sm, 4px);
+  background: var(--pomp-panel-bg);
+  overflow-wrap: anywhere;
+}
+
+.case-card-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-size: 1em;
+}
+
+.case-card-number {
+  flex: none;
+  min-width: 1.4em;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--pomp-button-secondary-bg);
+  color: var(--pomp-button-secondary-fg);
+  font-size: 0.85em;
+  text-align: center;
+}
+
+.case-card-image {
+  display: block;
+  /* The card is a column flexbox: without this an image is stretched to the card's width. */
+  align-self: flex-start;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius-sm, 4px);
+}
+
+.case-card-diagram {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.case-card-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.case-card-diagram pre {
+  margin: 0;
+  padding: 6px;
+  background: var(--pomp-code-bg);
+  white-space: pre-wrap;
+}
+
+.case-card-note,
+.case-cards-status {
+  margin: 0;
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+.case-cards-status[role='alert'] {
+  color: var(--pomp-error);
+}
+
+.case-card-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.case-card-comment > span {
+  color: var(--pomp-muted-fg);
+  font-size: 0.85em;
+}
+
+.case-card-comment textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.case-card-comment textarea[readonly] {
+  opacity: 0.8;
+}
+
+.case-cards-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 8px;
+}
+
+.case-cards-foot .case-cards-status {
+  flex: 1 1 12em;
+}
+
+/* The comments the user sent, shown in their chat bubble instead of the host's message text. */
+.case-sent-head {
+  margin-bottom: 4px;
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+}
+
+.case-sent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 1.6em;
+  min-width: 0;
+}
+
+.case-sent-title {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.case-sent-extra {
+  color: var(--pomp-muted-fg);
+}

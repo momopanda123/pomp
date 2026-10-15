@@ -1,0 +1,39 @@
+---
+name: improve-architecture
+description: "Walk the codebase for modules worth reshaping into deep ones, present the shortlist as a visual report, then interview about the choice. Runs only when the user starts it with /skill:improve-architecture."
+disable-model-invocation: true
+---
+
+# Hunt the modules worth deepening (pomp)
+
+Activate this skill solely on the user's own start: by the `/skill:improve-architecture` command, or by asking for a survey of deepening candidates. If neither happened, stop and offer it instead of proceeding.
+
+Delivers a decision, not a diff: it finds the handful of spots where reshaping would most repay future edits — easier testing, easier navigation for humans and agents alike — and lets the user pick among them at a glance. Source files stay untouched throughout, so even code not yet ready for change can be surveyed. One candidate per session: report, interview, glossary edits and follow-up work together would burst the context. Carry the decision forward; leave the report file behind.
+
+## Ground rules
+
+1. Fitting occasions: regular upkeep; the run-up to a large feature (name the planned work as the survey's direction and ask what would ease it — the strongest framing); a first pass over a big, strange or machine-written codebase; seeking missing seams before testing stubborn code. "Report only" is a legitimate ask — say so.
+2. Wrong occasions: a single defect (diagnose that; poor seams found along the way may lead back here); refining an already-chosen module (the `codebase-design` catalog skill); a programme spanning sessions; any run nobody requested.
+
+## Procedure
+
+1. Fix the hunting ground. An explicit user direction (area, subsystem, grievance) settles it outright. Otherwise mine the version-control history across a generous span (via the `bash` tool, which seeks approval): start where edits cluster, and only where no cluster emerges, widen the net. In .NET work `query_solution` enumerates the projects when offered. Chase churn: still code repays no reshaping, and whole-repository sweeps yield platitudes.
+2. Absorb the glossary and standing decision records for those areas by plain reading — no skill load for that.
+3. Read `skill://codebase-design` and speak strictly in its terms from then on. If it is switched off or missing, degrade to plain words for module shape — say so and continue.
+4. Tour the code through read-only `task` subagents per POMP's delegation rules, inline when the tool is missing. Carry no checklist; register friction where it bites. Telltale signs: untested ground, or tests fighting the interface (host test and diagnostic tools, or a hunt for test files, tell you which); one idea scattered across many tiny modules; an interface as costly as its innards; neighbours knotted tight with details leaking across; helpers extracted purely for testability while genuine faults breed at their call sites (locality absent).
+5. Run each suspect through the removal experiment: does deleting it concentrate the knot in one place, or merely relocate it? Candidates are the former only — this bar keeps the output clear of cosmetic tidy-ups.
+6. Dress each candidate: its dependency class (`skill://codebase-design/deepening`); the deepened form sketched in words, interfaces pointedly not yet designed; the dividend stated as leverage, as locality, and as which tests get easier; an honesty tier for confidence; a check against the records. A candidate defying a record surfaces only when the friction genuinely warrants reopening — flagged openly, never smuggled — and settled ideas are not re-litigated wholesale.
+7. Publish the report (see "The report"), hand over its path, and pose exactly one question: which candidate deserves a closer look? Then halt. The report gates everything after — no interview without it. Gather the pick via a ranked chat list or one case-review card per candidate (`present_case_feedback`, eight at most; see the `case-review` skill); cards collect feedback only, so either way you stop and wait. Track phases and candidates in the `todo` tool when offered, keeping a long session oriented past the pick.
+8. On the pick, read the `grilling` and `domain-modeling` catalog skills — either switched off or missing, fall back to a plain interview or plain glossary edits — and probe the bounds and dependencies, the reshaped module's form, what the seam hides, and which current tests would survive. Along the way: file fresh or wobbly terms in the glossary at once (founding the file if absent); when the user rejects the candidate on durable grounds, propose a decision record phrased to forestall future re-suggestion — only where posterity needs it, never for timing or the self-evident; when rival interfaces are wanted, run the `design-twice` page of `codebase-design`.
+9. Close with the decision and its resting place summarised. Designing and executing the change is fresh work, best in a new session.
+
+## The report
+
+- Vessel: a single self-contained workspace HTML page (user-named folder, else `docs/`), honouring the bundled `page-design` rules — theme-property CSS inline, system type, zero script, zero event attributes, zero outside URLs, zero animation, legible at 390 px, beneath the preview's 2 MiB ceiling. Brief title, the user's tongue, a date-stamped name per run. Report the workspace-relative path and its preview-card opening. Disposable: stays uncommitted unless the user says otherwise.
+- Masthead: solution or project name, date, one line declaring the scope (user direction or discovered hot spots), a compact legend for the recurring drawing marks (seams, leaks, the deepened module). No preamble.
+- Per candidate, a card in fixed order: (1) a title voicing the reshaping in domain words; (2) badges for honesty tier and dependency class; (3) the paired now/later figures as centrepiece (adjacent on wide screens, stacked on narrow); (4) the ailment in a sentence; (5) the cure in a sentence; (6) dividend bullets, six words apiece at most, speaking leverage, locality or test gains — concrete, never vague praise; (7) when owed, a single warning-styled line citing the defied record and the case for reopening; (8) finally the implicated files in monospace, working detail for whoever acts (the figure, not the list, carries the verdict).
+- Finale: the favoured candidate, one sentence of rationale, an in-page jump to its card.
+- Honesty tiers, all three in earnest use: strong — removal experiment passed with evidence; middling — plausible but hostage to the code's future; weak — completeness entries, largely ignorable. An all-weak report is itself a finding: declare nothing worth deepening.
+- Figures obey the bundled `diagram` discipline — one assertion apiece, 1–3-word labels, slim canvases (pair halves around 360 by 320, holding text size once stacked on phones) — rendered as inline SVG borrowing the page's own properties, since `page-design` insists on one file. Both halves grow from a shared base so the delta alone differs; keep the pair jointly visible on wide screens. Rotate the visual idiom per card toward whatever bares the shallowness: call-count sequences (many calls, then one); mass blocks (interface nearly rivalling implementation, then dwarfed); strata bands (thin many, thick one); a call tree collapsing into a box with faded innards; a dependency web with seeping edges lit. Ink for structure, accent for the deepened module, the page's warning tones for reopened records and its error tones for leaks.
+- Voice: terse and hedgeless; glossary nouns for things ("the booking confirmation module"), `codebase-design` nouns for architecture, no manager/helper coinages; any figure demanding a paragraph of prose wants redrawing.
+- Count: every removal-passing candidate, ranked — about seven at most for readability and size.

@@ -1,0 +1,46 @@
+/* Type accents supplement the visible kind and inclusion labels. */
+.context-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  margin-right: 6px;
+  border-radius: var(--pomp-radius-sm);
+  border: 1px solid var(--pomp-border);
+  border-left-width: 3px;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.context-kind-glyph {
+  font-style: normal;
+}
+
+.context-kind-state {
+  color: var(--pomp-muted-fg);
+  font-size: 0.9em;
+}
+
+.context-kind-document {
+  border-left-color: var(--pomp-link);
+}
+
+.context-kind-folder {
+  border-left-color: var(--pomp-warning);
+}
+
+.context-kind-code {
+  border-left-color: var(--pomp-success);
+}
+
+.context-kind-other {
+  border-left-color: var(--pomp-muted-fg);
+}
+
+.context-kind.available {
+  opacity: 0.75;
+}
+
+.context-kind.available .context-kind-state {
+  text-decoration: line-through;
+}

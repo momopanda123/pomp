@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Host tools exposed to omp (design: CustomToolRegistry entries). VS-agnostic: every tool talks to
+    Visual Studio only through the adapter interfaces of Pomp.Contracts.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>Pomp</RootNamespace>
+    <AssemblyName>Pomp.Tools</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pomp.Contracts\Pomp.Contracts.csproj" />
+  </ItemGroup>
+</Project>

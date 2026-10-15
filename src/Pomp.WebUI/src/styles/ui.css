@@ -1,0 +1,132 @@
+/* Shared page controls (components/ui.tsx). Colors come from the theme variables, so dark and light themes both work. */
+
+.ui-switch { display: inline-flex; align-items: center; gap: 6px; min-height: var(--pomp-bar-height); padding: 0 2px; border: 0; background: transparent;
+  color: var(--pomp-fg); font-size: .92em; cursor: pointer; white-space: nowrap; }
+.ui-switch:disabled { opacity: .45; cursor: default; }
+.ui-switch-track { position: relative; flex: none; width: 28px; height: 16px; border-radius: 8px;
+  background: color-mix(in srgb, var(--pomp-fg) 32%, var(--pomp-bg)); transition: background .12s; }
+.ui-switch-thumb { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--pomp-bg); transition: left .12s; }
+.ui-switch[aria-checked='true'] .ui-switch-track { background: var(--pomp-button-bg); }
+.ui-switch[aria-checked='true'] .ui-switch-thumb { left: 14px; background: var(--pomp-button-fg); }
+.ui-switch:focus-visible { outline: 1px solid var(--pomp-focus-border); outline-offset: 1px; border-radius: var(--pomp-radius); }
+
+.ui-badge { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 18px; padding: 0 6px; border-radius: 9px;
+  font-size: 11px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle;
+  background: color-mix(in srgb, var(--pomp-fg) 12%, transparent); color: var(--pomp-fg); }
+.ui-badge .icon { flex: none; }
+.ui-badge-info { background: color-mix(in srgb, var(--pomp-accent) 18%, transparent); color: color-mix(in srgb, var(--pomp-accent) 70%, var(--pomp-fg)); }
+.ui-badge-accent { background: color-mix(in srgb, var(--pomp-ctx-messages) 22%, transparent); color: color-mix(in srgb, var(--pomp-ctx-messages) 65%, var(--pomp-fg)); }
+.ui-badge-ok { background: color-mix(in srgb, var(--pomp-success) 18%, transparent); color: color-mix(in srgb, var(--pomp-success) 60%, var(--pomp-fg)); }
+.ui-badge-warn { background: color-mix(in srgb, var(--pomp-warning) 20%, transparent); color: color-mix(in srgb, var(--pomp-warning) 60%, var(--pomp-fg)); }
+.ui-badge-error { background: color-mix(in srgb, var(--pomp-error) 18%, transparent); color: color-mix(in srgb, var(--pomp-error) 60%, var(--pomp-fg)); }
+.ui-mono { font-family: var(--pomp-font-mono); }
+
+.ui-icon-btn { width: var(--pomp-bar-height); height: var(--pomp-bar-height); flex: none; }
+.ui-icon-btn-danger:hover:not(:disabled) { color: var(--pomp-error); }
+
+/* One grid for the whole table: rows (and row groups) are subgrids, so auto/max-content columns line up with the header across rows. */
+/* The 2px and 0px edge tracks (plus the column gap) are the row gutters: padding on a subgrid row would eat into a fixed first column. */
+.ui-table { display: grid; grid-template-columns: 2px var(--ui-cols) 0px; column-gap: 8px; min-width: 0; }
+.ui-table > * { grid-column: 1 / -1; min-width: 0; }
+.ui-table [role='rowgroup']:not([hidden]) { display: grid; grid-template-columns: subgrid; }
+/* Anything in a row group that is not a row (an opened detail, a note, a confirm bar) spans the whole width. */
+.ui-table [role='rowgroup'] > * { grid-column: 1 / -1; min-width: 0; }
+.ui-tr { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; min-height: 32px; padding: 3px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--pomp-border) 65%, transparent); min-width: 0; }
+.ui-tr:last-child { border-bottom: 0; }
+.ui-tr > :first-child { grid-column-start: 2; }
+.ui-th { min-height: 24px; padding-top: 0; padding-bottom: 0; border-bottom: 1px solid var(--pomp-border);
+  background: color-mix(in srgb, var(--pomp-fg) 3%, transparent); color: var(--pomp-muted-fg); font-size: 11px; }
+.ui-tr:not(.ui-th):hover { background: var(--pomp-hover-bg); }
+.ui-tr-selected, .ui-tr-selected:hover { background: color-mix(in srgb, var(--pomp-selection-bg) 70%, transparent); }
+.ui-cell { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ui-cell-wrap { white-space: normal; overflow-wrap: anywhere; }
+.ui-cell .ui-sub { display: block; color: var(--pomp-muted-fg); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-cell-wrap .ui-sub { white-space: normal; }
+.ui-cell input[type='checkbox'], .ui-check input[type='checkbox'] { flex: none; width: 14px; height: 14px; margin: 0; }
+.ui-actions { display: flex; justify-content: flex-end; align-items: center; gap: 2px; overflow: visible; }
+.ui-empty-rows { height: calc(var(--ui-empty-rows, 2) * 32px);
+  background: repeating-linear-gradient(to bottom, transparent 0 31px, color-mix(in srgb, var(--pomp-border) 55%, transparent) 31px 32px); }
+.ui-table + .ui-table { border-top: 1px solid var(--pomp-border); }
+/* A view squeezed to a few words' width: each row's cells flow at their own width and wrap onto further lines, so text keeps a whole
+   line instead of a letter per line; the actions stay at the end. Column labels no longer line up, so only a header with controls stays. */
+.ui-table-narrow { grid-template-columns: minmax(0, 1fr); column-gap: 0; }
+.ui-table-narrow .ui-tr { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; row-gap: 2px; padding: 4px 6px; }
+.ui-table-narrow .ui-tr > * { flex: 1 1 auto; max-width: 100%; }
+.ui-table-narrow .ui-tr > .ui-actions { flex: none; margin-left: auto; }
+.ui-table-narrow .ui-tr > .ui-cell-wrap { flex: 1 1 6em; }
+.ui-table-narrow .ui-tr > .ui-status-icon { flex: none; }
+.ui-table-narrow .ui-th:not(:has(input, button, select)) { display: none; }
+
+.ui-pager { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-height: 30px; padding: 0 6px 0 10px;
+  border-top: 1px solid var(--pomp-border); color: var(--pomp-muted-fg); font-size: 12px; }
+.ui-pager-range { flex: 1; min-width: 0; }
+.ui-pager-page { min-width: 44px; text-align: center; color: var(--pomp-fg); }
+
+.ui-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 6px 6px 10px; border-bottom: 1px solid var(--pomp-border); min-width: 0; }
+.ui-search { display: flex; flex: 1 1 140px; align-items: center; gap: 6px; min-width: 0; height: var(--pomp-control-height); padding: 0 8px;
+  border: 1px solid var(--pomp-input-border); border-radius: var(--pomp-radius); background: var(--pomp-input-bg); color: var(--pomp-muted-fg); }
+.ui-search:focus-within { border-color: var(--pomp-focus-border); }
+.ui-search input { flex: 1; min-width: 0; border: 0; outline: 0; padding: 0; background: transparent; color: var(--pomp-input-fg); }
+.ui-search input::-webkit-search-cancel-button { filter: grayscale(1); }
+
+.ui-seg { display: inline-flex; flex-wrap: wrap; max-width: 100%; border: 1px solid var(--pomp-input-border); border-radius: var(--pomp-radius); overflow: hidden; }
+.ui-seg > button { display: inline-flex; align-items: center; gap: 4px; min-height: var(--pomp-bar-height); padding: 0 9px; border: 0;
+  border-right: 1px solid var(--pomp-input-border); background: transparent; color: var(--pomp-fg); font-size: .92em; cursor: pointer; white-space: nowrap; }
+.ui-seg > button:last-child { border-right: 0; }
+.ui-seg > button:hover:not(:disabled) { background: var(--pomp-hover-bg); }
+.ui-seg > button.on { background: color-mix(in srgb, var(--pomp-button-bg) 28%, transparent); color: var(--pomp-fg); font-weight: 600; }
+.ui-seg > button:disabled { opacity: .45; cursor: default; }
+
+.ui-form { display: flex; flex-direction: column; gap: 10px; padding: 10px; min-width: 0; }
+.ui-form + .ui-form { border-top: 1px solid var(--pomp-border); }
+.ui-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ui-field > label { font-size: .92em; color: var(--pomp-fg); }
+.ui-field :is(input:not([type='checkbox']):not([type='radio']), select, textarea) { width: 100%; box-sizing: border-box; min-width: 0;
+  border: 1px solid var(--pomp-input-border); border-radius: var(--pomp-radius); background: var(--pomp-input-bg); color: var(--pomp-input-fg); }
+.ui-field :is(input:not([type='checkbox']):not([type='radio']), select) { height: var(--pomp-control-height); padding: 0 8px; }
+.ui-field textarea { padding: 6px 8px; line-height: 1.45; resize: vertical; min-height: 72px; }
+.ui-field :is(input, select, textarea):focus { outline: 0; border-color: var(--pomp-focus-border); }
+.ui-field-error { color: var(--pomp-error); font-size: .92em; }
+.ui-field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.ui-form-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.ui-check { display: inline-flex; align-items: center; gap: 6px; }
+
+.ui-progress { height: 4px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--pomp-fg) 14%, transparent); }
+.ui-progress > i { display: block; height: 100%; background: var(--pomp-button-bg); }
+.ui-avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; border-radius: 50%;
+  color: #fff; font-size: 11px; font-weight: 600; }
+.ui-status-icon { display: inline-flex; align-items: center; justify-content: center; overflow: visible; }
+.ui-ok { color: var(--pomp-success); } .ui-warn { color: var(--pomp-warning); } .ui-err { color: var(--pomp-error); } .ui-info { color: var(--pomp-accent); }
+.ui-muted { color: var(--pomp-muted-fg); }
+.ui-note { padding: 6px 10px; }
+.ui-note[role='alert'] { color: var(--pomp-error); }
+.ui-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 6px 8px 10px; border-top: 1px solid var(--pomp-border); }
+.ui-card-foot > .ui-grow { flex: 1; min-width: 0; }
+.ui-gap { display: flex; flex-direction: column; gap: 8px; }
+
+/* Sections whose body is a table sit flush with the card edges. */
+.view-section-body.ui-flush { padding: 0; }
+
+/* Destructive confirm: outlined, so the red reads on both themes' backgrounds. */
+.btn.danger { background: transparent; border-color: var(--pomp-error); color: color-mix(in srgb, var(--pomp-error) 75%, var(--pomp-fg)); }
+.btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--pomp-error) 16%, transparent); }
+/* A labelled meter: label, bar, value. */
+.ui-usage-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: .92em; }
+.diff-add { color: var(--pomp-success); }
+.diff-del { color: var(--pomp-error); }
+/* A bare input in a toolbar or row (forms use .ui-field). */
+.ui-input { flex: 1 1 140px; min-width: 0; height: var(--pomp-control-height); box-sizing: border-box; padding: 0 8px;
+  border: 1px solid var(--pomp-input-border); border-radius: var(--pomp-radius); background: var(--pomp-input-bg); color: var(--pomp-input-fg); }
+.ui-input:focus { outline: 0; border-color: var(--pomp-focus-border); }
+/* ColorPicker: saturation × brightness over the hue, a hue bar and the #rrggbb text (the WebView opens no native chooser). */
+.color-picker { display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: var(--pomp-bg); }
+.color-picker-square { position: relative; height: 120px; border-radius: 4px; cursor: crosshair; touch-action: none;
+  background-image: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent); }
+.color-picker-hue { position: relative; height: 12px; border-radius: 6px; cursor: pointer; touch-action: none;
+  background: linear-gradient(to right, #f00 0%, #ff0 16.66%, #0f0 33.33%, #0ff 50%, #00f 66.66%, #f0f 83.33%, #f00 100%); }
+.color-picker-square:focus-visible, .color-picker-hue:focus-visible { outline: 1px solid var(--pomp-focus-border); outline-offset: 2px; }
+.color-picker-marker { position: absolute; width: 12px; height: 12px; border: 2px solid #fff; border-radius: 50%; transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .55); pointer-events: none; box-sizing: border-box; }
+.color-picker-hex { display: flex; align-items: center; gap: 8px; color: var(--pomp-muted-fg); font-size: 12px; }
+.color-picker-hex input { flex: 1; min-width: 0; font-family: var(--pomp-font-mono); }

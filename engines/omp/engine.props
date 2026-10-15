@@ -1,0 +1,18 @@
+<Project>
+  <!--
+    The omp engine that every POMP VSIX ships (docs/architecture.md "엔진 버전"). One POMP release = one omp build: POMP uses only this
+    engine (verified by size and SHA-256 at start), so an omp update reaches users only through a POMP release.
+
+    To move to another omp version: change these values together (the official release's SHA256SUMS.txt lists the hashes), run the
+    self-test suites and the real-engine checks against the new engine, then release POMP. The build downloads the files below into
+    artifacts\engines\omp\<version>\ (git-ignored) when they are not there yet and fails when a hash does not match.
+  -->
+  <PropertyGroup>
+    <PompOmpVersion>18.10.4</PompOmpVersion>
+    <PompOmpReleaseUrl>https://github.com/can1357/oh-my-pi/releases/download/v18.10.4/</PompOmpReleaseUrl>
+    <PompOmpAsset>omp-windows-x64.exe</PompOmpAsset>
+    <PompOmpSha256>391744ed751f56742c85d8fbf2eb7dcb800b83a0eaf6a650e6cae70d29776d44</PompOmpSha256>
+    <PompOmpSize>244276224</PompOmpSize>
+    <PompOmpNoticesSha256>768612d40a4d1788813b997b011290d0f08c426add452de6560bf227cd1fc29d</PompOmpNoticesSha256>
+  </PropertyGroup>
+</Project>

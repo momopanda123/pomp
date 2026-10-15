@@ -1,0 +1,583 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "brainstorming",
+      "kind": "skill",
+      "title": "Design Brainstorming",
+      "titleKo": "설계 브레인스토밍",
+      "description": "Agree on a design with the user before building anything.",
+      "descriptionKo": "만들기 전에 사용자와 설계를 합의한다.",
+      "category": "planning",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "writing-plans",
+      "kind": "skill",
+      "title": "Writing Plans",
+      "titleKo": "계획서 작성",
+      "description": "Turn an approved design into tasks a context-free executor can follow.",
+      "descriptionKo": "승인된 설계를 실행 가능한 작업 목록으로 바꾼다.",
+      "category": "planning",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": true
+    },
+    {
+      "id": "test-driven-development",
+      "kind": "skill",
+      "title": "Test-Driven Development",
+      "titleKo": "테스트 주도 개발",
+      "description": "Start every behavior change from a failing test, then write minimal code.",
+      "descriptionKo": "실패하는 테스트부터 시작하고 최소 코드로 통과시킨다.",
+      "category": "testing",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": true
+    },
+    {
+      "id": "systematic-debugging",
+      "kind": "skill",
+      "title": "Systematic Debugging",
+      "titleKo": "체계적 디버깅",
+      "description": "Find and confirm a defect's origin before fixing it, within an attempt budget.",
+      "descriptionKo": "원인을 먼저 확정하고 시도 횟수 안에서 고친다.",
+      "category": "debugging",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": true
+    },
+    {
+      "id": "receiving-code-review",
+      "kind": "skill",
+      "title": "Receiving Code Review",
+      "titleKo": "리뷰 피드백 반영",
+      "description": "Check review feedback against the code and answer with substance.",
+      "descriptionKo": "리뷰 의견을 코드와 대조하고 실질적으로 답한다.",
+      "category": "review",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": true
+    },
+    {
+      "id": "finishing-a-branch",
+      "kind": "skill",
+      "title": "Finishing a Branch",
+      "titleKo": "브랜치 마무리",
+      "description": "Land finished work by the user's chosen route, never destructively.",
+      "descriptionKo": "사용자가 고른 방식으로 작업을 마무리하고 함부로 지우지 않는다.",
+      "category": "process",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "improve-architecture",
+      "kind": "skill",
+      "title": "Improve Architecture",
+      "titleKo": "아키텍처 개선",
+      "description": "Survey for modules worth reshaping into deep ones, with a visual report and a follow-up interview.",
+      "descriptionKo": "깊게 만들 만한 모듈을 조사해 시각 보고서와 후속 인터뷰로 제시합니다.",
+      "category": "architecture",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [
+        "codebase-design",
+        "grilling",
+        "domain-modeling"
+      ],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "codebase-design",
+      "kind": "skill",
+      "title": "Codebase Design",
+      "titleKo": "코드베이스 설계",
+      "description": "Shared vocabulary and rules of thumb for designing deep modules.",
+      "descriptionKo": "깊은 모듈 설계를 위한 공용 어휘와 실무 지침입니다.",
+      "category": "architecture",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "domain-modeling",
+      "kind": "skill",
+      "title": "Domain Modeling",
+      "titleKo": "도메인 모델링",
+      "description": "Keep the project glossary and weighty decision records accurate during design.",
+      "descriptionKo": "설계 논의 중 프로젝트 용어집과 주요 결정 기록을 정확히 유지합니다.",
+      "category": "architecture",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "grilling",
+      "kind": "skill",
+      "title": "Grilling",
+      "titleKo": "결정 인터뷰",
+      "description": "Stress-test a plan by interviewing its owner in rounds with recommendations.",
+      "descriptionKo": "권고안을 담은 라운드식 인터뷰로 계획을 검증합니다.",
+      "category": "architecture",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "scope-review",
+      "kind": "skill",
+      "title": "Scope Review",
+      "titleKo": "범위 검토",
+      "description": "Challenges a written plan's scope and ambition from the product angle.",
+      "descriptionKo": "작성된 계획의 범위와 목표 수준을 제품 관점에서 검토합니다.",
+      "category": "review",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "retro",
+      "kind": "skill",
+      "title": "Retro Report",
+      "titleKo": "회고 보고서",
+      "description": "Turns a window of git history into a retrospective report and trend snapshot.",
+      "descriptionKo": "Git 기록 구간을 회고 보고서와 추세 스냅샷으로 만듭니다.",
+      "category": "process",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "dotnet-patterns",
+      "kind": "skill",
+      "title": "Dotnet Patterns",
+      "titleKo": ".NET 패턴",
+      "description": "Everyday C# and .NET craft: explicit data, async end to end, options validation, review smells.",
+      "descriptionKo": "명시적 데이터·종단 비동기·옵션 검증 등 일상 C#/.NET 작성법과 리뷰 체크리스트입니다.",
+      "category": "dotnet",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "csharp-testing",
+      "kind": "skill",
+      "title": "CSharp Testing",
+      "titleKo": "C# 테스트",
+      "description": "Deterministic .NET tests at the cheapest working layer, with F# property-based extras.",
+      "descriptionKo": "가장 저렴한 계층에서 결정적 .NET 테스트를 작성하고 F# 보조 기법을 더합니다.",
+      "category": "testing",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "cpp-testing",
+      "kind": "skill",
+      "title": "Cpp Testing",
+      "titleKo": "C++ 테스트",
+      "description": "Native C++ test routine: framework wiring, isolation, failure triage, coverage, sanitizers.",
+      "descriptionKo": "프레임워크 연결·격리·실패 분류·커버리지·새니타이저까지 C++ 네이티브 테스트 절차입니다.",
+      "category": "testing",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "security-review",
+      "kind": "skill",
+      "title": "Security Review",
+      "titleKo": "보안 검토",
+      "description": "Walk a change across trust boundaries for injection, auth, secret and exposure defects.",
+      "descriptionKo": "신뢰 경계를 따라 주입·인증·비밀·노출 결함을 증거와 함께 찾습니다.",
+      "category": "security",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "e2e-testing",
+      "kind": "skill",
+      "title": "E2E Testing",
+      "titleKo": "E2E 테스트",
+      "description": "Small trustworthy browser-test suite: journeys, locators, waits, isolation, evidence, flakes.",
+      "descriptionKo": "핵심 여정 위주의 작고 신뢰할 수 있는 브라우저 테스트 모음을 유지합니다.",
+      "category": "testing",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "database-migrations",
+      "kind": "skill",
+      "title": "Database Migrations",
+      "titleKo": "DB 마이그레이션",
+      "description": "Schema and data changes that survive live traffic, EF Core and SQL Server first.",
+      "descriptionKo": "EF Core·SQL Server 중심으로 운영 중에도 안전한 스키마·데이터 변경을 계획합니다.",
+      "category": "data",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "docker-patterns",
+      "kind": "skill",
+      "title": "Docker Patterns",
+      "titleKo": "도커 패턴",
+      "description": "Reproducible dev stacks, lean non-root images, hardened runtime, container debugging order.",
+      "descriptionKo": "재현 가능한 개발 스택·경량 비루트 이미지·강화된 실행 설정과 진단 순서입니다.",
+      "category": "ops",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "api-design",
+      "kind": "skill",
+      "title": "API Design",
+      "titleKo": "API 설계",
+      "description": "Consistent HTTP/JSON APIs with a contract-first change process for shared boundaries.",
+      "descriptionKo": "일관된 HTTP/JSON API 설계와 공유 경계용 계약 우선 변경 절차입니다.",
+      "category": "architecture",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "error-handling",
+      "kind": "skill",
+      "title": "Error Handling",
+      "titleKo": "오류 처리",
+      "description": "Failure taxonomy, boundary translation, safe retries and breakers, user-facing wording.",
+      "descriptionKo": "실패 분류·경계 변환·안전한 재시도와 차단기·사용자용 문구를 설계합니다.",
+      "category": "dotnet",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "hexagonal-architecture",
+      "kind": "skill",
+      "title": "Hexagonal Architecture",
+      "titleKo": "헥사고날 아키텍처",
+      "description": "Ports-and-adapters structure for new code and slice-by-slice migration with per-boundary tests.",
+      "descriptionKo": "신규 코드의 포트-어댑터 구조와 경계별 테스트를 갖춘 점진 이전 절차입니다.",
+      "category": "architecture",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "codebase-onboarding",
+      "kind": "skill",
+      "title": "Codebase Onboarding",
+      "titleKo": "코드베이스 파악",
+      "description": "Turn an unfamiliar repository into a map, a guide and a short instruction file.",
+      "descriptionKo": "낯선 저장소를 지도·안내서·짧은 지침 파일로 빠르게 정리합니다.",
+      "category": "process",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "deployment-patterns",
+      "kind": "skill",
+      "title": "Deployment Patterns",
+      "titleKo": "배포 패턴",
+      "description": "Safe shipping: rollout strategy, pipeline proof, health, config, rollback, readiness review.",
+      "descriptionKo": "출시 전략·파이프라인 검증·상태·설정·롤백·출시 준비 검토로 안전하게 배포합니다.",
+      "category": "ops",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "accessibility",
+      "kind": "skill",
+      "title": "Accessibility",
+      "titleKo": "접근성",
+      "description": "WCAG 2.2 AA build-and-audit procedure for web and Windows desktop UI with a manual script.",
+      "descriptionKo": "웹·윈도우 데스크톱 UI의 WCAG 2.2 AA 구축·점검 절차와 수동 테스트 스크립트입니다.",
+      "category": "design",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
+      "id": "anatomy",
+      "kind": "skill",
+      "title": "Anatomy figures",
+      "titleKo": "원리 해부 그림",
+      "description": "Explain a technical idea as a detailed, interactive isometric SVG machine, with WebGL effects and a beta 3D mode.",
+      "descriptionKo": "기술 개념을 정밀한 아이소메트릭 SVG 기계 그림으로 설명한다. WebGL 효과와 3D 모드(베타) 포함.",
+      "category": "design",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "MIT",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [
+        "node",
+        "browser"
+      ],
+      "defaultEnabled": false
+    },
+    {
+      "id": "github",
+      "kind": "mcp",
+      "title": "GitHub",
+      "description": "GitHub's hosted MCP server: repositories, issues and pull requests over HTTPS.",
+      "category": "dev",
+      "version": "2.0.2",
+      "publisher": "GitHub",
+      "license": "MIT",
+      "scopes": [
+        "user"
+      ],
+      "requires": [],
+      "needs": [
+        "network",
+        "token"
+      ],
+      "inputs": [
+        {
+          "key": "token",
+          "label": "Personal access token",
+          "secret": true,
+          "required": true,
+          "labelKo": "개인 액세스 토큰"
+        }
+      ],
+      "server": {
+        "type": "http",
+        "url": "https://api.githubcopilot.com/mcp/",
+        "headers": {
+          "Authorization": "Bearer ${input:token}"
+        }
+      },
+      "titleKo": "GitHub",
+      "descriptionKo": "GitHub이 운영하는 MCP 서버: 저장소, 이슈, 풀 리퀘스트 (HTTPS)"
+    },
+    {
+      "id": "context7",
+      "kind": "mcp",
+      "title": "Context7",
+      "description": "Upstash's Context7 MCP server: current library documentation for the model.",
+      "category": "docs",
+      "version": "4.3.0",
+      "publisher": "Upstash",
+      "license": "MIT",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [
+        "node",
+        "network"
+      ],
+      "inputs": [
+        {
+          "key": "apiKey",
+          "label": "API key",
+          "secret": true,
+          "required": false,
+          "labelKo": "API 키"
+        }
+      ],
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@upstash/context7-mcp@4.3.0"
+        ],
+        "env": {
+          "CONTEXT7_API_KEY": "${input:apiKey}"
+        }
+      },
+      "titleKo": "Context7",
+      "descriptionKo": "Upstash의 Context7 MCP 서버: 라이브러리 최신 문서"
+    }
+  ]
+}

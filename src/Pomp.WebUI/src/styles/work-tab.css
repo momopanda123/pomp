@@ -1,0 +1,33 @@
+/* Work tab › 변경: the proposal's file rows open to their hunks; the isolated results open to their files. */
+.review-file-toggle { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; padding: 0; border: 0; background: transparent;
+  color: var(--pomp-fg); font: inherit; text-align: left; cursor: pointer; }
+.review-file-toggle > span, .review-file-toggle > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-file-toggle:hover > :is(span, strong) { text-decoration: underline; }
+.workspace-review .ui-cell .ui-sub.ui-mono { padding-left: 16px; }
+.review-totals { margin-left: auto; white-space: nowrap; font-size: .92em; }
+.review-hunks { display: flex; flex-direction: column; gap: 6px; padding: 4px 6px 8px 34px; border-bottom: 1px solid color-mix(in srgb, var(--pomp-border) 65%, transparent); }
+.workspace-review .review-hunk { margin: 0; padding: 0 0 0 8px; border-left: 3px solid var(--pomp-border); opacity: .7; }
+.workspace-review .review-hunk.selected { border-color: var(--pomp-accent); opacity: 1; }
+.review-hunk-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: var(--pomp-bar-height); }
+.workspace-review .review-comparison { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.workspace-review.review-layout-split .review-comparison { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.workspace-review .review-comparison pre { margin: 0; padding: 6px 8px; border-radius: var(--pomp-radius); font-family: var(--pomp-font-mono); font-size: .92em;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; }
+.workspace-review .review-hunk-editor { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 8px; }
+.workspace-review .review-hunk-editor textarea { min-height: 96px; background: var(--pomp-input-bg); }
+.review-generators { font-size: .92em; }
+.isolation-files { display: flex; flex-direction: column; padding: 2px 6px 6px 26px; border-bottom: 1px solid color-mix(in srgb, var(--pomp-border) 65%, transparent); }
+.isolation-file { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-height: 26px; font-size: .92em; }
+.isolation-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container (max-width: 360px) { .workspace-review.review-layout-split .review-comparison { display: flex; } .review-hunks { padding-left: 10px; } }
+/* Plan task and phase forms sit below the table they edit. */
+.agent-plan .plan-task-form { border-top: 1px solid var(--pomp-border); }
+.ui-card-foot > .review-generators { white-space: nowrap; min-width: max-content; }
+.interactive-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.work-interactive .interactive-command-echo { margin: 0; padding: 6px 10px; border-bottom: 1px solid var(--pomp-border); background: var(--pomp-code-bg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.work-interactive .work-terminal-screen { height: 320px; padding: 6px; background: #000; }
+
+/* Work › 변경 › 변경 제안: the agent is still working (header), and the outcome of the last applied proposal (a row with the way to the records). */
+.ui-working { display: inline-flex; align-items: center; gap: 5px; color: var(--pomp-muted-fg); font-size: .92em; white-space: nowrap; }
+.ui-working .spinner { width: 10px; height: 10px; }
+.workspace-review .review-outcome { gap: 8px; }

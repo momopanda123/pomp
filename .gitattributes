@@ -1,0 +1,20 @@
+* text=auto
+
+*.cs      text diff=csharp
+*.csproj  text
+*.sln     text eol=crlf
+*.vsct    text
+*.vsixmanifest text
+*.ts      text
+*.tsx     text
+*.md      text
+*.ps1     text eol=crlf
+
+# omp before 18.4.2 mis-parses CRLF SKILL.md frontmatter; keep the skill files LF on every checkout.
+src/Pomp.OmpExtension/skills/**/SKILL.md text eol=lf
+
+*.png     binary
+*.ico     binary
+*.exe     binary
+*.dll     binary
+

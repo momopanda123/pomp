@@ -1,0 +1,264 @@
+/* Permission and dialog requests: a card at the end of the conversation (inside the transcript scroll area), and what it leaves behind. */
+
+.request-card {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--pomp-focus-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-panel-bg);
+  outline: none;
+}
+
+.dialog-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--pomp-border);
+  font-weight: 600;
+}
+
+.dialog-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dialog-counter {
+  flex: none;
+  color: var(--pomp-muted-fg);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+/* Content keeps its natural height; the transcript scrolls (a diff or a message has its own scroll area). */
+.dialog-body > * {
+  flex-shrink: 0;
+}
+
+.dialog-foot {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px 8px;
+  border-top: 1px solid var(--pomp-border);
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.dialog-message {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--pomp-muted-fg);
+  font-size: 0.9em;
+}
+
+.timeout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--pomp-muted-fg);
+  font-size: 0.9em;
+}
+
+.timeout-bar {
+  flex: 1;
+  height: 3px;
+  overflow: hidden;
+  border-radius: var(--pomp-radius-sm);
+  background: color-mix(in srgb, var(--pomp-fg) 16%, transparent);
+}
+
+.timeout-fill {
+  height: 100%;
+  background: var(--pomp-warning);
+  transition: width 0.25s linear;
+}
+
+.timeout-text {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.perm-title {
+  font-size: 1.05em;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.perm-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.perm-tool {
+  min-width: 0;
+  font-size: 0.95em;
+  overflow-wrap: anywhere;
+}
+
+.perm-target {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.perm-key {
+  flex: none;
+  color: var(--pomp-muted-fg);
+}
+
+.perm-target code {
+  min-width: 0;
+  font-size: 0.95em;
+  overflow-wrap: anywhere;
+}
+
+.perm-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+
+.perm-summary > div {
+  display: grid;
+  grid-template-columns: minmax(0, 90px) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.perm-summary dt { color: var(--pomp-muted-fg); overflow-wrap: anywhere; }
+.perm-summary dd { min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.perm-more { overflow-wrap: anywhere; }
+.perm-task-hint { color: var(--pomp-warning); font-size: 0.92em; overflow-wrap: anywhere; }
+.perm-details { min-width: 0; }
+.perm-details > summary { color: var(--pomp-link); cursor: pointer; overflow-wrap: anywhere; }
+.perm-details > .perm-message { margin-top: 6px; }
+
+.perm-message {
+  min-width: 0;
+  max-height: 32vh;
+  margin: 0;
+  padding: 7px 9px;
+  overflow: auto;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-code-bg);
+  font-size: 0.92em;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--pomp-control-height);
+  padding: 4px 8px;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  background: transparent;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.option:hover:not(:disabled) {
+  border-color: var(--pomp-focus-border);
+  background: var(--pomp-hover-bg);
+}
+
+.option:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.option.current {
+  border-color: var(--pomp-accent);
+}
+
+.option-mark {
+  display: inline-flex;
+  flex: none;
+  width: 14px;
+  color: var(--pomp-accent);
+}
+
+/* ---- What remains of an answered, dismissed or expired request ---------------------------- */
+
+.request-record {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+}
+
+.request-record > .icon {
+  flex: none;
+  align-self: center;
+}
+
+.request-record-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.request-record-outcome {
+  flex: none;
+  color: var(--pomp-fg);
+}
+
+.request-record[data-outcome="deny"] .request-record-outcome,
+.request-record[data-outcome="expired"] .request-record-outcome,
+.request-record[data-outcome="cancelled"] .request-record-outcome {
+  color: var(--pomp-warning);
+}
+
+@media (max-width: 400px) {
+  .dialog-head { padding: 5px 8px; }
+  .dialog-body { padding: 6px 8px; }
+  .dialog-foot { padding: 5px 8px 7px; }
+  .perm-summary > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .request-record { flex-wrap: wrap; }
+}

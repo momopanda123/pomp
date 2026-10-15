@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json.schemastore.org/vsix-publish",
+  "categories": [ "coding", "debugging" ],
+  "identity": {
+    "internalName": "pomp-vs2022"
+  },
+  "overview": "overview.md",
+  "priceCategory": "free",
+  "publisher": "momopanda123",
+  "private": false,
+  "preview": false,
+  "qna": true
+}

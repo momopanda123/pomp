@@ -1,0 +1,50 @@
+<Project>
+  <!--
+    The 64-bit flavour Pomp.Vsix.VS2022 (Visual Studio 2022 17.x and 2026 18.x: VS 2026 runs extensions built
+    against the VS 17 SDK, and the manifest range [17.0,) covers both). Imported right after
+    Microsoft.NET.Sdk's Sdk.props by the project, which then sets PompVsFlavor and TargetVsixContainerName itself.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>Pomp.VisualStudio</AssemblyName>
+    <RootNamespace>Pomp.VisualStudio</RootNamespace>
+    <DefineConstants>$(DefineConstants);VS2022</DefineConstants>
+
+    <!-- Architecture of the devenv.exe process that hosts this flavour (selects WebView2Loader.dll). -->
+    <PompLoaderArch>x64</PompLoaderArch>
+    <!-- VS 2022+ ship (and redirect to) their own Newtonsoft.Json; only the VS 2019 VSIX carries a copy. -->
+    <PompShipNewtonsoftJson>false</PompShipNewtonsoftJson>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compile-time only: the Visual Studio SDK assemblies are provided by the IDE and must not be packaged. -->
+    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.0.32112.339" ExcludeAssets="runtime">
+      <IncludeAssets>compile; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- NuGet interfaces are supplied by Visual Studio; never ship a second runtime copy. -->
+    <!-- Pin a published stable release: NuGet 6.0 references an unavailable preview lower bound. -->
+    <PackageReference Include="Microsoft.VisualStudio.TemplateWizardInterface" Version="17.0.31902.203" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Nerdbank.Streams" Version="2.7.74" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VisualStudio.LanguageServices" Version="4.0.1" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="NuGet.VisualStudio" Version="6.0.0" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="17.14.2142" />
+    <!-- Deliberately old: VS 2022/2026 redirect Microsoft.Web.WebView2.* to their own newer copy. -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.1245.22" />
+    <!-- Same version Pomp.Contracts uses (compile-time pin); NOT packaged, Visual Studio 2022+ provide and redirect it. -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pomp.Contracts\Pomp.Contracts.csproj" />
+    <ProjectReference Include="..\Pomp.CodeLens.Contracts\Pomp.CodeLens.Contracts.csproj" />
+    <!-- Name: the manifest's CodeLensComponent asset refers to the project by this name (VSSDK1044 without it). -->
+    <ProjectReference Include="..\Pomp.CodeLens.Provider\Pomp.CodeLens.Provider.csproj" Name="Pomp.CodeLens.Provider" />
+    <ProjectReference Include="..\Pomp.Core\Pomp.Core.csproj" />
+    <ProjectReference Include="..\Pomp.Tools\Pomp.Tools.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Already part of the default None glob; Update only adds the designer hint. -->
+    <None Update="source.extension.vsixmanifest" SubType="Designer" />
+  </ItemGroup>
+</Project>

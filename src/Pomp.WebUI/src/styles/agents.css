@@ -1,0 +1,697 @@
+/* Agents & Teams, Computer use, and Team brief styling */
+
+/* The chip row stays put; .agents-scroll below it scrolls with the same 8px gutter as the Work and Tools tabs. */
+.agents-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  padding: 0;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  background: var(--pomp-bg);
+  color: var(--pomp-fg);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.agents-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  border-bottom: 1px solid var(--pomp-border);
+  padding-bottom: 10px;
+}
+.agents-section:last-of-type {
+  border-bottom: 0;
+}
+
+.agents-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.agents-section-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+.agents-section-head h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--pomp-fg);
+}
+
+.runs-notice {
+  font-size: .8rem;
+  color: var(--pomp-muted-fg);
+}
+
+.agents-empty-text {
+  margin: 4px 0;
+  color: var(--pomp-muted-fg);
+  font-size: .85rem;
+}
+.agents-empty-text.group-empty {
+  padding-left: 6px;
+}
+
+.agents-scroll { display: flex; flex: 1; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; padding: 8px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+/* Runs/history keep headers above their own content while the panel scrolls. */
+.agents-scroll > * { flex-shrink: 0; }
+.agents-panel .agents-section { border-bottom: 0; padding-bottom: 0; }
+.agents-panel .history-list { list-style: none; margin: 8px 0; padding: 0; }
+.agents-panel .history-list > .view-item { padding: 8px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); }
+.history-prompt { max-height: 160px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.run-group-header { flex-wrap: wrap; }
+/* Run rows */
+.run-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.run-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-panel-bg);
+  min-width: 0;
+}
+.run-group-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: .85rem;
+  color: var(--pomp-accent);
+  margin-bottom: 4px;
+}
+.run-group-id {
+  color: var(--pomp-muted-fg);
+  font-size: .75rem;
+}
+
+.run-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.run-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 6px;
+  background: var(--pomp-bg);
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  min-width: 0;
+}
+.run-row-main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  min-width: 0;
+  font-size: .82rem;
+}
+.run-role-title {
+  color: var(--pomp-fg);
+}
+.run-status-badge {
+  padding: 1px 4px;
+  border-radius: var(--pomp-radius-sm);
+  font-size: .75rem;
+  font-weight: 500;
+  background: var(--pomp-border);
+  color: var(--pomp-fg);
+}
+.run-status-badge.running {
+  background: var(--pomp-accent);
+  color: var(--pomp-button-fg);
+}
+.run-status-badge.completed {
+  background: var(--pomp-success);
+  color: var(--pomp-button-fg);
+}
+.run-status-badge.failed,
+.run-status-badge.error {
+  background: var(--pomp-error);
+  color: var(--pomp-button-fg);
+}
+.run-stat, .run-model {
+  color: var(--pomp-muted-fg);
+  font-size: .78rem;
+}
+.run-recent-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 2px;
+}
+.tool-chip {
+  padding: 1px 3px;
+  background: var(--pomp-input-bg);
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius-sm);
+  font-size: .72rem;
+  font-family: monospace;
+}
+.run-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 2px;
+}
+/* The stop question takes its own line under the row's buttons. */
+.run-stop-confirm {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Roles and teams: one table card each (components/AgentsTables.tsx). A row is avatar, name/id, one sub line and badges, then actions. */
+.agents-name-cell { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
+.agents-name-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
+/* The id gives way first; the name keeps its width until the line has nothing else to give. */
+.agents-name-line > strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.agents-id { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+.agents-badges { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; margin-top: 2px; }
+.agents-avatar { font-size: 11px; line-height: 1; overflow: hidden; }
+.agents-avatar.shape-rounded { border-radius: 28%; }
+.agents-avatar.shape-square { border-radius: 2px; }
+.agents-avatar.shape-hexagon { border-radius: 0; clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%); }
+.agents-avatar.has-image { background: transparent !important; }
+.agents-avatar > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.agents-avatar-button { display: inline-flex; padding: 0; border: 0; background: none; border-radius: var(--pomp-radius-sm); cursor: pointer; }
+.agents-avatar-button:focus-visible { outline: 1px solid var(--pomp-focus-border); outline-offset: 2px; }
+.agents-avatar-button:disabled { cursor: default; }
+.avatar-editor-preview { display: flex; justify-content: center; padding: 6px 0 2px; }
+.avatar-swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.avatar-swatch { width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 2px solid transparent; cursor: pointer; color: #fff; font-size: 10px; font-weight: 600;
+  box-shadow: 0 0 0 1px var(--pomp-border); }
+.avatar-swatch.selected { border-color: var(--pomp-bg); box-shadow: 0 0 0 2px var(--pomp-focus-border); }
+.avatar-swatch:focus-visible { outline: 1px solid var(--pomp-focus-border); outline-offset: 2px; }
+/* "+" at the end of the swatches opens the page's color chooser below them. */
+.avatar-swatch.add { display: inline-flex; align-items: center; justify-content: center; background: var(--pomp-input-bg); color: var(--pomp-fg); box-shadow: 0 0 0 1px var(--pomp-input-border); }
+.avatar-swatch.add:hover:not(:disabled) { background: var(--pomp-hover-bg); }
+.agents-dialog .color-picker { margin-top: 8px; }
+.avatar-image-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.agents-avatar.missing { box-sizing: border-box; border: 1px dashed var(--pomp-warning); background: transparent; color: var(--pomp-warning); }
+.agents-avatar-stack { display: inline-flex; align-items: center; padding-left: 4px; }
+.agents-avatar-stack > .agents-avatar { margin-left: -4px; box-shadow: 0 0 0 2px var(--pomp-bg); font-size: 10px; }
+.agents-role-row.is-shadowed .agents-name-line, .agents-team-row.is-shadowed .agents-name-line, .agents-role-row.is-shadowed .agents-avatar { opacity: .65; }
+
+/* Modals & Dialogs */
+.agents-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  background: color-mix(in srgb, var(--pomp-bg) 80%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  box-sizing: border-box;
+}
+.agents-dialog {
+  background: var(--pomp-panel-bg);
+  border: 1px solid var(--pomp-focus-border);
+  border-radius: var(--pomp-radius);
+  box-shadow: 0 4px 20px color-mix(in srgb, var(--pomp-fg) 20%, transparent);
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  width: 100%;
+  max-width: 420px;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.agents-dialog .dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--pomp-border);
+  gap: 8px;
+}
+.agents-dialog .dialog-head h4 {
+  margin: 0;
+  font-size: .95rem;
+  font-weight: 600;
+}
+.agents-dialog .dialog-form {
+  padding: 10px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+/* Fields: label above, the control full width; inputs and selects share one height (as .ui-field in ui.css). */
+.agents-dialog .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.agents-dialog .form-field > label {
+  font-size: .92em;
+  color: var(--pomp-fg);
+}
+.agents-dialog .form-field :is(input:not([type='checkbox']):not([type='radio']):not([type='search']), select, textarea) {
+  box-sizing: border-box; width: 100%; min-width: 0; margin: 0;
+  border: 1px solid var(--pomp-input-border); border-radius: var(--pomp-radius); background: var(--pomp-input-bg); color: var(--pomp-input-fg);
+}
+.agents-dialog .form-field :is(input:not([type='checkbox']):not([type='radio']):not([type='search']), select) { height: var(--pomp-control-height); padding: 0 8px; }
+.agents-dialog .form-field textarea { padding: 6px 8px; line-height: 1.45; resize: vertical; min-height: 56px; }
+.agents-dialog .form-field :is(input:not([type='search']), select, textarea):focus { outline: 0; border-color: var(--pomp-focus-border); }
+.agents-dialog .form-field :is(input, select, textarea):disabled { opacity: .6; }
+.agents-dialog .form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+.agents-dialog .field-error {
+  font-size: .92em;
+  color: var(--pomp-error);
+}
+.agents-dialog .switch-field { gap: 2px; align-items: flex-start; }
+.agents-dialog .field-error p { margin: 0; }
+.agents-dialog .template-preview .ui-table { border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); overflow: hidden; }
+.agents-dialog .dialog-loading { min-height: 48px; justify-content: center; align-items: center; }
+.agents-dialog .dialog-status { margin: 0; padding: 0 10px 8px; color: var(--pomp-muted-fg); }
+.agents-dialog .switch-field .ui-switch { max-width: 100%; white-space: normal; text-align: left; }
+.agents-dialog .dialog-error {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--pomp-error) 12%, var(--pomp-bg));
+  color: var(--pomp-error);
+  font-size: .8rem;
+}
+/* requests.css gives every .dialog-foot a column (the request card's footer stacks its rows): a dialog's buttons sit in one row. */
+.agents-dialog .dialog-foot {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--pomp-border);
+}
+.checkbox-field label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .8rem;
+  color: var(--pomp-fg);
+  cursor: pointer;
+}
+
+.templates-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--pomp-bg);
+  border-bottom: 1px solid var(--pomp-border);
+}
+.templates-label {
+  font-size: .92em;
+  color: var(--pomp-muted-fg);
+}
+
+.selected-members-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.selected-member-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  background: var(--pomp-bg);
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius-sm);
+  min-width: 0;
+}
+.member-index {
+  color: var(--pomp-muted-fg);
+  font-size: 11px;
+}
+.member-title {
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.member-slug {
+  color: var(--pomp-muted-fg);
+  font-size: 11px;
+  font-family: var(--pomp-font-mono);
+}
+.member-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.member-controls .icon-btn {
+  width: 22px;
+  height: 22px;
+}
+.add-member-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+}
+.add-label {
+  font-size: .92em;
+  color: var(--pomp-muted-fg);
+}
+
+.confirm-dialog {
+  padding: 12px;
+  gap: 10px;
+}
+.confirm-dialog h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+.confirm-dialog p {
+  margin: 0;
+  font-size: .85rem;
+  color: var(--pomp-fg);
+  line-height: 1.4;
+}
+.agents-dialog .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.transcript-messages {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  max-height: 55vh;
+}
+.transcript-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: var(--pomp-radius-sm);
+  font-size: .82rem;
+}
+.transcript-msg.user {
+  background: var(--pomp-selection-bg);
+  align-self: flex-end;
+  max-width: 90%;
+}
+.transcript-msg.assistant {
+  background: var(--pomp-bg);
+  border: 1px solid var(--pomp-border);
+  align-self: flex-start;
+  max-width: 95%;
+}
+.transcript-role {
+  font-size: .72rem;
+  color: var(--pomp-muted-fg);
+  text-transform: uppercase;
+}
+.transcript-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agents-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--pomp-radius-sm);
+  font-size: .82rem;
+}
+.agents-banner.error {
+  background: color-mix(in srgb, var(--pomp-error) 15%, var(--pomp-bg));
+  color: var(--pomp-error);
+}
+
+/* Send target chip in Composer */
+.send-target-anchor {
+  position: relative;
+  display: flex;
+  flex: 0 1 132px;
+  min-width: 120px;
+  max-width: 160px;
+}
+.send-target-chip {
+  width: 100%;
+  min-height: var(--pomp-bar-height);
+  padding: 1px 4px;
+  gap: 2px;
+  font-size: .82em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.send-target-chip.highlighted {
+  border-color: var(--pomp-focus-border);
+  color: var(--pomp-fg);
+  background: var(--pomp-active-bg);
+}
+.send-target-popover {
+  left: 0;
+  min-width: 160px;
+  max-width: 240px;
+  bottom: calc(100% + 4px);
+}
+
+/* Computer toggle */
+.computer-toggle-wrapper {
+  position: static;
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+.computer-toggle.active {
+  background: var(--pomp-active-bg);
+  color: var(--pomp-fg);
+  box-shadow: inset 0 0 0 1px var(--pomp-focus-border);
+}
+.computer-toggle.failed {
+  color: var(--pomp-error);
+}
+.confirm-popover {
+  position: absolute;
+  right: 8px;
+  left: 8px;
+  bottom: calc(100% + 4px);
+  width: auto;
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+  padding: 8px 10px;
+  background: var(--pomp-panel-bg);
+  border: 1px solid var(--pomp-focus-border);
+  border-radius: var(--pomp-radius);
+  box-shadow: 0 4px 18px color-mix(in srgb, var(--pomp-fg) 20%, transparent);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+/* Part of the page flow (Tools › This conversation) instead of floating above the composer. */
+.confirm-popover.inline {
+  position: static;
+  max-height: none;
+  margin-top: 6px;
+  box-shadow: none;
+}
+.confirm-popover-head strong {
+  font-size: .88rem;
+  color: var(--pomp-fg);
+}
+.confirm-popover-body p {
+  margin: 0;
+  font-size: .8rem;
+  color: var(--pomp-fg);
+  line-height: 1.35;
+}
+.confirm-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 4px;
+}
+.computer-error-inline {
+  margin-top: 6px;
+  max-width: 100%;
+}
+
+/* Team brief card in Transcript */
+.team-brief-card {
+  margin: 4px 0;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-panel-bg);
+  overflow: hidden;
+}
+.team-brief-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 4px 6px;
+  background: transparent;
+  border: 0;
+  color: var(--pomp-accent);
+  font-size: .84rem;
+  text-align: left;
+  cursor: pointer;
+}
+.team-brief-toggle:hover {
+  background: var(--pomp-hover-bg);
+}
+.team-brief-body {
+  padding: 6px 8px;
+  border-top: 1px solid var(--pomp-border);
+  font-size: .8rem;
+  background: var(--pomp-bg);
+}
+.team-brief-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  color: var(--pomp-fg);
+}
+
+/* Compact IRC line */
+.irc-line {
+  display: inline-block;
+  padding: 2px 4px;
+  font-size: .82rem;
+  line-height: 1.35;
+  color: var(--pomp-muted-fg);
+  background: var(--pomp-panel-bg);
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius-sm);
+  word-break: break-word;
+}
+.irc-agents {
+  font-weight: 600;
+  color: var(--pomp-accent);
+}
+.irc-body {
+  color: var(--pomp-fg);
+}
+
+/* Keep form content, translated actions and long model IDs inside narrow VS panes. */
+.agents-dialog { color: var(--pomp-fg); overflow-wrap: anywhere; }
+.agents-dialog input:not([type='checkbox']), .agents-dialog select, .agents-dialog textarea { width: 100%; min-width: 0; max-width: 100%; }
+.agents-dialog .dialog-form { min-height: 0; overflow-x: hidden; }
+.agents-dialog .dialog-head, .agents-dialog .dialog-foot, .templates-bar { flex: none; }
+.agents-dialog .dialog-foot, .agents-dialog .dialog-actions, .confirm-popover-actions { flex-wrap: wrap; }
+.agents-dialog .btn, .confirm-popover .btn, .agents-panel .btn { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.agents-dialog .dialog-error { flex-wrap: wrap; }
+.run-group-header { flex-wrap: wrap; min-width: 0; }
+.run-group-header > *, .run-row-main > *, .role-badge, .member-chip { min-width: 0; max-width: 100%; }
+.run-group-id { overflow-wrap: anywhere; }
+.role-model-picker { min-width: 0; }
+.role-model-picker > button { width: 100%; min-width: 0; min-height: var(--pomp-control-height); padding: 0 8px; justify-content: space-between; text-align: left;
+  border-color: var(--pomp-input-border); background: var(--pomp-input-bg); color: var(--pomp-input-fg); }
+.role-model-picker > button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.role-model-picker .picker-pop.inline { margin-top: 4px; max-height: 260px; }
+.selected-member-row { flex-wrap: wrap; }
+.member-slug { min-width: 0; overflow-wrap: anywhere; }
+.transcript-limit { padding: 0 10px; }
+.composer-bar .send-target-anchor .picker-pop.up { left: 0; right: auto; width: min(240px, calc(100vw - 24px)); bottom: calc(100% + 4px); }
+.composer-bar .send-target-anchor .chip-text { min-width: 0; }
+.permission-mode-anchor { position: relative; display: flex; flex: 0 1 auto; min-width: 0; max-width: 112px; }
+.permission-mode-chip { width: 100%; min-height: var(--pomp-bar-height); padding: 1px 4px; gap: 3px; font-size: .82em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.permission-mode-chip .icon { flex: none; width: 12px; height: 12px; }
+.permission-mode-chip .chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.permission-mode-chip.highlighted { border-color: var(--pomp-focus-border); color: var(--pomp-fg); background: var(--pomp-active-bg); }
+.permission-mode-anchor .picker-pop.up { left: 0; right: auto; width: min(200px, calc(100vw - 24px)); bottom: calc(100% + 4px); }
+.permission-mode-anchor .confirm-popover { left: 0; right: auto; width: min(260px, calc(100vw - 24px)); }
+/* The destination chip stays next to the tools. When the model controls wrap to their own row, space-between would push the chip to the far end
+   of the first row and its left-aligned list would run out of the pane. */
+.composer-bar .send-target-anchor { margin-right: auto; }
+@media (max-width: 299px) {
+  .send-target-anchor { flex-basis: 100%; max-width: 100%; }
+  .composer-bar .send-target-chip { width: auto; max-width: 100%; }
+  .selected-member-row .member-slug { display: none; }
+  .member-controls { margin-left: auto; }
+}
+@media (min-width: 300px) and (max-width: 420px) {
+  .send-target-anchor { flex-shrink: 0; }
+  .composer-bar .picker-thinking { min-width: 24px; }
+}
+
+.message-target-badge { font-size: .78rem; color: var(--pomp-accent); overflow-wrap: anywhere; margin-bottom: 3px; }
+.mention-group { padding: 4px 6px; font-size: .78rem; color: var(--pomp-muted-fg); border-top: 1px solid var(--pomp-border); overflow-wrap: anywhere; }
+.team-brief-toggle { min-width: 0; overflow-wrap: anywhere; }
+.team-brief-toggle strong { min-width: 0; }
+
+/* Background panel compact progress */
+.job-team-badge {
+  font-size: .78rem;
+  color: var(--pomp-accent);
+  margin-top: 2px;
+}
+.job-progress-compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: .78rem;
+  color: var(--pomp-muted-fg);
+  margin-top: 3px;
+}
+.prog-stat {
+  display: inline-block;
+}
+.prog-model {
+  color: var(--pomp-fg);
+}
+.prog-tools {
+  font-family: monospace;
+}
+
+/* The role and team editors label their fields in small muted text; the knowledge to tick is ordinary text. */
+.agents-dialog .knowledge-checklist label { font-size: inherit; color: var(--pomp-fg); }
+
+/* POMP's own role editor: whose instructions these are, and the scope with its "hidden" status. */
+.agents-dialog .main-role-identity { display: flex; align-items: center; gap: 8px; }
+.agents-dialog .main-role-scope { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

@@ -1,0 +1,745 @@
+/* Transcript, messages, markdown, tool cards. */
+
+.transcript-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.transcript {
+  flex: 1;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.transcript-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 100%;
+  padding: 10px 12px 14px;
+}
+
+.jump {
+  position: absolute;
+  right: 14px;
+  bottom: 10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--pomp-bar-height);
+  height: var(--pomp-bar-height);
+  padding: 0;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-panel-bg);
+  color: var(--pomp-fg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  font-size: 0.92em;
+  cursor: pointer;
+}
+
+.jump:hover {
+  background: color-mix(in srgb, var(--pomp-panel-bg) 85%, var(--pomp-fg));
+}
+
+.empty {
+  margin: auto;
+  padding: 24px 8px;
+  max-width: 30em;
+  text-align: center;
+  color: var(--pomp-muted-fg);
+}
+
+.empty-title {
+  margin-bottom: 6px;
+  color: var(--pomp-fg);
+  font-size: 1.15em;
+  font-weight: 600;
+}
+
+.working {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pomp-muted-fg);
+  font-size: 0.95em;
+}
+
+.transcript-wrap.replaying *, .transcript-wrap.replaying *::before, .transcript-wrap.replaying *::after { animation: none !important; transition: none !important; }
+.transcript-wrap.replaying .transcript { overflow-anchor: none; }
+.attachment-summary { margin: 5px 0 0; }
+.attachment-summary > .context-count { display: inline-flex; align-items: center; gap: 2px; height: 20px; padding: 0 4px; color: var(--pomp-fg); border-color: var(--pomp-focus-border); font-variant-numeric: tabular-nums; }
+.attachment-summary > .context-count[aria-expanded='true'] { background: var(--pomp-active-bg); }
+.attachment-summary-list { margin-top: 4px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); }
+
+/* ---- Messages ----------------------------------------------------------------------------- */
+
+.msg.user {
+  padding: 6px 10px;
+  border: 1px solid var(--pomp-border);
+  border-left: 2px solid var(--pomp-accent);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-panel-bg);
+}
+
+.msg.user.pending {
+  opacity: 0.65;
+}
+
+/* A user message whose turn ended without running (e.g. rejected because omp was busy). */
+.msg.user.failed {
+  border-left-color: var(--pomp-error);
+}
+
+.user-failed {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--pomp-error);
+  font-size: 0.92em;
+}
+
+.user-failed .icon {
+  margin-top: 3px;
+}
+
+.user-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg.assistant {
+  overflow-wrap: anywhere;
+}
+
+.msg-note {
+  margin-top: 4px;
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+}
+
+.inline-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--pomp-error);
+}
+
+.inline-error .icon {
+  margin-top: 3px;
+}
+
+.thinking {
+  margin-bottom: 6px;
+  color: var(--pomp-muted-fg);
+  font-size: 0.95em;
+}
+
+.thinking-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 1px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thinking-head:hover {
+  color: var(--pomp-fg);
+}
+
+.thinking-title {
+  flex: none;
+}
+
+.thinking.live .thinking-title {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.thinking-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 0.7;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thinking-body {
+  max-height: 260px;
+  margin: 2px 0 4px 6px;
+  padding-left: 10px;
+  overflow: auto;
+  border-left: 2px solid var(--pomp-border);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chevron {
+  transition: transform 0.12s;
+}
+
+.chevron.open {
+  transform: rotate(90deg);
+}
+
+/* ---- Notices ------------------------------------------------------------------------------ */
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 0 2px;
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+}
+
+.notice .icon {
+  margin-top: 3px;
+}
+
+.notice.info .icon {
+  color: var(--pomp-accent);
+}
+
+.notice.warning {
+  color: var(--pomp-warning);
+}
+
+.notice.error {
+  color: var(--pomp-error);
+}
+
+.notice-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* omp command output (/context, /stats …) keeps its column layout; a wide table scrolls inside the block, never the page. */
+.notice.command-output {
+  color: var(--pomp-fg);
+}
+
+.notice-pre {
+  flex: 1;
+  min-width: 0;
+  max-height: 360px;
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-code-bg);
+  font-family: var(--pomp-font-mono);
+  font-size: 0.92em;
+  line-height: 1.35;
+  white-space: pre;
+}
+
+/* Boundary between the conversation before and after an omp restart / new session. */
+.notice.session-reset {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--pomp-border);
+}
+
+.turn-error {
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--pomp-error) 55%, transparent);
+  border-radius: var(--pomp-radius);
+  background: color-mix(in srgb, var(--pomp-error) 10%, transparent);
+}
+
+.turn-error-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pomp-error);
+}
+
+.turn-error-code {
+  margin-left: auto;
+  font-size: 0.85em;
+  opacity: 0.85;
+}
+
+.turn-error-message {
+  margin-top: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.turn-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 6px;
+}
+
+.turn-error-hint {
+  flex: 1 1 12em;
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+}
+
+/* ---- Markdown ----------------------------------------------------------------------------- */
+
+.md-block {
+  margin: 0 0 0.55em;
+}
+
+.md > .md-block:last-child {
+  margin-bottom: 0;
+}
+
+.md-block > :first-child {
+  margin-top: 0;
+}
+
+.md-block > :last-child {
+  margin-bottom: 0;
+}
+
+.md p {
+  margin: 0 0 0.55em;
+}
+
+.md .md-raw {
+  white-space: pre-wrap;
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  margin: 0.7em 0 0.35em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.md h1 {
+  font-size: 1.25em;
+}
+
+.md h2 {
+  font-size: 1.15em;
+}
+
+.md h3 {
+  font-size: 1.05em;
+}
+
+.md h4,
+.md h5,
+.md h6 {
+  font-size: 1em;
+}
+
+.md ul,
+.md ol {
+  margin: 0.3em 0 0.55em;
+  padding-left: 1.5em;
+}
+
+.md li {
+  margin: 0.15em 0;
+}
+
+.md li > p {
+  margin: 0;
+}
+
+.md blockquote {
+  margin: 0.4em 0 0.55em;
+  padding: 1px 10px;
+  border-left: 3px solid var(--pomp-border);
+  color: var(--pomp-muted-fg);
+}
+
+.md hr {
+  margin: 0.8em 0;
+  border: 0;
+  border-top: 1px solid var(--pomp-border);
+}
+
+.md a {
+  color: var(--pomp-link);
+  text-decoration: none;
+}
+
+.md a:hover {
+  text-decoration: underline;
+}
+
+.md code {
+  padding: 1px 4px;
+  border-radius: var(--pomp-radius-sm);
+  background: var(--pomp-code-bg);
+  font-size: 0.92em;
+}
+
+.md pre code {
+  padding: 0;
+  background: none;
+  font-size: 1em;
+}
+
+.codeblock {
+  margin: 0.45em 0 0.6em;
+  overflow: hidden;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-code-bg);
+}
+
+.codeblock-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 22px;
+  padding: 1px 4px 1px 9px;
+  border-bottom: 1px solid var(--pomp-border);
+  background: color-mix(in srgb, var(--pomp-fg) 6%, transparent);
+  color: var(--pomp-muted-fg);
+  font-size: 0.85em;
+}
+
+.codeblock-copy, .codeblock-stage {
+  padding: 1px 8px;
+  border: 0;
+  border-radius: var(--pomp-radius-sm);
+  background: transparent;
+  color: inherit;
+  font-size: 1em;
+  cursor: pointer;
+}
+
+.codeblock-copy:hover, .codeblock-stage:hover:not(:disabled) {
+  background: var(--pomp-hover-bg);
+  color: var(--pomp-fg);
+}
+
+.codeblock pre {
+  margin: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 0.92em;
+  line-height: 1.5;
+  tab-size: 4;
+}
+
+.table-wrap {
+  margin: 0.45em 0 0.6em;
+  overflow-x: auto;
+}
+
+.md table {
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+
+/* Cells keep words whole (the message's "anywhere" wrapping would squeeze a column to one character in a narrow pane):
+   a table wider than the pane scrolls inside .table-wrap instead. */
+.md th,
+.md td {
+  padding: 3px 9px;
+  border: 1px solid var(--pomp-border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: normal;
+  word-break: keep-all;
+}
+
+.md th {
+  background: var(--pomp-panel-bg);
+  font-weight: 600;
+}
+
+.md [align='center'] {
+  text-align: center;
+}
+
+.md [align='right'] {
+  text-align: right;
+}
+
+/* ---- Tool cards --------------------------------------------------------------------------- */
+
+.tool {
+  border: 1px solid var(--pomp-border);
+  border-left: 2px solid var(--pomp-muted-fg);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-panel-bg);
+  font-size: 0.95em;
+}
+
+.tool.running {
+  border-left-color: var(--pomp-accent);
+}
+
+.tool.done {
+  border-left-color: var(--pomp-success);
+}
+
+.tool.error {
+  border-left-color: var(--pomp-error);
+}
+
+.tool-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 25px;
+  padding: 2px 8px 2px 6px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-head:hover {
+  background: var(--pomp-hover-bg);
+}
+
+.tool-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  color: var(--pomp-muted-fg);
+}
+
+.tool.done .tool-status {
+  color: var(--pomp-success);
+}
+
+.tool.error .tool-status {
+  color: var(--pomp-error);
+}
+
+.tool-name {
+  flex: none;
+  font-family: var(--pomp-font-mono);
+  font-weight: 600;
+}
+
+.tool-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pomp-muted-fg);
+  font-family: var(--pomp-font-mono);
+  font-size: 0.92em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-duration {
+  flex: none;
+  color: var(--pomp-muted-fg);
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-progress,
+.tool-errline,
+.tool-skipline {
+  padding: 0 8px 5px 26px;
+  font-family: var(--pomp-font-mono);
+  font-size: 0.9em;
+}
+
+.tool-progress {
+  max-height: 4.8em;
+  overflow: hidden;
+  color: var(--pomp-muted-fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tool-skipline {
+  color: var(--pomp-muted-fg);
+  overflow-wrap: anywhere;
+}
+
+.tool-errline {
+  overflow: hidden;
+  color: var(--pomp-error);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-body {
+  padding: 2px 8px 8px;
+  border-top: 1px solid var(--pomp-border);
+}
+
+.tool-label {
+  margin: 6px 0 2px;
+  color: var(--pomp-muted-fg);
+  font-size: 0.85em;
+}
+
+.tool-pre {
+  max-height: 260px;
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border-radius: var(--pomp-radius-sm);
+  background: var(--pomp-code-bg);
+  font-size: 0.92em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tool-empty {
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+}
+
+/* In-memory workspace review uses host theme colors and immutable hunk identities. */
+.workspace-review { flex: 0 1 auto; max-height: 55vh; overflow: auto; padding: 12px; border-bottom: 1px solid var(--pomp-border); }
+.workspace-review header, .review-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.workspace-review header span { color: var(--pomp-muted-fg); font-size: .9em; }
+.workspace-review p { margin: 8px 0; }
+.review-actions { margin: 8px 0; }
+.review-files summary { cursor: pointer; overflow-wrap: anywhere; padding: 6px 0; }
+.review-hunk { border-left: 3px solid transparent; margin: 8px 0; padding-left: 8px; opacity: .65; }
+.review-hunk.selected { border-color: var(--pomp-accent); opacity: 1; }
+.review-hunk pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; padding: 6px; border-radius: var(--pomp-radius); font-family: var(--pomp-font-mono); }
+.review-before { background: var(--pomp-diff-del-bg); }
+.review-after { background: var(--pomp-diff-add-bg); }
+.review-diagnostics { max-height: 160px; overflow: auto; }
+.review-diagnostics .error { color: var(--pomp-error); }
+
+.workspace-history { border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); padding: 8px; margin: 4px 8px; font-size: 12px; }
+.workspace-history > summary { cursor: pointer; font-weight: 600; }
+.workspace-history > ol { max-height: 260px; overflow: auto; padding-left: 24px; }
+.workspace-history li { overflow-wrap: anywhere; margin: 6px 0; }
+
+.review-layout-split .review-comparison { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+@media (max-width: 480px) { .review-layout-split .review-comparison { display: block; } }
+
+.context-basket { border-bottom: 1px solid var(--pomp-border); margin-bottom: 6px; font-size: .85em; }
+.context-basket summary { cursor: pointer; color: var(--pomp-muted-fg); }
+.context-basket-summary { margin: 4px 0; color: var(--pomp-muted-fg); }
+.context-basket-details { margin: 6px 0; }
+.perm-remember-scope { overflow-wrap: anywhere; }
+.context-basket-files { margin: 6px 0; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); }
+.context-file-order { text-align: right; font-variant-numeric: tabular-nums; }
+.context-file-handle { cursor: grab; }
+.context-file-path { display: flex; min-width: 0; }
+.context-file-path > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-delete-confirm.confirm-popover { position: static; width: auto; max-width: 100%; margin-top: 6px; }
+
+.terminal-panel { border-bottom: 1px solid var(--pomp-border); padding: 8px 12px; }
+.terminal-panel summary { cursor: pointer; }
+.terminal-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--pomp-font-mono); background: var(--pomp-code-bg); padding: 6px; border-radius: var(--pomp-radius); }
+.terminal-output { max-height: 230px; overflow: auto; }
+.terminal-command { max-height: 80px; overflow: auto; }
+
+.agent-plan { padding: 8px 12px; border-bottom: 1px solid var(--pomp-border); font-size: .9em; }
+.agent-plan summary { cursor: pointer; font-weight: 600; }
+.agent-plan > ol { max-height: 200px; overflow: auto; padding-left: 20px; }
+.agent-plan li { overflow-wrap: anywhere; }
+.agent-plan li[data-status="completed"] { color: var(--pomp-muted-fg); }
+.agent-plan li[data-status="blocked"] { color: var(--pomp-error); }
+.plan-editor fieldset { margin: 6px 0; border: 1px solid var(--pomp-border); padding: 6px 8px; min-width: 0; }
+.plan-editor label { display: flex; flex-direction: column; gap: 2px; }
+.plan-editor ul { list-style: none; padding: 0; margin: 6px 0; }
+.plan-editor-task { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.plan-editor-task input[type="text"] { flex: 1 1 12em; min-width: 0; }
+
+.code-review-panel { padding: 8px 12px; border-bottom: 1px solid var(--pomp-border); font-size: .9em; }
+.code-review-panel summary { cursor: pointer; font-weight: 600; }
+.code-review-findings { max-height: 320px; overflow: auto; padding-left: 20px; }
+.code-review-findings li { border-top: 1px solid var(--pomp-border); padding: 6px 0; overflow-wrap: anywhere; }
+.code-review-findings pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--pomp-code-bg); border-radius: var(--pomp-radius); }
+.mention-symbol { color: var(--pomp-muted-fg); overflow-wrap: anywhere; font-size: .85em; margin-left: 6px; }
+.index-panel { padding: 6px 12px; border-bottom: 1px solid var(--pomp-border); font-size: .85em; }
+.index-panel summary { cursor: pointer; color: var(--pomp-muted-fg); }
+
+.review-hunk-editor { padding: 10px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); margin: 8px 0; }
+.review-hunk-editor textarea { box-sizing: border-box; display: block; width: 100%; min-height: 120px; resize: vertical; font-family: var(--pomp-font-mono); color: var(--pomp-fg); background: var(--pomp-code-bg); margin: 8px 0; border: 1px solid var(--pomp-input-border); border-radius: var(--pomp-radius); }
+.review-hunk-editor textarea:focus { outline: none; border-color: var(--pomp-focus-border); }
+
+.codeblock-lang { max-width: 100%; overflow-wrap: anywhere; }
+.code-stage-status { color: var(--pomp-muted-fg); font-size: .9em; overflow-wrap: anywhere; }
+
+/* A written .svg/.html file and its script-free preview (docs/ui-protocol.md, Preview). */
+.tool-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 8px 6px 26px;
+}
+
+.tool-preview-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--pomp-font-mono);
+  font-size: 0.9em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-preview > button {
+  flex: 0 0 auto;
+}
+
+/* ---- Advisor notes ------------------------------------------------------------------------- */
+
+/* The notes advisors gave the chat agent: one card where they came in the conversation. */
+.advisor-notes {
+  border: 1px solid var(--pomp-border);
+  border-left: 3px solid var(--pomp-accent);
+  border-radius: 4px;
+  padding: 6px 10px;
+  min-width: 0;
+  font-size: 0.92em;
+}
+
+.advisor-notes-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pomp-muted-fg);
+  margin-bottom: 4px;
+}
+
+.advisor-note + .advisor-note {
+  border-top: 1px solid var(--pomp-border);
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+.advisor-note-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.advisor-note-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

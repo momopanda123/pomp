@@ -1,0 +1,25 @@
+<Project>
+  <!--
+    VSIX for Visual Studio 2022 (17.x) and 2026 (18.x): 64-bit devenv.exe. Visual Studio 2026 runs extensions built
+    against the VS 17 SDK, so one package covers both (manifest range [17.0,), shared settings:
+    ..\Pomp.VisualStudio\Pomp.Vsix.X64.props).
+
+    All Visual Studio specific source lives in ..\Pomp.VisualStudio and is shared with the VS 2019 VSIX; everything
+    that is identical between the flavours is in ..\Pomp.VisualStudio\Pomp.Vsix.Common.targets.
+
+    SDK-style project with explicit SDK imports: Microsoft.VSSDK.BuildTools' Microsoft.VsSDK.targets (pkgdef,
+    VSCT, VSIX container) must be imported AFTER Microsoft.NET.Sdk's targets.
+    Build with MSBuild from Visual Studio (not "dotnet build"):
+      MSBuild.exe Pomp.Vsix.VS2022.csproj -restore -p:Configuration=Release
+  -->
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+  <Import Project="..\Pomp.VisualStudio\Pomp.Vsix.X64.props" />
+
+  <PropertyGroup>
+    <PompVsFlavor>VS2022</PompVsFlavor>
+    <TargetVsixContainerName>Pomp.VS2022.vsix</TargetVsixContainerName>
+  </PropertyGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+  <Import Project="..\Pomp.VisualStudio\Pomp.Vsix.Common.targets" />
+</Project>

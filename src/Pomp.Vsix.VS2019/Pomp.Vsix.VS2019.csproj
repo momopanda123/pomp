@@ -1,0 +1,72 @@
+<Project>
+  <!--
+    VSIX for Visual Studio 2019 (16.10 - 16.11): 32-bit devenv.exe.
+    Not installable in this development environment (no VS 2019); build-verified only.
+
+    All Visual Studio specific source lives in ..\Pomp.VisualStudio and is shared with the VS 2022 VSIX; everything
+    that is identical between the two flavours is in ..\Pomp.VisualStudio\Pomp.Vsix.Common.targets.
+
+    SDK-style project with explicit SDK imports: Microsoft.VSSDK.BuildTools' Microsoft.VsSDK.targets (pkgdef,
+    VSCT, VSIX container) must be imported AFTER Microsoft.NET.Sdk's targets.
+    Build with MSBuild from Visual Studio (not "dotnet build"):
+      MSBuild.exe Pomp.Vsix.VS2019.csproj -restore -p:Configuration=Release
+  -->
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>Pomp.VisualStudio</AssemblyName>
+    <RootNamespace>Pomp.VisualStudio</RootNamespace>
+    <DefineConstants>$(DefineConstants);VS2019</DefineConstants>
+
+    <PompVsFlavor>VS2019</PompVsFlavor>
+    <!-- Architecture of the devenv.exe process that hosts this flavour (selects WebView2Loader.dll). -->
+    <PompLoaderArch>x86</PompLoaderArch>
+    <!-- VS 2019 redirects Newtonsoft.Json only up to 12.x, so this VSIX carries its own 13.0.x copy. -->
+    <PompShipNewtonsoftJson>true</PompShipNewtonsoftJson>
+    <TargetVsixContainerName>Pomp.VS2019.vsix</TargetVsixContainerName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compile-time only: the Visual Studio SDK assemblies are provided by the IDE and must not be packaged. -->
+    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="16.10.31321.278" ExcludeAssets="runtime">
+      <IncludeAssets>compile; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- NuGet interfaces are supplied by Visual Studio; never ship a second runtime copy. -->
+    <!-- Align Validation with the VS 16.10 SDK assemblies, rather than its older transitive lower bound. -->
+    <PackageReference Include="Microsoft.VisualStudio.Validation" Version="16.10.35" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Nerdbank.Streams" Version="2.7.74" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VisualStudio.LanguageServices" Version="3.10.0" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="NuGet.VisualStudio" Version="5.10.0" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="16.11.71" />
+    <!-- VS 2019 has no WebView2 of its own that we can rely on: this copy (and its x86 loader) is what runs. -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.1245.22" />
+    <!-- Same version Pomp.Contracts uses; packaged explicitly (see PompShipNewtonsoftJson in the common targets). -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pomp.Contracts\Pomp.Contracts.csproj" />
+    <ProjectReference Include="..\Pomp.CodeLens.Contracts\Pomp.CodeLens.Contracts.csproj" />
+    <!-- Name: the manifest's CodeLensComponent asset refers to the project by this name (VSSDK1044 without it). -->
+    <ProjectReference Include="..\Pomp.CodeLens.Provider\Pomp.CodeLens.Provider.csproj" Name="Pomp.CodeLens.Provider" />
+    <ProjectReference Include="..\Pomp.Core\Pomp.Core.csproj" />
+    <ProjectReference Include="..\Pomp.Tools\Pomp.Tools.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Already part of the default None glob; Update only adds the designer hint. -->
+    <None Update="source.extension.vsixmanifest" SubType="Designer" />
+  </ItemGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+  <Import Project="..\Pomp.VisualStudio\Pomp.Vsix.Common.targets" />
+  <!-- Roslyn's VS workspace contract references this interop assembly; use the IDE copy consistently. -->
+  <Target Name="PompAlignRoslynInterop" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <ReferencePathWithRefAssemblies Update="@(ReferencePathWithRefAssemblies)" Condition="'%(ReferencePathWithRefAssemblies.Filename)' == 'Microsoft.VisualStudio.Shell.Interop.11.0'">
+        <EmbedInteropTypes>false</EmbedInteropTypes>
+      </ReferencePathWithRefAssemblies>
+    </ItemGroup>
+  </Target>
+</Project>

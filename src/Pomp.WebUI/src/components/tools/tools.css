@@ -1,0 +1,159 @@
+/* Shared wrapped subviews. All color/shape values follow the host's POMP theme. */
+.tools-tab { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; height: 100%; max-width: 100%; overflow: hidden; container-type: inline-size; }
+.tools-tab .work-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.tools-view-stack { flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.tools-view { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; }
+.work-combined-view { display: block; overflow-y: auto; overflow-x: hidden; padding: 8px; overscroll-behavior: contain; }
+.work-combined-view > .tools-description { margin: 0 -8px 8px; }
+.tools-view.work-combined-view > .work-page { margin: 0; }
+.work-combined-view .work-combined-body { display: flex; flex-direction: column; gap: 8px; }
+.tools-view > .work-page { margin: 8px; }
+.tools-description { flex: none; margin: 0; padding: 8px 10px; border-bottom: 1px solid var(--pomp-border); color: var(--pomp-muted-fg); font-size: .92em; overflow-wrap: anywhere; }
+.tools-scroll-body { flex: 1; min-height: 0; min-width: 0; max-width: 100%; padding: 10px; overflow-y: auto; overflow-x: hidden; overflow-wrap: anywhere; overscroll-behavior: contain; }
+.tools-scroll-body .view-section-body :is(h3, h4) { font-size: 1em; margin: 0 0 6px; }
+.tools-scroll-body :is(p, small, strong, label, li, div) { min-width: 0; overflow-wrap: anywhere; }
+.tools-scroll-body p { margin: 5px 0 8px; }
+.tools-scroll-body :is(input:not([type='checkbox']), select, textarea) { display: block; width: 100%; min-width: 0; max-width: 100%; }
+.tools-scroll-body :is(button, select) { max-width: 100%; white-space: normal; overflow-wrap: anywhere; height: auto; min-height: var(--pomp-control-height); }
+.tools-scroll-body textarea { min-height: 60px; resize: vertical; }
+.tools-note { font-size: .88em; color: var(--pomp-muted-fg); }
+.tools-section { margin-bottom: 8px; }
+.tools-scroll-body { padding: 8px; }
+.tools-scroll-body > .view-section { margin: 0; }
+.tools-scroll-body > .view-section + .view-section { margin-top: 8px; }
+.tools-scroll-body > .view-section:last-child { margin-bottom: 0; }
+.tools-actions { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0; min-width: 0; }
+.tools-conversation-body { display: flex; flex-direction: column; }
+.tools-conversation-body > * { flex-shrink: 0; }
+.tools-conversation-body > [data-testid='tools-open-basket'] { align-self: flex-start; }
+.tools-selection-actions { position: sticky; bottom: 0; z-index: 1; align-items: center; margin: 10px 0 0; padding: 7px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: var(--pomp-panel-bg); }
+.tools-change-count { flex: 1; color: var(--pomp-muted-fg); font-size: .88em; }
+.tools-group { min-width: 0; margin: 6px 0; padding: 5px 7px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); }
+.tools-group-header { display: flex; gap: 5px; align-items: center; min-width: 0; }
+.tools-group-header > input { flex: none; margin: 0; }
+.tools-scroll-body button.tools-group-toggle { flex: 1; display: flex; gap: 5px; align-items: center; min-width: 0; padding: 1px 0; border: 0; border-radius: var(--pomp-radius-sm); background: transparent; text-align: left; color: var(--pomp-fg); }
+.tools-group-toggle:hover { background: var(--pomp-hover-bg); }
+.tools-group-chevron { flex: none; }
+.tools-group-summary { display: flex; flex: 1; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 1px 6px; }
+.tools-group-summary strong { font-weight: 600; }
+.tools-group-summary small { color: var(--pomp-muted-fg); font-size: .85em; white-space: nowrap; }
+.tools-group-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px 10px; padding: 6px 0 2px; }
+.tools-group-body[hidden] { display: none; }
+.tools-checkbox { display: flex; gap: 5px; align-items: flex-start; min-width: 0; margin: 3px 0; }
+.tools-checkbox input { flex: none; margin: 3px 0 0; }
+.tools-checkbox span { flex: 1; min-width: 0; }
+.tools-checkbox small { display: block; color: var(--pomp-muted-fg); font-size: .85em; }
+.tools-tool-name, .tools-group-body .tools-checkbox small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container (min-width: 340px) { .tools-group-body { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (max-width: 239px) { .tools-change-count { flex-basis: 100%; } }
+.tools-list { list-style: none; margin: 8px 0; padding: 0; }
+.tools-list > li { padding: 9px 0; border-bottom: 1px solid var(--pomp-border); }
+/* Skill descriptions can be paragraphs: two lines in lists, the full text in the tooltip. */
+.tools-list > li > p.tools-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 2px 0 6px; }
+.tools-row-heading { display: flex; gap: 5px; flex-wrap: wrap; align-items: baseline; }
+.tools-source { padding: 1px 4px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius-sm); color: var(--pomp-muted-fg); font-size: .85em; }
+.tools-editor, .tools-banner { margin: 10px 0; padding: 8px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: var(--pomp-panel-bg); }
+.tools-editor { border-color: var(--pomp-focus-border); }
+.tools-editor fieldset { min-width: 0; padding: 0; margin: 0; border: 0; }
+.tools-editor label { display: block; margin: 8px 0; }
+.tools-editor label.tools-checkbox { display: flex; }
+.tools-env-row { display: flex; flex-direction: column; gap: 5px; padding: 7px 0; border-bottom: 1px solid var(--pomp-border); }
+.tools-test-output { min-width: 0; max-width: 100%; max-height: 220px; overflow-y: auto; overflow-x: hidden; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; padding: 8px; border-radius: var(--pomp-radius); background: var(--pomp-code-bg); color: var(--pomp-fg); font-family: var(--pomp-font-mono); }
+.tools-scroll-body [role='alert'] { color: var(--pomp-error); }
+.work-combined-body { min-width: 0; min-height: 0; }
+/* Hooks/index have one card, but the view—not the body—owns the scroll. */
+.tools-view:has(> .work-page) { display: block; overflow-y: auto; overflow-x: hidden; }
+@media (max-width: 240px) { .tools-scroll-body { padding: 8px; } .tools-description { padding: 7px 8px; } }
+
+.tools-empty { margin: 8px 0; color: var(--pomp-muted-fg); overflow-wrap: anywhere; }
+
+/* A compact action at the end of a list row heading (e.g. use a skill). */
+.tools-row-heading > .tools-row-action { margin-left: auto; padding: 1px 10px; font-size: .92em; }
+/* Long script editors stay readable in a monospace face; they wrap instead of scrolling the page. */
+.tools-mono { font-family: var(--pomp-font-mono); }
+
+/* Agents › Rules: the event rules, the hook definitions and the hook runtime state are cards of one column; the Agents page scrolls and pads,
+   so the definitions keep only the form styling of their body. */
+.agent-rules { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.agent-rules > .tools-scroll-body { flex: none; padding: 0; overflow: visible; }
+
+/* Tools › Knowledge: the search and the new-knowledge button share a row, a knowledge is a row that opens to its pieces, a piece is plain preformatted text. */
+.knowledge-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; margin: 0 0 8px; }
+.tools-scroll-body .knowledge-bar > input { flex: 1 1 10em; width: auto; }
+.tools-scroll-body button.knowledge-toggle { display: inline-flex; gap: 5px; align-items: center; min-width: 0; padding: 1px 3px; border: 0; background: transparent; color: var(--pomp-fg); text-align: left; }
+.knowledge-toggle:hover { background: var(--pomp-hover-bg); }
+.knowledge-body { min-width: 0; margin: 4px 0 0 16px; }
+.knowledge-body[hidden] { display: none; }
+.knowledge-pieces { margin: 4px 0; }
+.knowledge-pieces > li { padding: 5px 0; }
+.knowledge-text { max-height: 240px; margin: 4px 0; padding: 6px 8px; overflow: auto; border-radius: var(--pomp-radius); background: var(--pomp-code-bg); font-family: var(--pomp-font-mono); font-size: .92em; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.knowledge-anchor { display: flex; flex-wrap: wrap; gap: 3px 6px; align-items: baseline; margin: 2px 0; color: var(--pomp-muted-fg); font-size: .9em; }
+.knowledge-anchor code { font-family: var(--pomp-font-mono); }
+.knowledge-optimized { margin: 2px 0 6px; }
+.knowledge-color-field { min-width: 0; margin: 0; padding: 0; border: 0; }
+.knowledge-color-field > legend { padding: 0; }
+.knowledge-swatches { display: flex; flex-wrap: wrap; gap: 4px; margin: 3px 0 6px; }
+/* The whole 28 px square is the target; the color fills it, so where it looks clickable is where it clicks. */
+.tools-scroll-body button.knowledge-swatch { display: inline-flex; flex: none; width: 28px; height: 28px; min-width: 0; padding: 3px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: transparent; cursor: pointer; }
+.knowledge-swatch > span { flex: 1; border-radius: 2px; pointer-events: none; }
+.tools-scroll-body button.knowledge-swatch[aria-checked="true"] { padding: 2px; border: 2px solid var(--pomp-fg); }
+.knowledge-color-code { display: flex; gap: 6px; align-items: center; }
+.tools-scroll-body .knowledge-color-code > input { width: 7em; font-family: var(--pomp-font-mono); }
+.knowledge-matches { list-style: none; display: flex; flex-direction: column; gap: 1px; margin: 2px 0 6px; padding: 0; }
+.tools-scroll-body .knowledge-matches button { display: flex; gap: 6px; align-items: center; width: 100%; min-width: 0; padding: 3px 6px; border: 0; background: transparent; color: var(--pomp-fg); text-align: left; overflow-wrap: anywhere; }
+.knowledge-matches button:hover { background: var(--pomp-hover-bg); }
+.knowledge-existing { display: flex; gap: 6px; align-items: center; margin: 2px 0 6px; color: var(--pomp-muted-fg); }
+
+/* Tools › Skills, MCP, Rules, Workflows: tables in flush cards, forms in an inline panel above them. */
+.tools-scroll-body .ui-icon-btn, .tools-scroll-body .ui-switch { min-height: 0; }
+.tools-scroll-body .ui-seg > button { min-height: var(--pomp-bar-height); white-space: nowrap; }
+.tools-scroll-body .view-section-actions .btn.small { min-height: var(--pomp-bar-height); white-space: nowrap; }
+.tools-scroll-body .ui-cell > .ui-sub + .ui-sub { margin-top: 1px; }
+.tools-scroll-body p.ui-note { margin: 0; }
+.tools-name-line { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+.tools-name-line > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tools-name-line > .ui-badge, .tools-name-line > .inline-kind { flex: none; }
+.tools-num { text-align: center; font-variant-numeric: tabular-nums; }
+.tools-applies .ui-badge { max-width: 140px; }
+.tools-scroll-body .ui-cell .ui-sub.ui-warn { color: color-mix(in srgb, var(--pomp-warning) 75%, var(--pomp-fg)); }
+.tools-scroll-body .ui-cell .ui-sub.ui-err { color: var(--pomp-error); }
+.tools-scroll-body button.tools-tag-more { min-height: 22px; color: var(--pomp-fg); cursor: pointer; }
+.tools-scroll-body button.tools-tag-more:hover { background: var(--pomp-hover-bg); }
+.tools-editor > :last-child:not(.ui-form) { margin-bottom: 10px; }
+.tools-tab .inline-kind { display: none; }
+/* Narrow panes drop the kind/scope/version columns; the badge moves next to the name. */
+@container (max-width: 379px) {
+  .tools-tab .tools-narrow .ui-table { grid-template-columns: 2px var(--ui-cols-narrow) 0px; }
+  .tools-tab .tools-narrow .narrow-hide, .tools-tab .tools-narrow .ui-th > .ui-cell:has(> .narrow-hide) { display: none; }
+  .tools-tab .tools-narrow .inline-kind { display: inline-flex; }
+  .tools-tab .tools-narrow .tools-name-line { flex-wrap: wrap; row-gap: 2px; }
+  .tools-tab .tools-applies .ui-badge { max-width: 84px; }
+}
+.tools-banner-row { border-top: 0; border-bottom: 1px solid var(--pomp-border); background: color-mix(in srgb, var(--pomp-warning) 10%, transparent); }
+.tools-tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; }
+.tools-tag { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-height: 22px; padding: 0 9px; border: 1px solid var(--pomp-border); border-radius: 11px;
+  background: color-mix(in srgb, var(--pomp-fg) 6%, transparent); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tools-tag > .icon { color: var(--pomp-accent); }
+.tools-tag > .ui-mono { font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.tools-test { border-top: 1px solid var(--pomp-border); padding: 8px 10px 10px; }
+.tools-test-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 6px; }
+.tools-scroll-body .tools-test-output { margin: 0; }
+.tools-catalog-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: .92em; }
+/* The inline editor: a framed panel at the top of the card body, its title as a header strip. */
+.tools-editor { margin: 8px; padding: 0; overflow: hidden; }
+.tools-editor > h3 { margin: 0; padding: 7px 10px; border-bottom: 1px solid var(--pomp-border); background: color-mix(in srgb, var(--pomp-fg) 4%, transparent); font-size: 1em; font-weight: 600; }
+.tools-editor > :not(h3):not(.ui-form) { margin-left: 10px; margin-right: 10px; }
+.tools-scroll-body .tools-editor .ui-field > label, .tools-field-label { display: block; margin: 0; font-size: .92em; color: var(--pomp-fg); }
+.tools-form > fieldset { display: flex; flex-direction: column; gap: 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.tools-form p { margin: 0; }
+.tools-form .ui-field-row { align-items: start; }
+.tools-form .ui-seg { align-self: flex-start; }
+.tools-form .ui-switch { align-self: flex-start; }
+.tools-question { overflow-wrap: anywhere; }
+.tools-pairs { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tools-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 24px; gap: 6px; align-items: center; }
+.tools-scroll-body .tools-pair > input { width: 100%; }
+.tools-scroll-body .tools-pair-add { align-self: flex-start; }
+.tools-import-preview { border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); }
+.tools-import-preview .ui-badge { max-width: 180px; }
+.tools-test-head > .ui-grow { flex: 1; }

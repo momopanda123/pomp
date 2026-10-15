@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "default": "deny",
+  "rules": [
+    {
+      "tool": "read_buffer",
+      "effect": "allow",
+      "paths": [
+        "."
+      ]
+    },
+    {
+      "tool": "query_solution",
+      "effect": "allow"
+    },
+    {
+      "tool": "read_error_list",
+      "effect": "allow"
+    },
+    {
+      "tool": "search_codebase",
+      "effect": "allow"
+    },
+    {
+      "tool": "build_codebase_context",
+      "effect": "allow"
+    },
+    {
+      "tool": "review_source",
+      "effect": "allow"
+    },
+    {
+      "tool": "composer_workflow",
+      "effect": "allow"
+    }
+  ]
+}

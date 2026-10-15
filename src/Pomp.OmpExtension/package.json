@@ -1,0 +1,43 @@
+{
+  "name": "pomp-omp-extension",
+  "version": "0.5.2",
+  "author": "deanpinb@gmail.com",
+  "description": "omp-side pieces of pomp (Visual Studio host): pomp-context extension, pre-edit and network guard hooks, vs-project skill",
+  "private": true,
+  "type": "module",
+  "omp": {
+    "extensions": [
+      "./extensions/composer-guard.ts",
+      "./extensions/permissions.ts",
+      "./extensions/pre-edit.ts",
+      "./extensions/network.ts",
+      "./extensions/pomp-context.ts",
+      "./extensions/inline.ts",
+      "./extensions/token-count.ts",
+      "./extensions/tools.ts",
+      "./extensions/resources.ts",
+      "./extensions/workflows.ts",
+      "./extensions/teams.ts",
+      "./extensions/delegation.ts",
+      "./extensions/computer-guard.ts",
+      "./extensions/role-memory.ts",
+      "./extensions/member-stop.ts",
+      "./extensions/advisor.ts",
+      "./extensions/untrusted-content.ts",
+      "./extensions/compaction-context.ts",
+      "./extensions/verify-gate.ts",
+      "./extensions/time-context.ts",
+      "./extensions/plan-guard.ts",
+      "./extensions/features-guidance.ts",
+      "./extensions/local-models.ts"
+    ]
+  },
+  "scripts": {
+    "build:vendor": "node scripts/build-vendor.mjs"
+  },
+  "devDependencies": {
+    "minimatch": "10.2.6",
+    "yaml": "2.9.1",
+    "esbuild": "0.28.2"
+  }
+}

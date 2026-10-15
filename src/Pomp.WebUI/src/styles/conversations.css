@@ -1,0 +1,70 @@
+/* Conversation-only controls stay compact; long host data wraps inside the VS pane. */
+.user-editor-context { min-width: 0; max-width: 100%; margin-top: 5px; }
+.editor-context-chip { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; box-sizing: border-box; padding: 2px 5px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); color: var(--pomp-muted-fg); font-size: .78rem; line-height: 1.4; vertical-align: middle; }
+.editor-context-chip > .icon, .editor-context-lines { flex: none; white-space: nowrap; }
+.editor-context-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Partner tabs hang from the session header like the shell tabs: square, accent underline on the active one, sitting on the
+   header's bottom border (the negative margins cancel the header padding and border). Labels stay readable; only the row scrolls. */
+.partner-picker { position: relative; display: flex; align-items: center; flex-wrap: wrap; min-width: 0; flex: 1 1 100%; margin: 2px -6px -2px; padding: 0 3px; }
+.partner-tabs { display: flex; align-items: stretch; flex: 1 1 100%; min-width: 0; max-width: 100%; min-height: 26px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.partner-tab { display: flex; align-items: stretch; flex: 0 0 auto; min-width: calc(4em + 46px); max-width: 12em; min-height: 26px; border-bottom: 2px solid transparent; color: var(--pomp-muted-fg); }
+.partner-tab:first-child { min-width: calc(4em + 28px); }
+.partner-tab:hover, .partner-tab.active { background: var(--pomp-hover-bg); color: var(--pomp-fg); }
+.partner-tab.active { border-bottom-color: var(--pomp-accent); }
+.partner-tab-main, .partner-tab-close, .partner-tab-add { border: 0; border-radius: 0; background: transparent; color: inherit; cursor: pointer; }
+.partner-tab-main { display: inline-flex; flex: 1; align-items: center; gap: 4px; min-width: 0; padding: 0 6px; font-size: .85rem; }
+.partner-tab-main > svg, .partner-tab-add > svg { flex: none; }
+.partner-tab-text { min-width: 4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.partner-tab-close { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 18px; padding: 0; color: var(--pomp-muted-fg); }
+.partner-tab-close:hover:not(:disabled), .partner-tab-add:hover:not(:disabled) { color: var(--pomp-fg); background: var(--pomp-hover-bg); }
+.partner-tab-add:hover:not(:disabled) { background: linear-gradient(var(--pomp-hover-bg), var(--pomp-hover-bg)), var(--pomp-bg); }
+/* Any number of tabs: the add button stays at the row's right edge while the tabs scroll under it. */
+.partner-tab-add { position: sticky; right: 0; z-index: 1; display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; padding: 0; color: var(--pomp-muted-fg); background: var(--pomp-bg); }
+.partner-tab-main:disabled, .partner-tab-close:disabled, .partner-tab-add:disabled { cursor: default; opacity: .5; }
+/* Dimmed by its icon only: a see-through add button would show the tabs scrolled under it. */
+.partner-tab-add:disabled { opacity: 1; color: color-mix(in srgb, var(--pomp-muted-fg) 50%, transparent); }
+.partner-message { flex: 1 1 100%; min-width: 0; padding: 2px 3px; overflow-wrap: anywhere; color: var(--pomp-muted-fg); font-size: .8rem; }
+.partner-message[role='alert'], .conversation-error { color: var(--pomp-error); }
+.partner-picker .picker-pop.inline { position: absolute; left: 0; right: 0; top: 100%; max-height: min(50vh, 320px); z-index: 30; }
+.conversation-list { flex: 0 1 auto; min-height: 0; max-height: 55%; overflow: auto; border-bottom: 1px solid var(--pomp-border); }
+.sessions-panel { min-width: 0; padding: 8px; font-size: .88rem; word-break: keep-all; overflow-wrap: anywhere; }
+.sessions-toolbar strong { flex: 1; min-width: 0; }
+.session-row-main { display: flex; min-width: 0; align-items: flex-start; }
+.session-row-open { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; padding: 2px; color: var(--pomp-fg); background: transparent; border: 0; text-align: left; cursor: pointer; }
+.session-row-open:disabled { cursor: default; color: var(--pomp-muted-fg); }
+.session-title { display: flex; gap: 4px; max-width: 100%; }
+.session-title .icon { flex: none; }
+.session-partner-badge { color: var(--pomp-accent); font-size: .8rem; overflow-wrap: anywhere; }
+.session-row-actions, .conversation-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.chat-queue, .live-agent-progress { flex: none; min-width: 0; margin: 0 8px 4px; padding: 4px 6px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); font-size: .82rem; word-break: keep-all; overflow-wrap: anywhere; background: var(--pomp-panel-bg); }
+.chat-queue > p { margin: 3px 0; }
+.conversation-strip-toggle { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; max-width: 100%; padding: 0; border: 0; background: transparent; color: var(--pomp-fg); text-align: left; cursor: pointer; font: inherit; }
+.conversation-strip-toggle .icon { flex: none; }
+.queue-expanded { max-height: min(27vh, 230px); overflow: auto; padding-top: 4px; }
+.queue-list, .history-list, .history-members, .live-members { list-style: none; margin: 0; padding: 0; min-width: 0; }
+.queue-list > li, .queue-awaiting { display: flex; flex-direction: column; min-width: 0; gap: 4px; padding: 6px 0; border-top: 1px solid var(--pomp-border); }
+.queue-list p, .queue-awaiting p { margin: 0; white-space: pre-wrap; }
+.conversation-actions .btn, .live-progress-head .btn { max-width: 100%; white-space: normal; }
+.live-progress-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; flex-wrap: wrap; }
+.live-members { max-height: 18vh; overflow: auto; }
+.live-members > li, .history-members > li { display: flex; flex-direction: column; gap: 3px; min-width: 0; margin-top: 5px; padding: 4px; border-top: 1px solid var(--pomp-border); }
+.agents-nav { position: sticky; z-index: 2; top: -8px; display: flex; flex: none; flex-wrap: wrap; gap: 4px; margin: -8px -8px 0; padding: 7px 8px; background: var(--pomp-bg); border-bottom: 1px solid var(--pomp-border); }
+/* Same full-width description strip as Work and Tools: cancel the panel padding and the gap below the chips. */
+.agents-panel > .tools-description { margin: -12px -8px 0; }
+.agent-history { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.history-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.history-filters label { display: flex; flex-direction: column; flex: 1 1 100px; min-width: 0; gap: 3px; }
+.history-filters input, .history-filters select { min-width: 0; width: 100%; }
+.history-pinned { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.history-list > li { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 7px; margin-bottom: 7px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: var(--pomp-panel-bg); }
+.history-prompt, .history-label { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.history-prompt { max-height: 8em; overflow: auto; }
+@media (max-width: 420px) {
+  /* Give the model choice its own full-width row, with effort and tools together below it. */
+  .agents-dialog .role-options-row > .form-field:first-child { flex-basis: 100%; }
+  .agents-dialog .role-options-row > .form-field:not(:first-child) { flex: 1 1 100px; }
+}
+@media (max-width: 299px) {
+  .agents-dialog .role-options-row > .form-field { flex-basis: 100%; }
+  .history-filters label { flex-basis: 100%; }
+}

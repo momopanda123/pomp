@@ -1,0 +1,175 @@
+/* One compact shell row. Pages own the remaining height; hidden pages remain mounted to preserve drafts and subscriptions. */
+[hidden] { display: none !important; }
+.tabbar { position: relative; z-index: 25; display: flex; flex: none; align-items: center; min-width: 0; height: 31px; padding: 0 3px; border-bottom: 1px solid var(--pomp-border); background: var(--pomp-panel-bg); }
+.shell-tabs { display: flex; align-items: stretch; min-width: 0; flex: 1; height: 100%; }
+.shell-tab { position: relative; display: inline-flex; justify-content: center; align-items: center; gap: 4px; min-width: 0; padding: 0 7px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; /* square like the VS tool window header it hangs from */ background: transparent; color: var(--pomp-muted-fg); cursor: pointer; font-size: .92em; white-space: nowrap; }
+.shell-tab:hover:not(:disabled), .shell-tab[aria-selected='true'] { color: var(--pomp-fg); background: var(--pomp-hover-bg); }
+.shell-tab[aria-selected='true'] { border-bottom-color: var(--pomp-accent); }
+.shell-tab:disabled { opacity: .5; cursor: default; }
+.tab-actions { display: flex; flex: none; gap: 0; margin-left: auto; }
+.tab-actions .icon-btn { width: var(--pomp-bar-height); height: var(--pomp-bar-height); }
+.tab-badge { display: inline-flex; justify-content: center; min-width: 13px; padding: 0 3px; border-radius: var(--pomp-radius-sm); background: var(--pomp-active-bg); color: var(--pomp-fg); font-size: 10px; font-variant-numeric: tabular-nums; }
+.tab-attention { width: 5px; height: 5px; border-radius: 50%; background: var(--pomp-warning); flex: none; }
+.shell-menu, .session-quick-menu { position: absolute; z-index: 35; display: flex; flex-direction: column; max-width: calc(100vw - 12px); padding: 3px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: var(--pomp-panel-bg); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4); }
+.shell-menu { top: 100%; right: 4px; }
+.shell-menu button, .session-quick-menu button { min-width: 0; padding: 5px 8px; border: 0; border-radius: var(--pomp-radius-sm); background: transparent; color: var(--pomp-fg); text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.shell-menu button:hover, .session-quick-menu button:hover { background: var(--pomp-hover-bg); }
+.session-quick-menu button:disabled { color: var(--pomp-muted-fg); cursor: default; }
+.tab-page { display: flex; flex: 1; flex-direction: column; width: 100%; min-height: 0; min-width: 0; overflow: hidden; }
+.chat-page > .transcript-wrap { min-height: 0; flex: 1; }
+.chat-page > .composer, .chat-page > .banner, .chat-page > .session-header, .chat-page > .activity-chips { flex: none; }
+.session-header { position: relative; display: flex; align-items: center; flex-wrap: wrap; min-height: 29px; padding: 1px 6px; gap: 1px; border-bottom: 1px solid var(--pomp-border); }
+.session-name { flex: 1; min-width: 0; padding: 2px 4px; border: 0; background: transparent; color: var(--pomp-fg); font-size: .94em; font-weight: 600; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.session-name:disabled { cursor: default; }
+.session-quick-menu { top: 100%; left: 6px; right: 6px; max-height: 50vh; overflow-y: auto; }
+.session-header-error { width: 100%; color: var(--pomp-error); font-size: .88em; overflow-wrap: anywhere; }
+.session-rename { display: flex; flex: 1; gap: 2px; min-width: 0; }
+.session-rename input, .session-search { min-width: 0; min-height: var(--pomp-control-height); padding: 2px 7px; border: 1px solid var(--pomp-input-border); border-radius: var(--pomp-radius); background: var(--pomp-input-bg); color: var(--pomp-input-fg); }
+.session-rename input { flex: 1; width: 0; }
+.session-rename input:focus, .session-search:focus { outline: none; border-color: var(--pomp-focus-border); }
+.activity-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px 8px; }
+.activity-chip, .work-chip { display: inline-flex; gap: 4px; align-items: center; min-width: 0; min-height: var(--pomp-bar-height); padding: 1px 7px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: transparent; color: var(--pomp-muted-fg); font-size: .88em; cursor: pointer; }
+.activity-chip:hover, .work-chip:hover, .work-chip[aria-selected='true'] { background: var(--pomp-hover-bg); color: var(--pomp-fg); }
+.work-chip[aria-selected='true'] { border-color: var(--pomp-accent); }
+.work-nav { display: flex; flex: none; flex-wrap: wrap; gap: 4px; padding: 7px 8px; border-bottom: 1px solid var(--pomp-border); }
+.work-content { flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.work-view { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; }
+.work-view > .work-page { flex: 1; min-height: 0; }
+.sessions-page { flex: 1; min-width: 0; padding: 10px 8px; overflow-x: hidden; overflow-y: auto; }
+.sessions-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 4px; margin-bottom: 8px; }
+.session-search { display: block; width: 100%; }
+.session-list { list-style: none; padding: 0; margin: 8px 0; }
+.session-list > li { display: flex; flex-direction: column; gap: 4px; padding: 8px 6px; border-bottom: 1px solid var(--pomp-border); }
+.session-list > li.current { background: var(--pomp-hover-bg); border-left: 2px solid var(--pomp-accent); }
+.session-title, .session-meta { min-width: 0; overflow-wrap: anywhere; }
+.session-meta { color: var(--pomp-muted-fg); font-size: .85em; }
+.session-entry-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.session-entry-actions .btn { padding: 2px 6px; font-size: .88em; white-space: normal; text-align: left; }
+.session-preview article { border-top: 1px solid var(--pomp-border); padding-top: 6px; }
+.session-preview p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.setup-page { display: flex; flex: 1; min-height: 0; }
+.setup-page .setup-panel { height: 100%; max-width: none; border: 0; border-radius: 0; background: var(--pomp-bg); box-shadow: none; }
+.composer { position: relative; min-width: 0; }
+.composer-bar { gap: 4px; flex-wrap: nowrap; }
+.context-count { height: var(--pomp-bar-height); padding: 1px 4px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: transparent; color: var(--pomp-muted-fg); font-size: .82em; white-space: nowrap; cursor: pointer; }
+.composer-bar > .btn { flex: none; width: var(--pomp-bar-height); height: var(--pomp-bar-height); min-height: var(--pomp-bar-height); padding: 2px; font-size: 0; gap: 0; }
+.composer-bar > .btn .icon { width: 13px; height: 13px; }
+.composer-bar .pickers-composer { flex: 1; min-width: 0; margin: 0; position: static; }
+.composer-bar .picker-row { flex-wrap: nowrap; gap: 3px; }
+.composer-bar .picker-model { flex: 1; min-width: 36px; }
+.composer-bar .picker-thinking { flex: 0 1 auto; min-width: 34px; max-width: 67px; }
+.composer-bar .chip { width: 100%; min-height: var(--pomp-bar-height); padding: 1px 4px; gap: 2px; font-size: .85em; }
+.composer-bar .chip-caret { display: none; }
+.composer-bar .picker-pop.up { left: 8px; right: 8px; bottom: calc(100% - 4px); }
+.basket-anchor { display: flex; }
+.context-row { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 5px; }
+.context-row > .context-meter { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
+.context-row .meter-value { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.context-tools { display: flex; flex: none; align-items: center; gap: 2px; }
+.context-tools .icon-btn { width: 20px; height: 20px; }
+/* The basket count (0-20) keeps one width, room for two digits, so the context bar beside it does not shift as files come and go. */
+.context-tools .context-count { display: inline-flex; align-items: center; justify-content: center; gap: 2px; height: 20px; padding: 0 3px; font-variant-numeric: tabular-nums; }
+.context-count-value { display: inline-block; min-width: 2ch; text-align: center; }
+.context-tools .context-count.filled { color: var(--pomp-fg); border-color: var(--pomp-focus-border); }
+/* Pressed or open: tinted and outlined, the icon (and count) in the text colour. Not the accent: the host maps it from the selected document
+   tab's background, which in some themes is about as pale or as dark as this tint, and the icon would vanish into it. */
+.context-tools .icon-btn[aria-pressed='true'],
+.context-tools .icon-btn[aria-expanded='true'],
+.context-tools .context-count[aria-expanded='true'] { background: var(--pomp-active-bg); color: var(--pomp-fg); }
+.context-tools .icon-btn[aria-pressed='true'],
+.context-tools .icon-btn[aria-expanded='true'] { box-shadow: inset 0 0 0 1px var(--pomp-focus-border); }
+.context-tools .context-count[aria-expanded='true'] { border-color: var(--pomp-focus-border); }
+.context-popover { position: absolute; z-index: 22; left: 8px; right: 8px; bottom: calc(100% + 3px); max-height: var(--basket-max, min(55vh, 430px)); overflow-x: hidden; overflow-y: auto; padding: 8px; border: 1px solid var(--pomp-focus-border); border-radius: var(--pomp-radius); background: var(--pomp-panel-bg); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4); }
+.context-popover .context-basket { padding: 0; border: 0; overflow-wrap: anywhere; }
+.context-popover .context-basket h3 { font-size: 1em; margin: 0; }
+.context-popover .context-basket input[type='text'], .context-popover .context-basket select { width: 100%; min-width: 0; max-width: 100%; }
+.context-popover .context-basket li { min-width: 0; }
+.context-popover .context-basket label { min-width: 0; }
+/* Context window (above the message box) and account usage (below the bar): one thin line each, never a second row of controls. */
+.meter { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--pomp-muted-fg); font-size: .85em; line-height: 1.3; }
+.context-meter { margin-bottom: 5px; --usage-color: var(--pomp-accent); }
+.context-meter.warning { --usage-color: var(--pomp-warning); }
+.context-meter.exhausted { --usage-color: var(--pomp-error); }
+.context-meter.unknown { --usage-color: var(--pomp-muted-fg); }
+.quota-meter { margin-top: 5px; }
+.meter-name { flex: none; white-space: nowrap; }
+.meter .usage-bar.meter-bar { flex: 1 1 auto; min-width: 20px; height: 4px; }
+.meter-value { flex: none; color: var(--pomp-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.context-meter.warning .meter-value, .context-meter.exhausted .meter-value { color: var(--usage-color); }
+.quota-limits { display: flex; flex: 1; flex-wrap: nowrap; align-items: center; gap: 3px 10px; min-width: 0; }
+/* One line: the meter shows as many limits as fit at ~10em each and counts the rest ("+2"); within a limit the name gives way
+   first (ellipsis), the percentage never. */
+.quota-meter .meter-more { flex: none; color: var(--pomp-muted-fg); font-size: .85em; }
+/* One provider's usage at a time: the arrows slide to the previous or next provider (the current model's provider first). */
+.quota-track { position: relative; display: flex; flex: 1 1 0; min-width: 0; overflow: clip; overflow-clip-margin: 3px; container-type: inline-size; }
+/* A hidden copy of every limit at its own width (name, a short bar, value), one under another so it stays inside the pane: how
+   many fit is counted from it. */
+.quota-measure { position: absolute; top: 0; left: 0; display: flex; flex-direction: column; align-items: flex-start; visibility: hidden; pointer-events: none; white-space: nowrap; }
+.quota-measure .quota-limit { display: flex; flex: none; align-items: center; gap: 4px; }
+.quota-measure .meter-bar { flex: none; width: 24px; }
+/* A very narrow pane keeps the room for the limits; the arrows still step through the providers. */
+@container (max-width: 180px) { .quota-provider { display: none; } }
+.quota-slide { display: flex; flex: 1 1 0; align-items: center; gap: 6px; min-width: 0; }
+.quota-slide.from-next { animation: quota-slide-next .18s ease-out; }
+.quota-slide.from-prev { animation: quota-slide-prev .18s ease-out; }
+@keyframes quota-slide-next { from { transform: translateX(16px); opacity: 0; } }
+@keyframes quota-slide-prev { from { transform: translateX(-16px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .quota-slide.from-next, .quota-slide.from-prev { animation: none; } }
+.quota-provider { flex: none; max-width: 8em; overflow: hidden; color: var(--pomp-fg); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.meter .icon-btn.quota-step { flex: none; width: 16px; height: 18px; }
+.quota-limit.usage-row { flex: 1 1 auto; flex-direction: row; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
+.quota-limit .meter-name { flex: 0 1 auto; min-width: 2.5em; overflow: hidden; text-overflow: ellipsis; }
+.quota-limit .usage-bar.meter-bar { min-width: 14px; }
+/* The bars are one button that opens the usage-by-subscription popover. */
+.quota-open { padding: 1px 2px; border: 0; border-radius: var(--pomp-radius-sm); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.quota-open:hover, .quota-open[aria-expanded='true'] { background: var(--pomp-hover-bg); }
+.quota-popover { position: absolute; z-index: 22; left: 8px; right: 8px; bottom: calc(100% + 3px); display: flex; flex-direction: column; gap: 8px; max-height: min(60vh, 460px); overflow-x: hidden; overflow-y: auto; padding: 8px 10px; border: 1px solid var(--pomp-focus-border); border-radius: var(--pomp-radius); background: var(--pomp-panel-bg); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4); color: var(--pomp-fg); font-size: 1rem; word-break: keep-all; overflow-wrap: anywhere; }
+.quota-popover-head { font-weight: 600; }
+.quota-popover-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; padding-top: 6px; border-top: 1px solid var(--pomp-border); }
+.usage-overview { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.usage-overview-item { display: flex; flex-direction: column; gap: 4px; padding: 7px 8px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: var(--pomp-bg); }
+.quota-limit.warning .meter-value, .quota-limit.exhausted .meter-value { color: var(--usage-color); }
+.meter-muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meter-muted.error { color: var(--pomp-error); }
+.meter .icon-btn.meter-refresh { flex: none; width: 18px; height: 18px; }
+.meter-refresh .spinner { width: 9px; height: 9px; }
+/* Fast mode: a lightning toggle next to the effort chip; yellow while the priority tier is requested. */
+.fast-toggle { flex: none; }
+.composer-bar .fast-toggle { width: 22px; height: var(--pomp-bar-height); }
+.fast-toggle[aria-pressed='true'], .fast-toggle[aria-pressed='true']:hover:not(:disabled) { background: var(--pomp-active-bg); color: var(--pomp-warning); }
+.fast-toggle.failed { color: var(--pomp-error); }
+.fast-toggle .spinner { width: 10px; height: 10px; }
+.picker-option.disabled { color: var(--pomp-muted-fg); cursor: default; }
+.picker-option.disabled:hover { background: transparent; }
+.picker-option.disabled.active { background: var(--pomp-hover-bg); }
+/* A very short pane keeps its height for the conversation: the meters go (the model chip's tooltip still has the context use).
+   The context basket and the editor-context toggle stay. The model and thinking lists open right above their chip row (over the
+   input while open) instead of above the whole composer, so that the list keeps some room. */
+@media (max-height: 340px) {
+  .context-meter, .quota-meter { display: none; }
+  .composer-bar { position: relative; }
+}
+.slash-description { display: block; font-family: var(--pomp-font-family); font-size: .92em; color: var(--pomp-muted-fg); }
+/* The skills group of the command list: a heading row between the commands and the skills (not an option). */
+.slash-group { padding: 5px 8px 2px; border-top: 1px solid var(--pomp-border); color: var(--pomp-muted-fg); font-size: .85em; font-weight: 600; }
+@media (max-width: 299px) {
+  .shell-tab { flex: 1; padding: 0 3px; gap: 2px; }
+  .tab-label { display: none; }
+  .tab-badge { min-width: 10px; padding: 0 2px; font-size: 9px; }
+  .composer-bar { flex-wrap: wrap; }
+  .context-row { flex-wrap: wrap; }
+  .composer-bar .picker-model { min-width: 40px; }
+  /* The row's group name says "context": the meter drops its own name so that the token total stays readable. */
+  .context-row { gap: 4px; }
+  .context-row .meter-name { display: none; }
+  .context-row .usage-bar.meter-bar { min-width: 12px; }
+}
+@media (min-width: 300px) and (max-width: 359px) {
+  .shell-tab { padding: 0 4px; gap: 3px; font-size: .86em; }
+  .context-tools .icon-btn { width: 17px; }
+  .context-count { padding: 1px 3px; }
+}
+.shell-menu-info { margin-top: 3px; padding: 5px 8px 3px; border-top: 1px solid var(--pomp-border); color: var(--pomp-muted-fg); font-size: .92em; overflow-wrap: anywhere; cursor: default; }
+.shell-menu-info.unverified { color: var(--pomp-warning); }
+.engine-notice > .icon { color: var(--pomp-warning); flex: none; }
+.engine-notice .banner-text { display: block; overflow-wrap: anywhere; }

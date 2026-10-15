@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    VS-agnostic core of pomp (design Layer 2 + host side of Layer 4): omp process bridge, NDJSON/RPC
+    transport, host tool registry and dispatch, permission gate, chat session orchestration, host tools.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>Pomp</RootNamespace>
+    <AssemblyName>Pomp.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pomp.Contracts\Pomp.Contracts.csproj" />
+  </ItemGroup>
+</Project>

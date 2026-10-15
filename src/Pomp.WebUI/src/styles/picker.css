@@ -1,0 +1,326 @@
+/* Model and thinking-level pickers: two chips under the message box (and stacked in the account panel), each opening a small
+   listbox. Narrow panes (down to 190 px): the chips shrink with an ellipsis, the popover takes the whole width of the pane and
+   scrolls inside itself. Theme variables only. */
+
+.pickers {
+  position: relative;
+  min-width: 0;
+}
+
+.pickers-composer {
+  margin-top: 5px;
+}
+
+/* Side by side while both fit; in a narrow pane the thinking chip wraps to its own line instead of squeezing the model name away. */
+.picker-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.picker-model {
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
+.picker-thinking {
+  flex: none;
+  max-width: 100%;
+}
+
+.picker-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.pickers-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.picker-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.picker-field-label {
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+}
+
+/* ---- Chip --------------------------------------------------------------------------------------------------------- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: var(--pomp-bar-height);
+  padding: 1px 6px 1px 7px;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  background: color-mix(in srgb, var(--pomp-fg) 6%, transparent);
+  color: var(--pomp-fg);
+  font-size: 0.92em;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.chip:hover:not(:disabled) {
+  background: var(--pomp-hover-bg);
+}
+
+.chip[aria-expanded='true'] {
+  border-color: var(--pomp-focus-border);
+  background: var(--pomp-active-bg);
+}
+
+.chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chip > .icon {
+  color: var(--pomp-muted-fg);
+}
+
+.chip > .spinner {
+  width: 10px;
+  height: 10px;
+}
+
+.chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-caret {
+  opacity: 0.75;
+}
+
+/* In the account panel the chips are full-width fields. */
+.pickers-panel .chip {
+  width: 100%;
+  min-height: var(--pomp-control-height);
+  padding-inline: 8px;
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-input-bg);
+  border-color: var(--pomp-input-border);
+}
+
+.pickers-panel .chip-text {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+/* ---- Popover ------------------------------------------------------------------------------------------------------- */
+
+.picker-pop {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  outline: none;
+  overflow: hidden;
+  border: 1px solid var(--pomp-focus-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-panel-bg);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  word-break: keep-all;
+}
+
+/* Floats above the chips, as wide as the pane; its height is capped to the room above (set from script as --pop-max). */
+.picker-pop.up {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  bottom: calc(100% + 4px);
+  left: 0;
+  max-height: var(--pop-max, 320px);
+}
+
+/* In the account panel the popover is part of the page flow below its chip. */
+.picker-pop.inline {
+  max-height: min(55vh, 20em);
+  margin-top: 4px;
+}
+
+.picker-search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--pomp-border);
+  color: var(--pomp-muted-fg);
+}
+
+.picker-search:focus-within {
+  border-bottom-color: var(--pomp-focus-border);
+}
+
+.picker-search-input {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--pomp-input-fg);
+}
+
+.picker-search-input::placeholder {
+  color: var(--pomp-muted-fg);
+  opacity: 0.85;
+}
+
+.picker-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 2px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  outline: none;
+}
+
+.picker-group {
+  padding: 5px 8px 2px;
+  color: var(--pomp-muted-fg);
+  font-size: 0.85em;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.picker-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--pomp-fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker-option:hover {
+  background: var(--pomp-hover-bg);
+}
+
+.picker-option.active {
+  background: var(--pomp-selection-bg);
+}
+
+.picker-check {
+  display: inline-flex;
+  flex: none;
+  width: 12px;
+  color: var(--pomp-accent);
+}
+
+.picker-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-hint {
+  flex: none;
+  color: var(--pomp-muted-fg);
+  font-size: 0.88em;
+}
+
+/* Usage of the current model's provider: its tightest limit on one line, and a thin bar. */
+.picker-usage {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 8px 6px;
+  border-bottom: 1px solid var(--pomp-border);
+  font-size: 0.92em;
+}
+
+.picker-usage-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-usage.warning .picker-usage-text,
+.picker-usage.exhausted .picker-usage-text {
+  color: var(--usage-color);
+}
+
+.picker-usage.muted {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  color: var(--pomp-muted-fg);
+}
+
+.picker-status {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 6px 8px;
+  color: var(--pomp-muted-fg);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+.picker-status.error {
+  color: var(--pomp-error);
+}
+
+.picker-status-text {
+  display: flex;
+  flex: 1 1 8em;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.picker-foot {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--pomp-border);
+}
+
+.picker-keys {
+  color: var(--pomp-muted-fg);
+  font-size: 0.85em;
+}
+
+/* Too narrow for the key hint: the manage button keeps the whole line. */
+@media (max-width: 300px) {
+  .picker-keys {
+    display: none;
+  }
+}

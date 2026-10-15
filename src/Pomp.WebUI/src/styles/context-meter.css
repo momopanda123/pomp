@@ -1,0 +1,29 @@
+/* The context bar split by source, its button and the breakdown popover (colors: --pomp-ctx-* in base.css). */
+.context-meter-open { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; padding: 2px; border: 0; border-radius: var(--pomp-radius-sm); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.context-meter-open:hover, .context-meter-open[aria-expanded='true'] { background: var(--pomp-hover-bg); }
+.context-meter-open .meter-value { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ctx-track { display: flex; height: 100%; }
+.ctx-filled { display: flex; flex: none; height: 100%; overflow: hidden; }
+.ctx-filled > .usage-fill { width: 100%; }
+.ctx-seg { display: block; flex: none; height: 100%; }
+.ctx-prompt { background: var(--pomp-ctx-prompt); }
+.ctx-tools { background: var(--pomp-ctx-tools); }
+.ctx-mcp { background: var(--pomp-ctx-mcp); }
+.ctx-context { background: var(--pomp-ctx-context); }
+.ctx-skills { background: var(--pomp-ctx-skills); }
+.ctx-messages { background: var(--pomp-ctx-messages); }
+.ctx-basket { background: repeating-linear-gradient(45deg, var(--pomp-muted-fg) 0 2px, transparent 2px 4px); }
+
+.context-breakdown { position: absolute; z-index: 22; left: 8px; right: 8px; display: flex; flex-direction: column; gap: 6px; overflow-x: hidden; overflow-y: auto; padding: 8px 10px; border: 1px solid var(--pomp-focus-border); border-radius: var(--pomp-radius); background: var(--pomp-panel-bg); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4); color: var(--pomp-fg); font-size: 1rem; line-height: 1.35; word-break: keep-all; overflow-wrap: anywhere; }
+.context-breakdown:focus { outline: none; }
+.context-breakdown-head { font-weight: 600; font-variant-numeric: tabular-nums; }
+.ctx-composition { display: flex; gap: 2px; flex: none; width: 100%; height: 8px; overflow: hidden; border-radius: 2px; }
+.ctx-composition > .ctx-seg { min-width: 1px; }
+.ctx-rows { display: flex; flex-direction: column; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.ctx-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; align-items: baseline; gap: 2px 8px; min-width: 0; }
+.ctx-swatch { align-self: center; width: 10px; height: 10px; border-radius: 2px; }
+.ctx-label { min-width: 0; }
+.ctx-tokens, .ctx-percent { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ctx-percent { min-width: 4.2ch; color: var(--pomp-muted-fg); }
+.ctx-free { color: var(--pomp-muted-fg); }
+.ctx-free .ctx-swatch { border: 1px solid var(--pomp-border); }

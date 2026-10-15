@@ -1,0 +1,98 @@
+/* Shared section cards. The enclosing view scrolls; headers stick only within their own card. */
+:root { --pomp-section-header-height: 40px; }
+/* Leave room for the stuck header when keyboard focus or scrollIntoView returns to a body control. */
+:is(.setup-body, .work-combined-view, .tools-scroll-body, .tools-view:has(> .work-page), .agents-scroll, .context-popover) {
+  scroll-padding-top: var(--pomp-section-header-height);
+}
+/* A stuck header covers its scroller's top padding, so scrolled rows never show above it. */
+:is(.setup-body, .work-combined-view, .tools-scroll-body, .agents-scroll, .context-popover) { --pomp-scroll-pad: 8px; }
+:is(.tools-view:has(> .work-page), .agent-rules > .tools-scroll-body) { --pomp-scroll-pad: 0px; }
+
+.view-section.view-section {
+  display: block; flex: none; min-width: 0; min-height: 0; max-width: 100%; max-height: none;
+  margin: 0; padding: 0; overflow: visible; border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius); background: var(--pomp-bg); color: var(--pomp-fg); font-size: 1em;
+}
+.view-section-header, .work-page > .work-page-header {
+  display: flex; flex-wrap: wrap; position: sticky; top: calc(-1 * var(--pomp-scroll-pad, 0px)); z-index: 2; align-items: center; gap: 6px;
+  min-width: 0; min-height: var(--pomp-section-header-height); box-sizing: border-box; margin: 0; padding: 7px 8px; border-bottom: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius) var(--pomp-radius) 0 0; background: var(--pomp-panel-bg); overflow-wrap: anywhere;
+  scroll-margin-top: 0;
+}
+.view-section-active > .view-section-header { box-shadow: inset 3px 0 var(--pomp-accent); }
+.view-section-heading, .work-page-header :is(h2, h3) { flex: 1 1 6em; min-width: 0; margin: 0; font-size: 1em; font-weight: 600; }
+button.view-section-toggle { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 0;
+  border: 0; border-radius: var(--pomp-radius-sm); background: transparent; color: var(--pomp-fg); text-align: left;
+  white-space: normal; overflow-wrap: anywhere; font: inherit; }
+.view-section-toggle > svg { flex: none; }
+.view-section-toggle > span { min-width: 0; }
+.view-section-toggle:hover { background: var(--pomp-hover-bg); }
+.work-page-status, .view-section-status { flex: 0 1 auto; min-width: 0; max-width: 45%; padding: 2px 5px;
+  border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius-sm); color: var(--pomp-muted-fg);
+  font-size: .85em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.view-section-actions { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; margin-left: auto; }
+.view-section-actions .tools-actions { margin: 0; }
+.view-section-actions .icon-btn { width: var(--pomp-control-height); height: var(--pomp-control-height); padding: 0; flex: none; }
+.view-section-body, .work-page > .work-page-body { min-width: 0; min-height: 0; max-width: 100%; padding: 8px; overflow: visible; overflow-wrap: anywhere; }
+.view-section-body[hidden] { display: none !important; }
+.view-section-body > :first-child { margin-top: 0; }
+.view-section-body > :last-child { margin-bottom: 0; }
+.view-section-body :is(ol, ul) { min-width: 0; max-width: 100%; }
+.view-section-body :is(ol, ul):not([class]) { padding-left: 20px; }
+.view-section-body ol:has(> .view-item) { padding-left: 0; list-style: none; }
+.view-section-body :is(li, p, strong, small, label, summary, details, div, span) { min-width: 0; overflow-wrap: anywhere; }
+.view-section-body :is(button, input, select, textarea) { min-width: 0; max-width: 100%; }
+.view-section-body :is(button, select) { white-space: normal; overflow-wrap: anywhere; }
+.view-section-body :is(input:not([type='checkbox']):not([type='radio']), select, textarea) { box-sizing: border-box; }
+.view-section-body .review-actions { gap: 6px; }
+.view-section-body .review-actions > :is(input:not([type='checkbox']), select) { flex: 1 1 8em; width: 100%; }
+.view-section-body .review-actions > label { flex: 1 1 100%; }
+.composer-auto-budget { display: flex; flex-direction: column; gap: 3px; color: var(--pomp-muted-fg); font-size: 0.9em; }
+.view-section-body :is(pre, .terminal-command, .review-diagnostics, .code-review-findings) { min-width: 0; max-width: 100%; }
+.view-section-body pre { padding: 8px; border-radius: var(--pomp-radius); background: var(--pomp-code-bg); color: var(--pomp-fg);
+  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; tab-size: 4; }
+.view-section-body .review-before { background: var(--pomp-diff-del-bg); }
+.view-section-body .review-after { background: var(--pomp-diff-add-bg); }
+.work-empty, .section-note { color: var(--pomp-muted-fg); }
+.section-note { font-size: .9em; margin: 0 0 6px; }
+.view-section-body > .view-section { margin-top: 8px; }
+.view-section-body > .view-section > .view-section-header { position: static; }
+.view-item { margin: 8px 0; padding: 8px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); }
+.view-item-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-bottom: 6px; }
+.view-item-header > strong { flex: 1; }
+.view-section-body .terminal-output, .view-item-output { max-height: 240px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+.work-terminal-screen { min-width: 0; height: 300px; min-height: 120px; max-width: 100%; }
+.work-terminal-screen .xterm { height: 100%; }
+.work-terminal-screen .xterm-viewport { max-width: 100%; }
+.view-section-body :is(button, input, select, textarea, [tabindex]) { scroll-margin-top: var(--pomp-section-sticky-height, var(--pomp-section-header-height)); }
+@media (max-width: 300px) { .view-section-header { gap: 4px; } .view-section-body .review-comparison { display: block; } .view-section-body .review-hunk-editor { padding: 6px; } }
+
+/* Problems stay readable at the host's smallest tool-window width. */
+.problems-toolbar, .problems-solve, .problem-heading, .problem-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.problems-toolbar > label:first-child { display: flex; flex-direction: column; gap: 3px; }
+.problems-select-all { display: flex; align-items: center; gap: 4px; }
+.problems-list { list-style: none; margin: 8px 0; padding: 0; }
+.problems-list > li { padding: 8px 0; border-top: 1px solid var(--pomp-border); }
+.problems-list p { margin: 6px 0; white-space: pre-wrap; }
+.problem-heading code, .problem-path { overflow-wrap: anywhere; word-break: break-word; }
+.problem-path { color: var(--pomp-muted-fg); margin-bottom: 6px; }
+
+
+.work-chip-empty { color: var(--pomp-muted-fg); }
+.work-chip-empty .tab-badge { opacity: .65; }
+.view-section-empty .view-section-toggle { opacity: 1; cursor: default; color: inherit; }
+.view-section-empty { border-bottom: 0; }
+
+.command-job-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.command-job { margin: 6px 0; min-width: 0; }
+.command-job pre { max-width: 100%; overflow-wrap: anywhere; white-space: pre-wrap; word-break: break-word; }
+/* Work › 코드 점검: a row opens to the whole description, its location and the source an agent quoted. */
+.problem-toggle { max-width: 100%; }
+.problem-details { display: flex; flex-direction: column; gap: 6px; padding: 4px 10px 10px 58px; border-bottom: 1px solid color-mix(in srgb, var(--pomp-border) 65%, transparent); min-width: 0; }
+.problem-message { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.problem-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 0; font-size: .92em; }
+.problem-facts dt { color: var(--pomp-muted-fg); }
+.problem-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.problem-evidence-label { color: var(--pomp-muted-fg); font-size: .92em; }
+.problem-evidence { margin: 0; padding: 6px 8px; max-height: 240px; overflow: auto; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius);
+  background: color-mix(in srgb, var(--pomp-fg) 4%, transparent); font-family: var(--pomp-font-mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }

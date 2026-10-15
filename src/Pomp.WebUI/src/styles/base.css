@@ -1,0 +1,432 @@
+/*
+ * Theme variables (docs/ui-protocol.md, "Theme variables") with dark defaults so the page renders correctly before
+ * the first theme/changed. The host overrides them inline on <html>; data-theme="light" only supplies light
+ * fallbacks for variables the host did not send.
+ */
+:root {
+  --pomp-bg: #1e1e1e;
+  --pomp-fg: #cccccc;
+  --pomp-muted-fg: #9d9d9d;
+  --pomp-border: #3c3c3c;
+  --pomp-panel-bg: #252526;
+  --pomp-input-bg: #313131;
+  --pomp-input-fg: #cccccc;
+  --pomp-input-border: #474747;
+  --pomp-focus-border: #007fd4;
+  /* Context meter segments (categorical, fixed order; validated for the dark surface). */
+  --pomp-ctx-prompt: #3987e5;
+  --pomp-ctx-tools: #d95926;
+  --pomp-ctx-mcp: #199e70;
+  --pomp-ctx-context: #c98500;
+  --pomp-ctx-skills: #d55181;
+  --pomp-ctx-messages: #9085e9;
+  --pomp-button-bg: #0e639c;
+  --pomp-button-fg: #ffffff;
+  --pomp-button-hover-bg: #1177bb;
+  --pomp-button-secondary-bg: #3a3d41;
+  --pomp-button-secondary-fg: #ffffff;
+  --pomp-link: #3794ff;
+  --pomp-accent: #569cd6;
+  --pomp-error: #f14c4c;
+  --pomp-warning: #cca700;
+  --pomp-success: #89d185;
+  --pomp-code-bg: #171717;
+  --pomp-selection-bg: #264f78;
+  --pomp-scrollbar: rgba(121, 121, 121, 0.4);
+  --pomp-diff-add-bg: rgba(155, 185, 85, 0.2);
+  --pomp-diff-del-bg: rgba(255, 0, 0, 0.2);
+
+  /* Page-level values (not part of the protocol); theme/changed can override the first two. */
+  --pomp-font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --pomp-font-size: 13px;
+  --pomp-font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+
+  /* Derived from the variables above, so they follow whatever the host sends. */
+  --pomp-hover-bg: color-mix(in srgb, var(--pomp-fg) 9%, transparent);
+  --pomp-active-bg: color-mix(in srgb, var(--pomp-fg) 15%, transparent);
+
+  /* One shape scale for every control and surface (not part of the protocol). Buttons, fields, chips, cards, menus, popovers
+     and dialogs all use --pomp-radius; --pomp-radius-sm is for small marks and for things nested inside a rounded box (code
+     spans, badges, menu rows, progress bars). Circles are only for status dots and spinners. */
+  --pomp-radius: 4px;
+  --pomp-radius-sm: 2px;
+  --pomp-control-height: 26px; /* buttons, text fields and selects in forms */
+  --pomp-bar-height: 24px; /* toolbar controls: icon buttons, chips, small buttons */
+
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --pomp-ctx-prompt: #2a78d6;
+  --pomp-ctx-tools: #eb6834;
+  --pomp-ctx-mcp: #1baf7a;
+  --pomp-ctx-context: #eda100;
+  --pomp-ctx-skills: #e87ba4;
+  --pomp-ctx-messages: #4a3aa7;
+  --pomp-bg: #ffffff;
+  --pomp-fg: #1f1f1f;
+  --pomp-muted-fg: #6e6e6e;
+  --pomp-border: #d4d4d4;
+  --pomp-panel-bg: #f3f3f3;
+  --pomp-input-bg: #ffffff;
+  --pomp-input-fg: #1f1f1f;
+  --pomp-input-border: #c8c8c8;
+  --pomp-focus-border: #005fb8;
+  --pomp-button-bg: #005fb8;
+  --pomp-button-fg: #ffffff;
+  --pomp-button-hover-bg: #0258a8;
+  --pomp-button-secondary-bg: #e5e5e5;
+  --pomp-button-secondary-fg: #1f1f1f;
+  --pomp-link: #005fb8;
+  --pomp-accent: #0066b8;
+  --pomp-error: #c72e2e;
+  --pomp-warning: #9a6700;
+  --pomp-success: #1a7f37;
+  --pomp-code-bg: #f0f0f0;
+  --pomp-selection-bg: #add6ff;
+  --pomp-scrollbar: rgba(100, 100, 100, 0.4);
+  --pomp-diff-add-bg: rgba(46, 160, 67, 0.2);
+  --pomp-diff-del-bg: rgba(248, 81, 73, 0.2);
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: var(--pomp-font-size);
+  scrollbar-width: thin;
+  scrollbar-color: var(--pomp-scrollbar) transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: var(--pomp-bg);
+  color: var(--pomp-fg);
+  font-family: var(--pomp-font-family);
+  font-size: 1rem;
+  line-height: 1.45;
+}
+
+::selection {
+  background: var(--pomp-selection-bg);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] {
+  accent-color: var(--pomp-button-bg);
+}
+
+/* Shell controls are chrome, not content: no accidental text selection. */
+button,
+.tabbar,
+.composer-bar {
+  user-select: none;
+}
+
+:focus-visible {
+  outline: 1px solid var(--pomp-focus-border);
+  outline-offset: 1px;
+}
+
+code,
+pre,
+kbd {
+  font-family: var(--pomp-font-mono);
+}
+
+/* ---- Buttons ------------------------------------------------------------------------------ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: var(--pomp-control-height);
+  padding: 2px 11px;
+  border: 1px solid transparent;
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-button-secondary-bg);
+  color: var(--pomp-button-secondary-fg);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--pomp-button-secondary-bg) 82%, var(--pomp-fg));
+}
+
+.btn.primary {
+  background: var(--pomp-button-bg);
+  color: var(--pomp-button-fg);
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: var(--pomp-button-hover-bg);
+}
+
+.btn.subtle {
+  background: transparent;
+  border-color: var(--pomp-border);
+  color: var(--pomp-fg);
+}
+
+.btn.subtle:hover:not(:disabled) {
+  background: var(--pomp-hover-bg);
+}
+
+.btn.stop {
+  background: transparent;
+  border-color: var(--pomp-error);
+  color: var(--pomp-fg);
+}
+
+.btn.stop .icon {
+  color: var(--pomp-error);
+}
+
+.btn.stop:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--pomp-error) 16%, transparent);
+}
+
+.btn:focus-visible {
+  outline-offset: 2px;
+}
+
+.btn:disabled,
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--pomp-bar-height);
+  height: var(--pomp-bar-height);
+  padding: 0;
+  border: 0;
+  border-radius: var(--pomp-radius);
+  background: transparent;
+  color: var(--pomp-muted-fg);
+  cursor: pointer;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--pomp-hover-bg);
+  color: var(--pomp-fg);
+}
+
+.icon {
+  flex: none;
+}
+
+/* ---- Form fields -------------------------------------------------------------------------- */
+
+.field {
+  display: block;
+  width: 100%;
+  min-height: var(--pomp-control-height);
+  padding: 2px 7px;
+  border: 1px solid var(--pomp-input-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-input-bg);
+  color: var(--pomp-input-fg);
+}
+
+.field:focus {
+  outline: none;
+  border-color: var(--pomp-focus-border);
+}
+
+/* ---- Native controls ---------------------------------------------------------------------------------------------------
+   Buttons, fields and selects without a class of their own (work pages, the context basket) get the look of .btn.subtle and
+   .field instead of the browser's. :where() keeps these rules at zero specificity, so any component rule
+   (.shell-menu button, .session-rename input ...) still decides; buttons with a role (menu items, options, tabs) are left to
+   their component. */
+
+:where(button:not([class]):not([role])) {
+  min-height: var(--pomp-control-height);
+  padding: 2px 9px;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  background: transparent;
+  color: var(--pomp-fg);
+  cursor: pointer;
+}
+
+:where(button:not([class]):not([role]):hover:not(:disabled)) {
+  background: var(--pomp-hover-bg);
+}
+
+:where(button:not([class]):not([role]):disabled) {
+  opacity: 0.45;
+  cursor: default;
+}
+
+:where(input:not([class]):not([type='checkbox']):not([type='radio']):not([type='range']), select:not([class]), textarea:not([class])) {
+  min-height: var(--pomp-control-height);
+  padding: 2px 7px;
+  border: 1px solid var(--pomp-input-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-input-bg);
+  color: var(--pomp-input-fg);
+}
+
+/* (0,1,0): after the global :focus-visible ring, so a focused field shows its border colour like .field, not both. */
+:where(input:not([class]):not([type='checkbox']):not([type='radio']):not([type='range']), select:not([class]), textarea:not([class])):focus {
+  outline: none;
+  border-color: var(--pomp-focus-border);
+}
+
+:where(input:not([class]), select:not([class]), textarea:not([class])):where(:disabled) {
+  opacity: 0.6;
+}
+
+.field.mono {
+  font-family: var(--pomp-font-mono);
+  font-size: 0.92em;
+  resize: vertical;
+}
+
+/* ---- Badges ------------------------------------------------------------------------------- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--badge-color, var(--pomp-border));
+  border-radius: var(--pomp-radius-sm);
+  background: color-mix(in srgb, var(--badge-color, var(--pomp-fg)) 13%, transparent);
+  color: var(--badge-color, var(--pomp-muted-fg));
+  font-size: 0.78em;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.badge.vs {
+  --badge-color: var(--pomp-accent);
+}
+
+.badge.kind.danger {
+  --badge-color: var(--pomp-error);
+}
+
+.badge.kind.warn {
+  --badge-color: var(--pomp-warning);
+}
+
+.badge.kind.info {
+  --badge-color: var(--pomp-accent);
+}
+
+.badge.source {
+  font-weight: 400;
+}
+
+/* ---- Small animations --------------------------------------------------------------------- */
+
+.spinner {
+  display: inline-block;
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border: 2px solid color-mix(in srgb, var(--pomp-fg) 22%, transparent);
+  border-top-color: var(--pomp-accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.dots i {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-right: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+.dots i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.dots i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---- Crash fallback ----------------------------------------------------------------------- */
+
+.crash {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 24px;
+}
+
+/* A knowledge's color and the checkbox lists of knowledge (the context basket, the role and team editors). */
+.knowledge-dot { display: inline-block; flex: none; width: .8em; height: .8em; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--pomp-fg) 30%, transparent); vertical-align: -.08em; }
+.knowledge-checklist { list-style: none; display: flex; flex-direction: column; gap: 2px; min-width: 0; margin: 4px 0; padding: 0; }
+.knowledge-checklist > li { min-width: 0; margin: 0; }
+.knowledge-checklist label { display: flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; cursor: pointer; }
+.knowledge-checklist input { flex: none; margin: 0; }

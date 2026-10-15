@@ -1,0 +1,63 @@
+/* Tools › 지식: a table of knowledge (color tag, pieces, scope, actions) whose rows open to their pieces; the form's color row ends with "+". */
+.knowledge-view .knowledge-form > fieldset { display: flex; flex-direction: column; gap: 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.knowledge-view .knowledge-form p { margin: 0; }
+.knowledge-view .ui-tr.knowledge-row { min-height: 34px; }
+.knowledge-view .knowledge-group + .knowledge-group > .knowledge-row { border-top: 1px solid color-mix(in srgb, var(--pomp-border) 65%, transparent); }
+.knowledge-view .knowledge-group > .ui-tr { border-bottom: 0; }
+.knowledge-view button.knowledge-toggle { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; min-height: 0; height: auto; padding: 2px 4px 2px 0;
+  border: 0; border-radius: var(--pomp-radius-sm, 3px); background: transparent; color: var(--pomp-fg); text-align: left; white-space: nowrap; cursor: pointer; }
+.knowledge-view button.knowledge-toggle:hover { background: var(--pomp-hover-bg); }
+.knowledge-toggle > .icon { flex: none; color: var(--pomp-muted-fg); }
+.knowledge-tag { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 22px; padding: 0 9px 0 7px; border-radius: 11px;
+  border: 1px solid color-mix(in srgb, var(--knowledge-color, var(--pomp-border)) 55%, var(--pomp-border));
+  background: color-mix(in srgb, var(--knowledge-color, transparent) 12%, transparent); font-weight: 600; }
+.knowledge-tag > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.knowledge-tag .knowledge-dot { border: 0; }
+.knowledge-badges { display: flex; flex-wrap: wrap; gap: 3px; margin: 3px 0 1px 17px; min-width: 0; }
+.knowledge-badges > .ui-badge { max-width: 100%; }
+.knowledge-count { color: var(--pomp-muted-fg); text-align: right; font-variant-numeric: tabular-nums; }
+.knowledge-name { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.knowledge-anchor-inline { font-size: 11px; }
+.knowledge-view .knowledge-body { margin: 0; padding: 4px 8px 8px 27px; border-top: 1px dashed color-mix(in srgb, var(--pomp-border) 65%, transparent);
+  background: color-mix(in srgb, var(--pomp-fg) 2%, transparent); }
+.knowledge-body-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 32px; }
+.knowledge-body-bar > .ui-muted { flex: 1; min-width: 0; font-size: 12px; }
+.knowledge-view .knowledge-body .tools-editor { margin: 4px 0 8px; }
+.knowledge-view .ui-form p { margin: 0; }
+.knowledge-view .knowledge-pieces { list-style: none; display: flex; flex-direction: column; gap: 6px; margin: 4px 0 0; padding: 0; }
+.knowledge-view .knowledge-pieces > li { padding: 0; }
+/* A piece: its source lines (when it was taken from a file) and its text, with edit/delete beside it. */
+.knowledge-piece { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
+.knowledge-piece-main { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.knowledge-piece > .ui-actions { flex: none; padding-top: 2px; }
+.knowledge-view .knowledge-anchor { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; margin: 0; color: var(--pomp-muted-fg); font-size: 12px; white-space: nowrap; }
+.knowledge-view .knowledge-anchor > code { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.knowledge-view .knowledge-anchor > .ui-badge { flex: none; }
+.knowledge-view .knowledge-anchor > .icon { flex: none; }
+.knowledge-view .knowledge-text { max-height: 200px; margin: 0; padding: 6px 8px; overflow: auto; border-radius: var(--pomp-radius);
+  background: var(--pomp-code-bg); color: var(--pomp-fg); font-family: var(--pomp-font-mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.knowledge-view .knowledge-optimized { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; margin: 2px 0 6px; }
+.knowledge-view .knowledge-optimized > .knowledge-text { align-self: stretch; }
+.knowledge-view .ui-tr .knowledge-text { max-height: 96px; margin-top: 4px; }
+
+/* Color: 16 presets, the custom color when one is set, then the dashed "+" that opens the #RRGGBB field. */
+.knowledge-color-label { font-size: .92em; color: var(--pomp-fg); }
+.knowledge-view .knowledge-swatches { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.knowledge-view button.knowledge-swatch { display: inline-flex; flex: none; width: 24px; height: 24px; min-width: 0; min-height: 0; padding: 2px; border: 1px solid transparent;
+  border-radius: var(--pomp-radius); background: transparent; cursor: pointer; }
+.knowledge-view button.knowledge-swatch > span { flex: 1; border-radius: 3px; pointer-events: none; }
+.knowledge-view button.knowledge-swatch[aria-checked='true'] { padding: 1px; border: 2px solid var(--pomp-fg); }
+.knowledge-view button.knowledge-swatch:focus-visible { outline: 1px solid var(--pomp-focus-border); outline-offset: 1px; }
+.knowledge-view button.knowledge-swatch-add { align-items: center; justify-content: center; padding: 0; border: 1px dashed color-mix(in srgb, var(--pomp-fg) 45%, transparent); color: var(--pomp-muted-fg); }
+.knowledge-view button.knowledge-swatch-add:hover, .knowledge-view button.knowledge-swatch-add[aria-expanded='true'] { color: var(--pomp-fg); border-color: var(--pomp-fg); background: var(--pomp-hover-bg); }
+.knowledge-view .knowledge-color-code { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.knowledge-view .knowledge-color-code > input.ui-mono { width: 9em; flex: none; display: inline-block; }
+.knowledge-view .knowledge-color-code .knowledge-dot { width: 14px; height: 14px; }
+
+.knowledge-view .knowledge-matches { list-style: none; display: flex; flex-direction: column; gap: 1px; margin: -4px 0 0; padding: 0; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); }
+.knowledge-view .knowledge-matches button { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; min-height: 26px; height: auto; padding: 2px 8px; border: 0; border-radius: 0;
+  background: transparent; color: var(--pomp-fg); text-align: left; white-space: nowrap; }
+.knowledge-view .knowledge-matches button > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.knowledge-view .knowledge-matches button:hover { background: var(--pomp-hover-bg); }
+.knowledge-view .knowledge-existing { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--pomp-muted-fg); }
+.knowledge-view .knowledge-existing > strong { color: var(--pomp-fg); }

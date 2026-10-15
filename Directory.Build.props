@@ -1,0 +1,21 @@
+<Project>
+  <!-- Shared settings for every C# project in the repository. -->
+  <PropertyGroup>
+    <!-- Pinned instead of "latest": the language version must not silently follow whichever .NET SDK is installed (README minimum: .NET SDK 8 = C# 12). -->
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <Version>0.5.4</Version>
+    <Company>deanpinb@gmail.com</Company>
+    <Authors>deanpinb@gmail.com</Authors>
+    <Product>POMP</Product>
+    <Copyright>Copyright (c) 2026 deanpinb@gmail.com</Copyright>
+    <NeutralLanguage>en-US</NeutralLanguage>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compile-time polyfills (records, init, nullable attributes) for netstandard2.0 / net472. -->
+    <PackageReference Include="PolySharp" Version="1.15.0" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers; buildtransitive" />
+  </ItemGroup>
+</Project>
