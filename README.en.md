@@ -7,7 +7,7 @@ change code, build, run tests and debug. Supports Visual Studio 2019 (16.10+), 2
 
 | Component | Version |
 |---|---|
-| POMP | 0.5.4 |
+| POMP | 0.5.5 |
 | omp | 18.10.4 |
 
 ![POMP intro](docs/media/pomp-intro.gif)

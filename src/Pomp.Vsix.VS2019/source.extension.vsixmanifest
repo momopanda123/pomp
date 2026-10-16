@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="Pomp.VSIX.VS2019" Version="0.5.4" Language="en-US" Publisher="momopanda123" />
+    <Identity Id="Pomp.VSIX.VS2019" Version="0.5.5" Language="en-US" Publisher="momopanda123" />
     <DisplayName>POMP (VS2019)</DisplayName>
     <Description xml:space="preserve">AI coding partner inside Visual Studio 2019. Chat with an agent that works with the editor buffers, the solution, the Error List, builds, tests, the debugger, NuGet and Git, and asks before it changes or runs anything. / Visual Studio 안의 AI 코딩 파트너. 에이전트가 편집기·솔루션·오류 목록·빌드·테스트·디버거·NuGet·Git을 사용하고, 바꾸거나 실행하기 전에는 먼저 묻습니다.</Description>
     <License>LICENSE.txt</License>

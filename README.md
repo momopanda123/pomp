@@ -7,7 +7,7 @@
 
 | 구성 요소 | 버전 |
 |---|---|
-| POMP | 0.5.4 |
+| POMP | 0.5.5 |
 | omp | 18.10.4 |
 
 ![POMP 소개](docs/media/pomp-intro.gif)
