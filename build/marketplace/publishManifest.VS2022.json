@@ -2,7 +2,7 @@
   "$schema": "http://json.schemastore.org/vsix-publish",
   "categories": [ "coding", "debugging" ],
   "identity": {
-    "internalName": "pomp-vs2022"
+    "internalName": "pomp2022"
   },
   "overview": "overview.md",
   "priceCategory": "free",

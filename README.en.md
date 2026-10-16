@@ -122,7 +122,7 @@ Requirements
 |---|---|---|
 | `Pomp.VS2017-<version>.vsix` | POMP (VS2017) | Visual Studio 2017 15.9 (no native CodeLens captions) |
 | `Pomp.VS2019-<version>.vsix` | POMP (VS2019) | Visual Studio 2019 16.10 – 16.11 |
-| `Pomp.VS2022-<version>.vsix` | POMP | Visual Studio 2022 (17.x) · 2026 (18.x) |
+| `Pomp.VS2022-<version>.vsix` | POMP (VS2022) | Visual Studio 2022 (17.x) · 2026 (18.x) |
 
 Steps
 1. **Visual Studio Marketplace** (listing in preparation): in Visual Studio, open **Extensions > Manage Extensions** and search
@@ -197,8 +197,8 @@ The detailed docs are in Korean.
 ## License
 
 **POMP** (this repository's code, documents and UI) is source-available software made and distributed by
-**`deanpinb@gmail.com`** under the **PolyForm Noncommercial License 1.0.0**: free for personal and noncommercial use, no
-commercial use. See [`LICENSE.txt`](LICENSE.txt). Marketplace publisher ID: **`deanpinb`**.
+**`momopanda123`** under the **PolyForm Noncommercial License 1.0.0**: free for personal and noncommercial use, no
+commercial use. See [`LICENSE.txt`](LICENSE.txt). Marketplace publisher ID: **`momopanda123`**.
 
 POMP's conversation and agent engine **omp** is the official release binary of
 [oh-my-pi](https://github.com/can1357/oh-my-pi) (**MIT licensed**), and POMP's PolyForm license does not
