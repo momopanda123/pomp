@@ -19,8 +19,8 @@
   `IViewElementFactory` 변환)가 없어 VS2017 VSIX는 CodeLens 공급자를 싣지 않고(`Editor/CodeLensCaptionFeature.cs` 제외) 옵션
   **캡션에 기본 CodeLens 사용**을 숨긴다(POMP 자체 코드 캡션은 그대로). VS 2017에서 실행 검증은 아직 하지 않았다(이 개발 환경에 VS 2017이 없다).
 - C# 언어 버전은 `Directory.Build.props`에서 `12.0`으로 고정한다(설치된 SDK를 따라 조용히 올라가지 않게).
-- 세 VSIX는 **서로 다른 Identity**(`Pomp.VSIX.VS2017`, `Pomp.VSIX.VS2019`, `Pomp.VSIX`)와 표시 이름(`POMP (VS2019)` 등)을 쓴다
-  (Marketplace 목록도 분리). 64비트 패키지 하나(`Pomp.VSIX`, 표시 이름 `POMP`)가 VS 2022와 VS 2026을 함께 커버한다
+- 세 VSIX는 **서로 다른 Identity**(`Pomp.VSIX.VS2017`, `Pomp.VSIX.VS2019`, `Pomp.VSIX.VS2022`)와 표시 이름(`POMP (VS2019)` 등)을 쓴다
+  (Marketplace 목록도 분리). 64비트 패키지 하나(`Pomp.VSIX.VS2022`, 표시 이름 `POMP (VS2022)`)가 VS 2022와 VS 2026을 함께 커버한다
   (VS 2026은 17.x API로 동작하고 설치 범위의 상한을 무시하므로 `[17.0,)` 하나로 양쪽에 설치된다 — Microsoft 호환성 모델).
   사용자는 자기 VS 버전의 패키지를 설치한다.
 - 최소 버전의 SDK로 컴파일한다 (상위 버전 API 사용 시 하위 VS에서 로드 실패).
