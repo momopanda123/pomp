@@ -1151,7 +1151,7 @@ Payload:
 | --- | --- | --- |
 | `skills/state` | `{ skills, diagnostics }` | Skill rows from every source plus scan diagnostics. |
 | `skills/command` | see below | Manage, read, edit or switch one skill. |
-| `skills/reply` | `{ requestId, ok, error?, document? }` | Result of one `skills/command`. |
+| `skills/reply` | `{ requestId, ok, error?, document?, skillImport? }` | Result of one `skills/command`. |
 
 #### `skills/state`
 
@@ -1175,8 +1175,8 @@ Payload:
 
 ```
 { requestId,
-  action: "refresh"|"create"|"import"|"delete"|"open"|"read"|"update"|"enable"|"disable"|"reset",
-  scope?: "project"|"user", name?, description?, body?, content?, expectedHash? }
+  action: "refresh"|"create"|"pick"|"import"|"delete"|"open"|"read"|"update"|"enable"|"disable"|"reset",
+  scope?: "project"|"user", name?, description?, body?, content?, expectedHash?, ticket? }
 ```
 
 - `read` and `update` are described under "In-page resource editing".
@@ -1184,31 +1184,61 @@ Payload:
 - A `read` without scope serves a `pomp` row too.
 - The page copies a built-in skill with `read` followed by `create`.
 
-**`import`**
+**`pick` and `import`**
 
-- Takes pasted `content`: complete UTF-8 Markdown of at most 32 KiB.
-- Validates the existing catalog metadata and body limits.
-- The declared name must match the chosen name.
-- The name uses lowercase letters, digits and hyphens, 2–40 characters.
-- A nonempty description is required.
-- Writes a temporary sibling, then moves it without replacing an existing `SKILL.md`.
-- Project/user scope checks and direct-path checks remain mandatory.
-- It neither executes the content nor grants permissions.
-- The editor opens the saved file.
-- Restart the engine to refresh command availability.
-- No URL fetch or package execution is involved.
+The Import button imports a skill file from disk. It never takes pasted text.
+
+1. `pick` shows the host's open-file dialog, filtered to `SKILL.md` and `*.md`.
+   - The reply carries `skillImport: { ticket, name, description, file, files, bytes }`.
+   - Without `skillImport` the user closed the dialog.
+   - The dialog runs outside the command queue. The page waits up to 10 minutes for the reply.
+2. The page shows that preview with a scope choice.
+3. `import` sends `scope` and `ticket`. The page never names a path.
+
+What a chosen file brings:
+
+- A file named `SKILL.md` brings its whole folder, such as `references/` and `scripts/`.
+  - `.git` folders are skipped.
+  - At most 500 files, 32 MiB and 6 folder levels. A bigger folder is refused.
+- Any other `.md` file is copied alone as `SKILL.md`.
+
+Name and checks:
+
+- The name is the frontmatter `name`, else the folder name (`SKILL.md`) or the file name.
+- It must match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`.
+- The `SKILL.md` text must be UTF-8 of at most 32 KiB with a nonempty body.
+- A readable frontmatter needs a nonempty `description`.
+- A frontmatter POMP's simple reader cannot read (folded text, lists) is still imported.
+  The engine reads full YAML. The row then offers open and delete only.
+
+Writing:
+
+- `import` reads the file again. When the name changed since `pick`, it refuses and asks for a new pick.
+- It refuses when the scope already has a skill or folder with that name.
+- The copy goes into a hidden staging folder in `<scope>/.pomp/skills/`, which is then moved to `<name>/` whole.
+- Linked/reparse entries are refused. Nothing is executed and no permission is granted.
+
+**Engine rediscovery**
+
+- `refresh`, `create`, `import`, `update` and `delete` send omp's `/reload-plugins` after the list refresh.
+  The engine then rediscovers its skills and file commands without a restart or a model request.
+- The reply waits for that reload. The page waits up to 60 seconds for any skills reply.
+- Its `Plugins reloaded.` output is not shown as a chat notice.
+- While a reply or request runs, the reload waits for the end of that reply.
+- At the end of every reply the host compares the `SKILL.md` files of both scopes (path, size, write time) with what the engine last saw.
+  On a change it refreshes the list and reloads the engine. A skill the model wrote is usable right after its reply.
+- The model's system prompt names the two skill folders and the file format (`features-guidance`).
 
 **`create`, `delete`, `open`**
 
 - `create` requires a name matching `^[a-z0-9-]{2,40}$`.
 - `create` requires a single-line description of 1–500 characters.
 - `create` uses `CreateNew` for `<scope>/.pomp/skills/<name>/SKILL.md`.
-- `create` then opens the template through the existing VS editor adapter. It never overwrites.
+- `create` never overwrites. The new file is edited in the page; only `open` opens the VS editor.
 - `delete` resolves one unambiguous POMP-scope row and requires its current hash.
 - `delete` removes the containing directory only if it is empty.
 - `open` resolves the catalog identity. It does not accept a page-supplied path.
 - Linked/reparse paths are refused.
-- After creation or deletion, refresh or restart determines native invocation.
 - Disconnect clears invocation availability.
 
 **Discovery directories**

@@ -130,6 +130,14 @@ namespace Pomp.Hosting
         private McpStatePayload _mcpView = new McpStatePayload();
         private CatalogStatePayload _catalogView = new CatalogStatePayload();
         private JArray _engineSkills = new JArray();
+        /// <summary>The file the Skills tab's import dialog chose last (the page refers to it by ticket only).</summary>
+        private (string Ticket, string File, string Name)? _skillImport;
+        /// <summary>A skills change came in while the engine was busy: rediscover once the reply ends.</summary>
+        private bool _skillReloadPending;
+        /// <summary>The SKILL.md files (path, size, time) seen at the last list refresh: a reply that wrote one makes the engine rediscover.</summary>
+        private string _skillFingerprint = "";
+        /// <summary>A /reload-plugins sent by POMP itself is running: its "Plugins reloaded." output is not a chat notice.</summary>
+        private int _skillReloadsRunning;
         private bool _mcpRestartRequired;
         private string? _toolsSession;
         private ToolsTicket? _toolsTicket;
@@ -450,25 +458,34 @@ namespace Pomp.Hosting
             JArray commands; lock (_stateLock) commands = _engineSkills;
             var off = EffectiveOffSkills();
             var builtins = CatalogFiles().BuiltinSkills();
-            var catalog = SkillFiles().View(commands, installed.Skills, builtins, off, ConfigDisabledSkills()); catalog.Diagnostics.AddRange(installed.Diagnostics.Take(Math.Max(0, 20 - catalog.Diagnostics.Count)));
+            var files = SkillFiles();
+            string fingerprint;
+            try { fingerprint = files.Fingerprint(); } catch (Exception ex) { fingerprint = ""; _logger.Debug("Could not check the skill folders: " + ex.Message); }
+            var catalog = files.View(commands, installed.Skills, builtins, off, ConfigDisabledSkills()); catalog.Diagnostics.AddRange(installed.Diagnostics.Take(Math.Max(0, 20 - catalog.Diagnostics.Count)));
             lock (_stateLock)
             {
                 // A disconnect or newer command catalog wins over a slow installed-provider/filesystem refresh.
                 if (!ReferenceEquals(commands, _engineSkills)) { _commands.Enqueue(RefreshSkillsAsync); return; }
-                _skillsView = catalog;
+                // The engine discovered the skills when it started: the first look is its baseline; later only a reload moves it.
+                _skillsView = catalog; if (_skillFingerprint.Length == 0) _skillFingerprint = fingerprint;
             }
             PublishSkills();
         }
         private async Task HandleSkillsAsync(JObject payload)
         {
             var id = payload.GetString("requestId") ?? ""; string? error = null; ResourceDocumentPayload? document = null;
+            var engineReload = false;
             try
             {
                 var command = new UiMessage("", payload).PayloadAs<SkillsCommandPayload>() ?? throw new ArgumentException(); string? open = null;
                 if (command.Action != "refresh" && command.Action != "read" && ResourcesBusy()) throw new InvalidOperationException(ResourceBusyMessage());
+                // The dialog is modal over VS and may stay open a while: it answers on its own, outside the command queue.
+                if (command.Action == "pick") { PickSkillImportAsync(id).Forget(_logger, "skill import picker"); return; }
+                // Every change and the refresh button make the engine rediscover its skills: a new file is usable at once.
+                engineReload = command.Action is "refresh" or "create" or "import" or "update" or "delete";
                 // Created and imported files are edited in the page now; only the explicit open action opens the VS editor.
                 if (command.Action == "create") SkillFiles().Create(command.Scope ?? "", command.Name ?? "", command.Description ?? "", command.Body);
-                else if (command.Action == "import") SkillFiles().Import(command.Scope ?? "", command.Name ?? "", command.Content ?? "");
+                else if (command.Action == "import") ImportPickedSkill(command.Scope ?? "", command.Ticket);
                 else if (command.Action == "update") SkillFiles().Update(command.Scope ?? "", command.Name ?? "", command.ExpectedHash, command.Description, command.Body, command.Content);
                 else if (command.Action == "read")
                 {
@@ -493,6 +510,7 @@ namespace Pomp.Hosting
                 }
                 else if (command.Action != "refresh") throw new ArgumentException(PompLanguage.Pick("알 수 없는 스킬 동작이에요.", "Unknown skills action."));
                 if (command.Action != "read") await RefreshSkillsAsync().ConfigureAwait(false);
+                if (engineReload) await ReloadEngineSkillsAsync().ConfigureAwait(false);
                 if (open != null)
                 {
                     CheckpointStore.CheckDirectPath(open);
@@ -503,6 +521,80 @@ namespace Pomp.Hosting
             }
             catch (Exception ex) { error = ResourceError(ex); }
             _ui.Post(UiMessageTypes.SkillsReply, new UiCommandReplyPayload { RequestId = id, Ok = error == null, Error = error, Document = error == null ? document : null }, UiDelivery.State);
+        }
+        /// <summary>skills pick: the host's open-file dialog, then a preview of what import would copy (no reply field when it was closed).</summary>
+        private async Task PickSkillImportAsync(string requestId)
+        {
+            string? error = null; SkillImportPreviewPayload? preview = null;
+            try
+            {
+                if (!(_environment is IPompFilePicker picker)) throw new InvalidOperationException(PompLanguage.Pick("파일을 고를 수 없어요.", "Choosing a file is not available."));
+                var root = await TryGetWorkspaceRootAsync().ConfigureAwait(false);
+                var files = await picker.PickFilesAsync(root, PompLanguage.Pick("가져올 스킬 파일", "Skill file to import"),
+                    PompLanguage.Pick("스킬 (SKILL.md, *.md)|SKILL.md;*.md", "Skills (SKILL.md, *.md)|SKILL.md;*.md"), false, _disposeCts.Token).ConfigureAwait(false);
+                if (files.Count == 1)
+                {
+                    var plan = SkillCatalog.PlanImport(files[0]);
+                    var ticket = Guid.NewGuid().ToString("N");
+                    lock (_stateLock) _skillImport = (ticket, plan.File, plan.Name);
+                    preview = new SkillImportPreviewPayload { Ticket = ticket, Name = plan.Name, Description = plan.Description, File = plan.File, Files = plan.Files, Bytes = plan.Bytes };
+                }
+            }
+            catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { return; }
+            catch (Exception ex) { error = ResourceError(ex); }
+            _ui.Post(UiMessageTypes.SkillsReply, new UiCommandReplyPayload { RequestId = requestId, Ok = error == null, Error = error, SkillImport = preview }, UiDelivery.State);
+        }
+        /// <summary>skills import: the picked file is read again (it may have changed since the preview) and copied into the scope.</summary>
+        private void ImportPickedSkill(string scope, string? ticket)
+        {
+            (string Ticket, string File, string Name)? picked;
+            lock (_stateLock) picked = _skillImport;
+            if (picked == null || string.IsNullOrEmpty(ticket) || picked.Value.Ticket != ticket) throw new InvalidOperationException(PompLanguage.Pick("가져올 파일을 다시 골라 주세요.", "Choose the file to import again."));
+            var plan = SkillCatalog.PlanImport(picked.Value.File);
+            if (plan.Name != picked.Value.Name) throw new InvalidOperationException(PompLanguage.Pick("파일이 바뀌었어요. 다시 골라 주세요.", "The file changed. Choose it again."));
+            SkillFiles().Import(scope, plan);
+            lock (_stateLock) if (_skillImport?.Ticket == ticket) _skillImport = null;
+        }
+        /// <summary>
+        /// Makes the engine rediscover its skills and file commands (omp's <c>/reload-plugins</c>, no model request), so a skill
+        /// file written by the page, the model or by hand is usable without a restart. While a reply or request runs it waits for the reply's end.
+        /// </summary>
+        private async Task ReloadEngineSkillsAsync()
+        {
+            OmpConnection? connection;
+            lock (_stateLock)
+            {
+                connection = _epochConnection;
+                if (_bridgeState.State != BridgeState.Running || connection == null || connection.IsClosed || Volatile.Read(ref _workspaceSwitching) == 1) return;
+            }
+            if (ResourcesBusy()) { lock (_stateLock) _skillReloadPending = true; return; }
+            // Taken before the reload: a file written while it runs still differs afterwards and is caught at the next reply's end.
+            string fingerprint;
+            try { fingerprint = SkillFiles().Fingerprint(); } catch (Exception ex) { fingerprint = ""; _logger.Debug("Could not check the skill folders: " + ex.Message); }
+            lock (_stateLock) { _skillReloadPending = false; _skillFingerprint = fingerprint; }
+            Interlocked.Increment(ref _skillReloadsRunning);
+            try
+            {
+                var response = await connection.SendCommandAsync(OmpCommands.Prompt("/reload-plugins"), TimeSpan.FromSeconds(30), _disposeCts.Token).ConfigureAwait(false);
+                if (!response.Success) _logger.Warn("The engine did not reload its skills: " + response.Error);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException && _disposeCts.IsCancellationRequested)) { _logger.Warn("The engine did not reload its skills: " + ex.Message); }
+            finally { Interlocked.Decrement(ref _skillReloadsRunning); }
+        }
+        /// <summary>True when <paramref name="frame"/> is the output of POMP's own skill reload (not shown in the chat).</summary>
+        private bool ObserveSkillReloadOutput(OmpFrame frame) =>
+            Volatile.Read(ref _skillReloadsRunning) > 0 && frame.Json.GetString("text") == "Plugins reloaded.";
+        /// <summary>After a reply: when a SKILL.md was added, changed or removed (the model may write one) or a change waited, the list and the engine catch up.</summary>
+        private async Task CatchUpSkillsAfterReplyAsync()
+        {
+            bool pending; string before;
+            lock (_stateLock) { pending = _skillReloadPending; before = _skillFingerprint; }
+            string now;
+            try { now = SkillFiles().Fingerprint(); }
+            catch (Exception ex) { _logger.Debug("Could not check the skill folders: " + ex.Message); return; }
+            if (!pending && now == before) return;
+            await RefreshSkillsAsync().ConfigureAwait(false);
+            await ReloadEngineSkillsAsync().ConfigureAwait(false);
         }
         private void RefreshRules()
         {

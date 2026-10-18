@@ -128,7 +128,7 @@ namespace Pomp.Hosting
                         break;
                     case OmpFrameTypes.CommandOutput:
                         // The answer to the page's computer toggle is shown by the toggle, not as a chat notice.
-                        if (!ObserveMcpOutput(frame) && !ObserveCommandOutput(frame) && !ObserveContextOutput(frame)) PostNotice("info", frame.Json.GetString("text") ?? string.Empty, "pre");
+                        if (!ObserveMcpOutput(frame) && !ObserveCommandOutput(frame) && !ObserveContextOutput(frame) && !ObserveSkillReloadOutput(frame)) PostNotice("info", frame.Json.GetString("text") ?? string.Empty, "pre");
                         break;
                     case OmpFrameTypes.Response:
                         HandleStrayResponse(frame);
@@ -608,6 +608,8 @@ namespace Pomp.Hosting
             }
 
             _ui.Post(UiMessageTypes.ChatTurnEnd, end);
+            // A reply may have written a skill (the model was asked to make one): the list and the engine catch up.
+            _commands.Enqueue(CatchUpSkillsAfterReplyAsync);
             if (history != null && runId != null)
             {
                 try { history.End(runId, status); PublishRunHistory(); }

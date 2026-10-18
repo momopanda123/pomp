@@ -1240,6 +1240,24 @@ namespace Pomp.Ui
         public string? Body { get; set; }
         public string? Content { get; set; }
         public string? ExpectedHash { get; set; }
+
+        /// <summary>import: the ticket of the file the host's <c>pick</c> dialog chose (the page never names a path).</summary>
+        public string? Ticket { get; set; }
+    }
+
+    /// <summary>The answer to a skills <c>pick</c>: what <c>import</c> with <see cref="Ticket"/> would copy.</summary>
+    public sealed class SkillImportPreviewPayload
+    {
+        public string Ticket { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+
+        /// <summary>The chosen file.</summary>
+        public string File { get; set; } = string.Empty;
+
+        /// <summary>Files copied: a chosen <c>SKILL.md</c> brings its whole folder, any other Markdown file only itself.</summary>
+        public int Files { get; set; }
+        public long Bytes { get; set; }
     }
     public sealed class ActiveRulesPayload
     {
@@ -1540,6 +1558,9 @@ namespace Pomp.Ui
 
         /// <summary>A skills/rules <c>read</c>: the file for the in-page editor.</summary>
         public ResourceDocumentPayload? Document { get; set; }
+
+        /// <summary>A skills <c>pick</c> that chose a file; absent when the dialog was closed.</summary>
+        public SkillImportPreviewPayload? SkillImport { get; set; }
     }
 
     /// <summary>A resource file read for editing; <see cref="Form"/> only when every frontmatter key is one the form edits.</summary>

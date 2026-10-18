@@ -1,5 +1,5 @@
 import { createMockPermissions } from './mockPermissions';
-import { MASKED_ENV, type CatalogCommand, type CatalogEntry, type CatalogStatePayload, type ConversationTool, type HooksCommand, type HooksStatePayload, type HookDraft, type HookInfo, type McpCommand, type McpServer, type ResourceDocument, type SkillInfo, type RulesCommand, type RulesStatePayload, type SkillsCommand, type SkillsStatePayload, type ToolsCommand, type ToolsDomain, type ToolsHostMessage, type ToolsStatePayload, type WorkflowsCommand, type WorkflowsStatePayload, type WorkflowDraft, type WorkflowInfo } from '../toolsProtocol';
+import { MASKED_ENV, type CatalogCommand, type CatalogEntry, type CatalogStatePayload, type ConversationTool, type HooksCommand, type HooksStatePayload, type HookDraft, type HookInfo, type McpCommand, type McpServer, type ResourceDocument, type SkillImportPreview, type SkillInfo, type RulesCommand, type RulesStatePayload, type SkillsCommand, type SkillsStatePayload, type ToolsCommand, type ToolsDomain, type ToolsHostMessage, type ToolsStatePayload, type WorkflowsCommand, type WorkflowsStatePayload, type WorkflowDraft, type WorkflowInfo } from '../toolsProtocol';
 
 /**
  * The skills built into POMP (source `pomp`): [name, category, description, default state, current state (default when omitted)].
@@ -112,7 +112,7 @@ export function createMockToolsHandler(emit: (message: ToolsHostMessage) => void
     if (!domain || domain === 'workflows') { const payload: WorkflowsStatePayload = { workflows: structuredClone(workflows), diagnostics: [] }; emit({ type: 'workflows/state', payload }); }
     if (!domain || domain === 'hooks') { const payload: HooksStatePayload = { hooks: structuredClone(hooks), diagnostics: [], policy: hooksPolicy }; emit({ type: 'hooks/state', payload }); }
   }
-  function reply(domain: ToolsDomain, requestId: string, error?: string, output?: string, document?: ResourceDocument) { emit({ type: `${domain}/reply`, payload: { requestId, ok: !error, error, output, document } }); }
+  function reply(domain: ToolsDomain, requestId: string, error?: string, output?: string, document?: ResourceDocument, skillImport?: SkillImportPreview) { emit({ type: `${domain}/reply`, payload: { requestId, ok: !error, error, output, document, skillImport } }); }
   // Tools › 권한 (permission/rules) answers through the same emit.
   const permissions = createMockPermissions(payload => emit({ type: 'permission/rulesState', payload } as unknown as ToolsHostMessage));
   function handle(message: { type: string; payload?: unknown }): boolean {
@@ -145,7 +145,7 @@ export function createMockToolsHandler(emit: (message: ToolsHostMessage) => void
       return { description, alwaysApply, globs: [...globsRaw.matchAll(/"([^"]*)"/g)].map(entry => entry[1]), body: match[2] };
     }
     setTimeout(() => {
-      let error: string | undefined; let output: string | undefined; let document: ResourceDocument | undefined;
+      let error: string | undefined; let output: string | undefined; let document: ResourceDocument | undefined; let skillImport: SkillImportPreview | undefined;
       if (domain === 'tools') {
         const p = command as ToolsCommand;
         if (p.action === 'set') {
@@ -197,7 +197,15 @@ export function createMockToolsHandler(emit: (message: ToolsHostMessage) => void
             const on = p.action === 'reset' ? skill.defaultEnabled ?? skill.enabled !== false : p.action === 'enable';
             return { ...skill, enabled: on, invocable: on && (invocableWhenOn.get(`${skill.source}:${skill.name}`) ?? true) };
           }) };
-        } else if (p.action === 'import') error = 'Markdown import requires the real host; this preview does not write skill files.';
+        } else if (p.action === 'pick') skillImport = { ticket: `pick-${++revision}`, name: 'release-notes', description: 'Write release notes from the merged changes.', file: 'C:\\Downloads\\release-notes\\SKILL.md', files: 3, bytes: 5120 };
+        else if (p.action === 'import') {
+          if (!p.ticket?.startsWith('pick-') || !['project', 'user'].includes(p.scope ?? '')) error = 'Choose the file to import again.';
+          else if (skills.skills.some(skill => skill.name === 'release-notes' && skill.source === p.scope)) error = 'A skill with this name already exists: release-notes.';
+          else {
+            skills = { ...skills, skills: [...skills.skills, { name: 'release-notes', source: p.scope!, description: 'Write release notes from the merged changes.', file: `C:\\mock-${p.scope}\\.pomp\\skills\\release-notes\\SKILL.md`, invocable: true, hash: `skill-${++revision}` }] };
+            bodies.set(`skill:${p.scope}:release-notes`, { content: '---\nname: release-notes\ndescription: Write release notes from the merged changes.\n---\n# Release notes\n', hash: `skill-${revision}-doc` });
+          }
+        }
         else if (p.action === 'open' && !skills.skills.some(skill => skill.name === p.name && (!p.scope || skill.source === p.scope))) error = 'Skill not found.';
       } else if (domain === 'rules') {
         const p = command as RulesCommand;
@@ -319,7 +327,7 @@ export function createMockToolsHandler(emit: (message: ToolsHostMessage) => void
           else output = `MCP connection test: ${existing.name}\nTransport: ${existing.type}\nConnected successfully\n2 tools discovered\nEnvironment values: [redacted]\n${Array.from({ length: 18 }, (_, i) => `check ${i + 1}: passed`).join('\n')}`;
         } else if (p.action === 'restart') { restartRequired = false; tools = { ...tools, tools: tools.tools.map(tool => ({ ...tool, active: tool.defaultActive })) }; snapshot('tools'); }
       }
-      pendingDomains.delete(domain); snapshot(domain); reply(domain, command.requestId, error, output, document);
+      pendingDomains.delete(domain); snapshot(domain); reply(domain, command.requestId, error, output, document, skillImport);
     }, options.delay ?? 220);
     return true;
   }

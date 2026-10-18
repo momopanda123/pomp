@@ -333,7 +333,7 @@ namespace Pomp.Hosting
                 else
                 {
                     var root = await TryGetWorkspaceRootAsync().ConfigureAwait(false);
-                    var files = await picker.PickFilesAsync(root, _disposeCts.Token).ConfigureAwait(false) ?? Array.Empty<string>();
+                    var files = await picker.PickFilesAsync(root, PompLanguage.Pick("POMP 메시지에 첨부할 파일", "Attach files to the POMP message"), null, true, _disposeCts.Token).ConfigureAwait(false) ?? Array.Empty<string>();
                     answer.Files = files
                         .Where(path => !string.IsNullOrWhiteSpace(path))
                         .Distinct(StringComparer.OrdinalIgnoreCase)
