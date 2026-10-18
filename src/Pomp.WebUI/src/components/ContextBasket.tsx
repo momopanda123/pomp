@@ -214,11 +214,10 @@ export function ContextBasket({ files, text, includeEditorContext, onIncludeEdit
       </div>
       <Pager paged={pagedFiles} testId="basket-file-pager" />
     </div>
-    <button type="button" disabled={disabled || searching || !workspaceKey || !text.trim()} onClick={suggest}>{ko ? '초안 관련 코드 찾기' : 'Find related code for this draft'}</button>
-    <details className="context-basket-details" data-testid="context-basket-details">
-      <summary>{t('basket.details')}</summary>
+    <div className="context-basket-tools">
+      <button type="button" className="btn small" disabled={disabled || searching || !workspaceKey || !text.trim()} onClick={suggest}><Icon name="search" size={12} />{ko ? '초안 관련 코드 찾기' : 'Find related code'}</button>
       <DraftTokenCounter text={text} root={workspaceKey} sessionId={sessionId} model={model} connected={connected} disabled={disabled} locale={locale} />
-    </details>
+    </div>
     {usable.length > 0 && <ViewSection sectionKey="context-knowledge" title={t('tools.knowledge')} status={usable.filter(item => picked.has(item.id)).length}>
       <KnowledgeChecklist items={usable} checked={item => picked.has(item.id)} onToggle={(item, checked) => { void toggleKnowledge(item, checked); }}
         disabled={disabled || !connected || knowledge.pending} testId="basket-knowledge" />

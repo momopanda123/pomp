@@ -2711,7 +2711,9 @@ Payload: `{ requestId?, root, sessionId?, selected: string[], optimizing?: strin
 
 - There is no count limit.
 - Items that would pass one message, 1.75 MiB, are left out and counted in `hidden`.
-- `selected` lists the knowledge ids selected for the current conversation.
+- `selected` lists the knowledge ids selected for the current conversation: every default knowledge it did not untick, then what it picked.
+- `select` with the ticked ids stores what was picked besides the defaults and which defaults were unticked
+  (`.pomp/local/knowledge-sessions.json` rows `{ ids, excluded? }`). A default made later is ticked in every conversation that did not untick it.
 - `optimizing` is the id being optimized.
 - Unasked pushes have no `requestId`.
 
@@ -2815,15 +2817,14 @@ All delivery is inside blocks marked as reference material.
 These are not instructions that change tool permissions, approvals or host policy. Tags inside are neutralized.
 
 - **Default knowledge** (`default: true`)
-  - Goes with every conversation, agent and team without being selected.
-  - In the main session it comes first in `session-knowledge.json`, ahead of the selection.
-  - Every subagent gets it from `role-memory.json` `defaults` as its own `<pomp_knowledge>` block.
+  - Ticked from the start in every conversation's basket; unticking it leaves it out of that conversation only.
+  - Every subagent gets the defaults the conversation did not untick from `role-memory.json` `defaults` as its own `<pomp_knowledge>` block.
   - Limit: 20 items / 24,000 characters.
-- **Selected knowledge of the conversation**
-  - Limit: 20 items / 24,000 characters, shared with the default knowledge.
+- **Selected knowledge of the conversation** (ticked defaults first)
+  - Limit: 20 items / 24,000 characters.
   - Written to `POMP_STATE_DIR/session-knowledge.json` as `{ version: 1, root, sessionId, items: [{ title, body }] }`.
   - The omp extension appends it to the main session's system prompt as `<pomp_knowledge>` when root and session match.
-  - A resumed conversation keeps its selection. A new one starts empty.
+  - A resumed conversation keeps its choice. A new one starts with the defaults ticked.
 - **Knowledge assigned to a team**
   - Limit: newest 10 / 12,000 characters.
   - Sent as a `<team_knowledge>` block appended to the messages the user sends to that team.

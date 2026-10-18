@@ -45,8 +45,8 @@ export function DraftTokenCounter({ text, root, sessionId, model, connected, dis
     return () => window.clearTimeout(timer);
   }, [automatic, disabled, connected, text, count]);
   return <div className="draft-token-counter">
-    <label><input type="checkbox" checked={automatic} disabled={disabled || !connected || !root || !sessionId || !model} onChange={event => { lastAutomaticText.current = null; setAutomatic(event.target.checked); if (!event.target.checked) { request.current = null; setWaiting(false); } }} />{ko ? '자동 계산' : 'Count automatically'}</label>
-    <button type="button" disabled={disabled || !connected || waiting || !root || !sessionId || !model || !text.length || text.length > 128000} onClick={count}>{waiting ? (ko ? '계산 중' : 'Counting') : (ko ? '초안 토큰 계산' : 'Count draft tokens')}</button>
+    <button type="button" className="btn small" disabled={disabled || !connected || waiting || !root || !sessionId || !model || !text.length || text.length > 128000} onClick={count}>{waiting ? (ko ? '계산 중' : 'Counting') : (ko ? '초안 토큰 계산' : 'Count draft tokens')}</button>
+    <label className="ui-check" title={ko ? '초안이 바뀔 때마다 계산' : 'Count as the draft changes'}><input type="checkbox" checked={automatic} disabled={disabled || !connected || !root || !sessionId || !model} onChange={event => { lastAutomaticText.current = null; setAutomatic(event.target.checked); if (!event.target.checked) { request.current = null; setWaiting(false); } }} />{ko ? '자동' : 'Auto'}</label>
     {text.length > 128000 && <p>{ko ? '초안이 너무 길어요.' : 'The draft is too long.'}</p>}
     {result?.error && <p role="alert">{revealControls(result.error)}</p>}
     {result && !result.error && <p role="status">

@@ -638,9 +638,10 @@
 @media (max-width: 480px) { .review-layout-split .review-comparison { display: block; } }
 
 .context-basket { border-bottom: 1px solid var(--pomp-border); margin-bottom: 6px; font-size: .85em; }
-.context-basket summary { cursor: pointer; color: var(--pomp-muted-fg); }
 .context-basket-summary { margin: 4px 0; color: var(--pomp-muted-fg); }
-.context-basket-details { margin: 6px 0; }
+.context-basket-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+.context-basket-tools .draft-token-counter { display: contents; }
+.context-basket-tools p { flex-basis: 100%; margin: 0; color: var(--pomp-muted-fg); }
 .perm-remember-scope { overflow-wrap: anywhere; }
 .context-basket-files { margin: 6px 0; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); }
 .context-file-order { text-align: right; font-variant-numeric: tabular-nums; }

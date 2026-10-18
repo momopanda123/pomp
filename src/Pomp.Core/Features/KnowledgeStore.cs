@@ -212,12 +212,13 @@ namespace Pomp.Features
         internal static string RenderPiece(string text, Anchor? anchor) =>
             anchor == null ? text : "`" + anchor.Path + "` lines " + anchor.StartLine + "–" + anchor.EndLine + ":\n```\n" + text + "\n```";
 
-        /// <summary>The used content of every default knowledge, newest first, within the budgets.</summary>
-        internal IReadOnlyList<(string Id, string Title, string Body)> DefaultItems(int maxItems, int maxChars)
+        /// <summary>The used content of every default knowledge not in <paramref name="excluded"/>, newest first, within the budgets.</summary>
+        internal IReadOnlyList<(string Id, string Title, string Body)> DefaultItems(int maxItems, int maxChars, IEnumerable<string> excluded)
         {
             var result = new List<(string Id, string Title, string Body)>();
             var used = 0;
-            foreach (var knowledge in List().Where(k => k.Default))
+            var skip = new HashSet<string>(excluded, StringComparer.Ordinal);
+            foreach (var knowledge in List().Where(k => k.Default && !skip.Contains(k.Id)))
             {
                 var body = UsedContent(knowledge);
                 if (body.Length == 0) continue;
@@ -228,7 +229,7 @@ namespace Pomp.Features
             return result;
         }
 
-        /// <summary>Makes the knowledge a default (used everywhere without being selected) or an ordinary one.</summary>
+        /// <summary>Makes the knowledge a default (ticked in every conversation's basket until unticked there) or an ordinary one.</summary>
         internal void SetDefault(string id, int revision, bool on)
         {
             EnsureMigrated();

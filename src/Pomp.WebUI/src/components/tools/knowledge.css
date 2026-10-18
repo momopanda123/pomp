@@ -15,7 +15,10 @@
 .knowledge-tag .knowledge-dot { border: 0; }
 .knowledge-badges { display: flex; flex-wrap: wrap; gap: 3px; margin: 3px 0 1px 17px; min-width: 0; }
 .knowledge-badges > .ui-badge { max-width: 100%; }
-.knowledge-count { color: var(--pomp-muted-fg); text-align: right; font-variant-numeric: tabular-nums; }
+.knowledge-count { color: var(--pomp-muted-fg); font-variant-numeric: tabular-nums; }
+/* The Default and Pieces columns: header and cells centered on the same line. */
+.knowledge-view .knowledge-center { display: block; text-align: center; }
+.knowledge-view .knowledge-center > .ui-switch { vertical-align: middle; }
 .knowledge-name { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
 .knowledge-anchor-inline { font-size: 11px; }
 .knowledge-view .knowledge-body { margin: 0; padding: 4px 8px 8px 27px; border-top: 1px dashed color-mix(in srgb, var(--pomp-border) 65%, transparent);

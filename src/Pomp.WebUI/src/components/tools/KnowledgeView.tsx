@@ -238,7 +238,7 @@ export function KnowledgeView({ locale, workspaceKey, active, disabled, draft, o
           <button type="submit" className="btn primary" data-testid="knowledge-save" disabled={submitting || disabled}>{t('tools.save')}</button></FormActions></form>
       </InPageDialog>}
       <DataTable columns={COLUMNS} label={t('tools.knowledge')} testId="knowledge-list" empty={!listed.length}
-        head={[ko ? '이름' : 'Name', <span key="default" title={t('knowledge.defaultHint')}>{t('knowledge.default')}</span>, ko ? '조각' : 'Pieces', '']}>
+        head={[ko ? '이름' : 'Name', <span key="default" className="knowledge-center">{t('knowledge.default')}</span>, <span key="pieces" className="knowledge-center">{ko ? '조각' : 'Pieces'}</span>, '']}>
         {paged.slice.map(item => <KnowledgeRow key={item.id} item={item} t={t} ko={ko} open={expanded.has(item.id)} onToggle={() => toggle(item.id)}
           locked={locked} busy={knowledge.optimizing === item.id || starting.has(item.id)} roleTitle={roleTitle} teamTitle={teamTitle} canInsert={!!onInsertText}
           onInsert={() => onInsertText?.(usedContent(item))}
@@ -318,8 +318,8 @@ function KnowledgeRow({ item, t, ko, open, locked, busy, canInsert, roleTitle, t
           {item.teams.map(id => <Badge key={`team:${id}`} icon="users">{teamTitle(id)}</Badge>)}
         </span>
       </Cell>
-      <Cell><span title={t('knowledge.defaultHint')}><Switch checked={item.default} label={`${item.name} ${t('knowledge.default')}`} showLabel={false} disabled={locked} testId={`knowledge-default-${item.id}`} onChange={onDefault} /></span></Cell>
-      <Cell className="knowledge-count"><span data-testid={`knowledge-count-${item.id}`}>{saved.length}</span></Cell>
+      <Cell className="knowledge-center" title={t('knowledge.defaultHint')}><Switch checked={item.default} label={t('knowledge.defaultHint')} showLabel={false} disabled={locked} testId={`knowledge-default-${item.id}`} onChange={onDefault} /></Cell>
+      <Cell className="knowledge-count knowledge-center"><span data-testid={`knowledge-count-${item.id}`}>{saved.length}</span></Cell>
       <Actions>
         <IconButton icon="send" label={t('knowledge.insert')} testId={`knowledge-insert-${item.id}`} disabled={!canInsert || !content.trim() || content.length > INSERT_LIMIT} onClick={onInsert} />
         <IconButton icon="edit" label={t('knowledge.edit')} testId={`knowledge-edit-${item.id}`} disabled={locked} onClick={onEdit} />

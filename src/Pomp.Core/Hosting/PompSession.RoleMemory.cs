@@ -44,8 +44,9 @@ namespace Pomp.Hosting
         /// </summary>
         private void WriteRoleMemory()
         {
-            string? directory; string root;
+            string? directory; string root; string session;
             lock (_stateLock) { directory = _roleMemoryDirectory; root = _workingDirectory; }
+            lock (_knowledgeLock) session = _knowledgeSession;
             if (directory == null) return;
             var roles = new JObject(); var defaults = new JArray();
             try
@@ -55,7 +56,8 @@ namespace Pomp.Hosting
                     var store = new KnowledgeStore(_environment.DataDirectory, root, _options.UserHome);
                     foreach (var pair in store.RoleKnowledge(RoleMemoryNotes, RoleMemoryChars))
                         roles[pair.Key] = new JArray(pair.Value.Select(note => new JObject { ["title"] = note.Title, ["body"] = note.Body }));
-                    foreach (var item in store.DefaultItems(KnowledgeItems, KnowledgeChars))
+                    // Every agent and team member gets the default knowledge the conversation did not untick in its basket.
+                    foreach (var item in store.DefaultItems(KnowledgeItems, KnowledgeChars, KnowledgeChoiceFor(session).Excluded))
                         defaults.Add(new JObject { ["title"] = item.Title, ["body"] = item.Body });
                 }
             }
@@ -69,8 +71,8 @@ namespace Pomp.Hosting
         }
 
         /// <summary>
-        /// Rewrites the default knowledge and then the conversation's selected knowledge for the extension (20 items / 24,000 chars
-        /// together). Never throws; a failed write leaves the previous file or none, which only means less reference material.
+        /// Rewrites the conversation's knowledge for the extension: the defaults it did not untick, then what it picked (20 items /
+        /// 24,000 chars). Never throws; a failed write leaves the previous file or none, which only means less reference material.
         /// </summary>
         private void WriteSessionKnowledge()
         {
@@ -84,11 +86,7 @@ namespace Pomp.Hosting
                 if (root.Length > 0 && session.Length > 0)
                 {
                     var store = new KnowledgeStore(_environment.DataDirectory, root, _options.UserHome);
-                    var defaults = store.DefaultItems(KnowledgeItems, KnowledgeChars);
-                    var used = 0;
-                    foreach (var item in defaults) { items.Add(new JObject { ["title"] = item.Title, ["body"] = item.Body }); used += item.Title.Length + item.Body.Length; }
-                    var shown = new HashSet<string>(defaults.Select(item => item.Id), StringComparer.Ordinal);
-                    foreach (var item in store.SelectedItems(KnowledgeSelectionFor(session).Where(id => !shown.Contains(id)), KnowledgeItems - defaults.Count, KnowledgeChars - used))
+                    foreach (var item in store.SelectedItems(EffectiveSelection(store.List(), KnowledgeChoiceFor(session)), KnowledgeItems, KnowledgeChars))
                         items.Add(new JObject { ["title"] = item.Title, ["body"] = item.Body });
                 }
             }
