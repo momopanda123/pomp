@@ -66,11 +66,21 @@ JSON은 `Newtonsoft.Json`(VS 제공 어셈블리 사용, VS 2019용 VSIX만 폴�
 | 경로 (`<작업 영역>\.pomp\` 아래) | 내용 |
 |---|---|
 | `agents\`, `teams\`, `rules\`, `workflows\`, `skills\`, `hooks\`, `permissions.json` | 이 프로젝트 범위로 만든 에이전트·팀·규칙·워크플로·스킬·훅·권한 정책 (저장소로 팀과 공유할 수 있다) |
-| `local\` | 이 프로젝트에 대한 POMP 자체 데이터: 대화(`sessions\`, omp `--session-dir`), 최근 대화, 컨텍스트 프리셋, 지식, 체크포인트, 리뷰, 백그라운드 에이전트, 에이전트 실행 기록, 자동화 규칙, 케이스 의견, 격리 작업 트리(`wt\`), 엔진용 에이전트 사본(`engine-plugin\`). 자체 `.gitignore`(`*`)로 커밋에서 빠진다 |
+| `local\` | 이 프로젝트에 대한 POMP 자체 데이터: 대화(`sessions\`, omp `--session-dir`), 최근 대화, 컨텍스트 프리셋, 지식, 체크포인트, 리뷰, 백그라운드 에이전트, 에이전트 실행 기록, 자동화 규칙, 케이스 의견, 격리 작업 트리(`wt\`), 엔진용 에이전트 사본(`engine-plugin\`), 이 데이터가 속한 작업 영역(`workspace.json`). 자체 `.gitignore`(`*`)로 커밋에서 빠진다 |
 
 - 프로젝트의 `.pomp` 폴더를 지우면 그 프로젝트의 POMP 내용이 초기화된다. 이전 버전이 `%LOCALAPPDATA%\Pomp\<기능>\<해시>`,
   `~\.omp\agent\sessions\<작업 폴더>`, `<작업 영역>\.omp\agents`에 두던 프로젝트 데이터는 처음 쓸 때 이 폴더로 **옮긴다**(복사하지
   않으므로 지운 뒤 되살아나지 않는다).
+- **다른 경로에서 온 `.pomp`**: 엔진을 시작할 때 `local\workspace.json`(없으면 최근 대화 목록 등에 기록된 작업 영역)과 지금 작업 영역을
+  비교한다(`WorkspaceOrigin`).
+  - **복사**(기록된 경로에 원래 프로젝트의 `.pomp\local`이 아직 있음): 그 프로젝트의 대화·작업 기록(대화, 최근 대화, 프리셋, 체크포인트,
+    리뷰·요약 캐시, 실행 기록, 케이스 의견, 격리 작업 트리, 붙여넣은 그림 등)을 한 폴더(`pomp-records-of-<원래 폴더>-<시각>`)로 모아 휴지통으로 옮긴다.
+    `.pomp`의 공유 설정과 지식(`knowledge.json`), 역할 그림, 자동화 규칙은 그대로 쓴다. 휴지통으로 옮기지 못하면 그 폴더에 남겨 두고 채팅에 알린다.
+    목록에 없는 새 저장소는 복사 때 기록으로 보고 함께 옮긴다.
+  - **이동·이름 바꾸기**(기록된 경로에 `.pomp\local`이 없거나 같은 폴더의 다른 경로): 작업 영역 경로가 기록된 저장소의 경로를 새 위치로 고쳐
+    기록을 유지한다. omp 대화 파일은 고치지 않는다(omp는 기록된 `cwd`가 있을 때만 그 폴더를 쓰므로 새 위치에서 돈다). 이전 경로는
+    `workspace.json`의 `previousRoots`에 남아 대화 삭제 때의 작업 영역 확인에 쓰인다. 원래 저장소를 가리키는 격리 작업 트리(`wt\`)는 휴지통으로 옮긴다.
+  - 어느 경우든 채팅에 한 줄 알림이 나온다.
 - 작업 영역 신뢰(`workspace-trust.json`)와 항상 허용한 도구 승인은 프로젝트 밖에 남는다. 저장소가 이것을 미리 담아 배포할 수 없게 하기 위해서다.
 
 - 패키지는 백그라운드 로드를 허용하지만 자동 로드(`ProvideAutoLoad`)는 없다 — 도구 창·명령·옵션을 처음 쓸 때 로드된다.
@@ -95,8 +105,8 @@ omp 정식 명세: <https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md>
 | prompt | `{type:"prompt", id, message}` → `response` 즉시 ack → … → `prompt_result` | 에디터 컨텍스트 요약(addAdditionalContext)은 호스트가 message 앞에 삽입. `streamingBehavior`(steer/followUp)는 보내지 않는다 — 아래 "한 번에 한 메시지" |
 | tool_call | `host_tool_call {id, toolCallId, toolName, arguments}` | `set_host_tools`로 등록한 호스트 툴만 |
 | tool_result | `host_tool_result {id, result:{content:[{type:"text",text}]}, isError?}` / 진행중 `host_tool_update` | |
-| permission_request | ① 호스트 툴: 호스트 `PermissionGate`가 실행 전 직접 판단 ② omp 내장 툴: `extension_ui_request {method:"select", title:"Allow tool: <name>\n…", options:["Approve","Deny"]}` | ①은 omp 승인 오버레이에서 `allow`로 두고 호스트가 게이트 |
-| permission_result | ② `extension_ui_response {id, value:"Approve"\|"Deny"}` | |
+| permission_request | ① 호스트 툴: 호스트 `PermissionGate`가 실행 전 직접 판단 ② omp 내장 툴: `extension_ui_request {method:"select", title:"Allow tool: <name>\n…", options:["Approve","Deny"]}`, 승인 모드가 띄운 프롬프트는 omp 18.11.3부터 `options:["Approve","Approve <대상> for this session","Deny"]` | ①은 omp 승인 오버레이에서 `allow`로 두고 호스트가 게이트 |
+| permission_result | ② `extension_ui_response {id, value:"Approve"\|"Deny"}` | 가운데 세션 승인 항목은 고르지 않는다(omp가 그 대상의 이후 호출을 호스트 게이트 없이 실행) |
 | status_update | `agent_start/end`, `message_update`(delta), `tool_execution_*`, `get_state.contextUsage` | UI에는 `session/info`, `chat/*`로 변환 |
 | error | `response{success:false}`, `prompt_result{status:"error"}`, `extension_error` | |
 | cancel | `abort` (진행 중 호스트 툴은 `host_tool_cancel`로 역통지) | |
@@ -130,14 +140,14 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
 
 - **`--no-extensions`(기본)**: omp가 스스로 찾는 확장·훅(사용자 프로필, 설치된 플러그인, 작업 폴더의 `.omp/extensions`)을
   끈다. 명시한 `-e` 패키지(pomp)와 그 `skills/`(`vs-project`)는 그대로 로드된다(omp 18.4.3·18.8.6·18.10.3에서 확인: 작업 폴더
-  프로브 확장은 로드되지 않고, 옵션을 켜면 로드됨. 18.10.4에서는 pomp 패키지의 명령과 `vs-project`가 로드되는 것을 확인). 도구 > 옵션 > Pomp의 "Load discovered omp extensions"(기본 꺼짐)를 켜면
+  프로브 확장은 로드되지 않고, 옵션을 켜면 로드됨. 18.10.4와 18.12.1에서는 pomp 패키지의 명령과 `vs-project`가 로드되는 것을 확인). 도구 > 옵션 > Pomp의 "Load discovered omp extensions"(기본 꺼짐)를 켜면
   이 플래그를 빼며, 이런 확장은 omp 안에서 샌드박스 없이 실행된다.
 - **프로세스 작업 폴더**: omp는 시작한 폴더의 `.env`를 `--cwd`로 옮기기 전에 읽어, 비어 있는 환경 변수(공급자 주소,
   프록시, API 키 등)를 채운다. 그래서 엔진 프로세스는 항상 POMP 폴더(`%LOCALAPPDATA%\Pomp\workspace`)에서 시작하고 작업 루트는
   `--cwd`로만 넘긴다. 저장소의 `.env`는 엔진에 들어가지 않는다.
 - **작업 영역 신뢰**(아래 "작업 영역 신뢰"): `--no-extensions`와 무관하게 omp는 작업 폴더의 설정 파일(`tools.approval.*`,
   `bash.patterns`, 셸·엔드포인트 설정), 모든 공급자 형식의 MCP 서버 목록, 도구 코드(`.omp/tools` 등), 컨텍스트 파일의 `@경로`
-  포함을 사용자 설정과 같은 신뢰로 읽고 실행한다(omp 18.10.4에도 프로젝트 신뢰 확인이 없다). POMP는 이런 구성이 있는 작업
+  포함을 사용자 설정과 같은 신뢰로 읽고 실행한다(omp 18.12.1에도 프로젝트 신뢰 확인이 없다). POMP는 이런 구성이 있는 작업
   영역에서, 사용자가 그 내용을 신뢰하기 전에는 omp를 시작하지 않는다.
 - 추가 인수(`ExtraArguments`)는 설정에 평문으로 저장된다. 로그에는 이름에 key/token/secret/password/passwd/credential/auth가
   들어간 플래그의 값을 `***`로 가린다(omp에는 원래 값이 전달된다).
@@ -183,7 +193,7 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
 
 ### 작업 영역 신뢰
 
-omp(18.4.3부터 현재 18.10.4까지)는 프로젝트 신뢰를 확인하지 않는다(`isProjectTrusted: () => true`). 작업 폴더에서 읽는 다음 구성은 시작과 동시에
+omp(18.4.3부터 현재 18.12.1까지)는 프로젝트 신뢰를 확인하지 않는다(`isProjectTrusted: () => true`). 작업 폴더에서 읽는 다음 구성은 시작과 동시에
 코드를 실행하거나, 승인을 바꾸거나, 바깥 파일을 대화에 넣는다. MCP stdio 서버는 엔진 환경(POMP가 넣은 API 키 포함)을 그대로 받는다.
 
 | 종류 | 파일 (작업 루트 기준) |
@@ -221,8 +231,8 @@ POMP는 특정 omp 버전과 함께 만들고 시험한다. omp의 RPC 계약(`g
 `omp usage --json` 등)은 버전마다 바뀔 수 있으므로 **POMP 릴리스 하나 = omp 버전 하나**로 묶어 배포한다.
 
 - **어느 버전인지**: `engines/omp/engine.props` 한 곳에서 정한다 — 버전, 공식 릴리스 URL(`github.com/can1357/oh-my-pi`),
-  자산 이름(`omp-windows-x64.exe`), 크기, SHA-256, `THIRD-PARTY-NOTICES.txt`의 SHA-256. 현재 **omp 18.10.4**
-  (244,256,768바이트, `c7969e65…a7d5`). 라이선스는 MIT(`engines/omp/LICENSE.upstream`).
+  자산 이름(`omp-windows-x64.exe`), 크기, SHA-256, `THIRD-PARTY-NOTICES.txt`의 SHA-256. 현재 **omp 18.12.1**
+  (222,742,016바이트, `1ba0274b…77bb`). 라이선스는 MIT(`engines/omp/LICENSE.upstream`).
 - **빌드**(`Pomp.Vsix.Common.targets`의 `PompPrepareOmpEngine`): `artifacts\engines\omp\<버전>\`에 엔진이 없으면 릴리스에서
   내려받고, 크기·해시가 고정값과 다르면 받은 파일을 지우고 빌드를 실패시킨다(엔진 POMP1011, 고지 파일 POMP1012).
   `-p:PompOmpExe=<절대 경로>`(build.ps1 `-OmpExe`)는 오프라인 빌드용 로컬 사본일 뿐 같은 해시 검사를 거친다 — 고정되지 않은
@@ -263,7 +273,7 @@ POMP는 특정 omp 버전과 함께 만들고 시험한다. omp의 RPC 계약(`g
 
 ### 에이전트·팀과 컴퓨터 사용
 
-계약은 `docs/agent-teams.md`. 기본 omp(현재 18.10.4)만으로 동작한다(엔진 패치 불필요).
+계약은 `docs/agent-teams.md`. 기본 omp(현재 18.12.1)만으로 동작한다(엔진 패치 불필요).
 - **에이전트**는 omp 표준 형식의 정의 파일(`<작업 영역>/.pomp/agents/*.md`, `~/.omp/agent/agents/*.md`)이고 POMP는 그 파일을 만들고
   고치기만 한다. 프로젝트 역할은 `.pomp/local/engine-plugin/agents`에 복사해 `--plugin-dir`로 omp에 넘긴다. **팀**(2명 이상, `.pomp/teams/*.json` 또는 `%APPDATA%\Pomp\teams`)으로 보낸 메시지는 호스트가 확인한 뒤
   `/pomp-team <id> …`로 보내고, 확장(`extensions/teams.ts`)이 팀 안내와 함께 메인 대화에 넘긴다. 메인 대화가 omp `task` 도구로
@@ -488,8 +498,8 @@ pre-edit 훅도 상태 파일 누락/읽기 실패 시 fail-open이며, bash·MC
 - 편집기 우클릭에서는 **POMP에게 질문 → POMP** 순서로 둔다. 이 메뉴가 여는 질문 창은 채팅 질문(Enter)과 수정 제안(Ctrl+Enter)을 함께 하며,
   고칠 수 없는 파일에서는 수정 제안이 꺼진다. POMP 하위 메뉴는 코드 동작(설명·리뷰·고치기·테스트 작성) → 컨텍스트(파일 추가) → 에이전트·팀에게 →
   채팅(열기·새 대화·포커스 전환) → 켜기/끄기(자동완성·코드 캡션)이며, 질문을 안에 중복하지 않는다.
-  도구 > POMP는 채팅 → POMP에게 질문 → 켜기/끄기 순서다.
-  보기 > 다른 창 > POMP 항목은 그대로 둔다.
+  도구 메뉴에는 POMP 하위 메뉴를 두지 않는다(모든 명령이 편집기 우클릭·채팅 창에 있어 중복이었다). Live·북마크 켜기/끄기는 메뉴 없이
+  단축키용 명령으로만 남고(채팅 입력창 위 아이콘과 같다), POMP 창은 VS 관례대로 보기 > 다른 창 > POMP로 연다.
 - 책갈피: 공개 API가 없어 열린 문서의 `MARKER_BOOKMARK` 마커 열거 방식(열린 문서 한정)으로 시작.
 - 실행 검증은 이 개발 PC의 VS 2019 16.11 실험 인스턴스(`/rootSuffix Exp`)에서 한다. VS 2026 패키지는 VS 2026 실험 인스턴스에 설치해
   연결·메뉴를 확인하고, VS 2022 패키지는 빌드·패키지 내용만 확인한다(VS 2022 미설치).

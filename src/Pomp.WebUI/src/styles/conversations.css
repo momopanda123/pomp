@@ -23,10 +23,10 @@
 .partner-tab-main:disabled, .partner-tab-close:disabled, .partner-tab-add:disabled { cursor: default; opacity: .5; }
 /* Dimmed by its icon only: a see-through add button would show the tabs scrolled under it. */
 .partner-tab-add:disabled { opacity: 1; color: color-mix(in srgb, var(--pomp-muted-fg) 50%, transparent); }
-.partner-message { flex: 1 1 100%; min-width: 0; padding: 2px 3px; overflow-wrap: anywhere; color: var(--pomp-muted-fg); font-size: .8rem; }
-.partner-message[role='alert'], .conversation-error { color: var(--pomp-error); }
 .partner-picker .picker-pop.inline { position: absolute; left: 0; right: 0; top: 100%; max-height: min(50vh, 320px); z-index: 30; }
-.conversation-list { flex: 0 1 auto; min-height: 0; max-height: 55%; overflow: auto; border-bottom: 1px solid var(--pomp-border); }
+/* The conversation list drops down over the chat from under the session header (a zero-height anchor keeps the chat in place). */
+.conversation-list-anchor { position: relative; flex: none; height: 0; z-index: 25; }
+.conversation-list { position: absolute; top: 2px; left: 6px; right: 6px; max-height: min(60vh, 460px); overflow: auto; border: 1px solid var(--pomp-focus-border); border-radius: var(--pomp-radius); background: var(--pomp-panel-bg); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4); }
 .sessions-panel { min-width: 0; padding: 8px; font-size: .88rem; word-break: keep-all; overflow-wrap: anywhere; }
 .sessions-toolbar strong { flex: 1; min-width: 0; }
 .session-row-main { display: flex; min-width: 0; align-items: flex-start; }
@@ -34,7 +34,7 @@
 .session-row-open:disabled { cursor: default; color: var(--pomp-muted-fg); }
 .session-title { display: flex; gap: 4px; max-width: 100%; }
 .session-title .icon { flex: none; }
-.session-partner-badge { color: var(--pomp-accent); font-size: .8rem; overflow-wrap: anywhere; }
+.session-partner-badge { color: var(--pomp-fg); font-size: .8rem; overflow-wrap: anywhere; }
 .session-row-actions, .conversation-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .chat-queue, .live-agent-progress { flex: none; min-width: 0; margin: 0 8px 4px; padding: 4px 6px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); font-size: .82rem; word-break: keep-all; overflow-wrap: anywhere; background: var(--pomp-panel-bg); }
 .chat-queue > p { margin: 3px 0; }

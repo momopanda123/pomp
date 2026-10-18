@@ -707,7 +707,7 @@ export function installMockHost(): void {
     const promptId = run.promptId;
     if (input.text.startsWith('/')) {
       // omp command_output is bridged as a notice; no fake model inference or tools are needed.
-      post('chat/turnStarted', { promptId, clientMessageId: input.clientMessageId, text: input.text, team: input.team, agent: input.agent, agentInstance: input.agentInstance, main: !input.team && !input.agent && !input.agentInstance ? true : undefined });
+      post('chat/turnStarted', { promptId, clientMessageId: input.clientMessageId, text: input.text, team: input.team, agent: input.agent, agentInstance: input.agentInstance, main: !input.team && !input.agent && !input.agentInstance ? true : undefined, from: input.from });
       postSession(true);
       await runWait(run, 180);
       const command = input.text.slice(1).split(/\s+/, 1)[0] ?? '';
@@ -724,7 +724,7 @@ export function installMockHost(): void {
       return;
     }
     tokens += 1_900;
-    post('chat/turnStarted', { promptId, clientMessageId: input.clientMessageId, text: input.text, attachments: input.attachments, editorContext: input.includeEditorContext ? { path: 'src/Pomp.Sample/Program.cs', startLine: 20, endLine: 45, caretLine: 22 } : undefined, team: input.team, agent: input.agent, agentInstance: input.agentInstance, main: !input.team && !input.agent && !input.agentInstance ? true : undefined });
+    post('chat/turnStarted', { promptId, clientMessageId: input.clientMessageId, text: input.text, attachments: input.attachments, editorContext: input.includeEditorContext ? { path: 'src/Pomp.Sample/Program.cs', startLine: 20, endLine: 45, caretLine: 22 } : undefined, team: input.team, agent: input.agent, agentInstance: input.agentInstance, main: !input.team && !input.agent && !input.agentInstance ? true : undefined, from: input.from });
     postSession(true);
     postBackground();
     await runWait(run, 300);
@@ -797,7 +797,7 @@ export function installMockHost(): void {
     await runTool(
       run,
       { id: nextId('tool'), name: 'read_error_list', args: { severity: 'error', maxItems: 50 }, host: true },
-      ['오류 목록을 읽는 중…', '3개 항목을 찾았습니다 (오류 2, 경고 1)'],
+      ['오류 목록을 읽는 중', '3개 항목을 찾았습니다 (오류 2, 경고 1)'],
       {
         text: 'CS1002  ; 필요  Program.cs(12,34)\nCS0103  현재 컨텍스트에 이름이 없습니다  Program.cs(13,25)\nCS8600  null 리터럴 변환 (경고)  Program.cs(18,22)',
         durationMs: 214,
@@ -817,7 +817,7 @@ export function installMockHost(): void {
       post('chat/toolStart', { toolCallId: id, toolName: 'bash', args: { command: 'dotnet build src/Pomp.Sample -c Release --no-restore' }, isHostTool: false });
       const answer = await askPermission(run, bashApproval());
       if (approved(answer)) {
-        post('chat/toolUpdate', { toolCallId: id, text: 'Restore complete (0.4s)\nBuilding Pomp.Sample …' });
+        post('chat/toolUpdate', { toolCallId: id, text: 'Restore complete (0.4s)\nBuilding Pomp.Sample' });
         await runWait(run, 900);
         post('chat/toolEnd', {
           toolCallId: id,
@@ -911,7 +911,9 @@ export function installMockHost(): void {
       const messages = transcripts.get(entry.id) ?? [];
       if (messages.length === 0 && !entry.name) entry.title = payload.text.slice(0, 120);
       const target = payload.team ? { kind: 'team', id: payload.team } : payload.agent ? { kind: 'agent', id: payload.agent } : payload.agentInstance ? { kind: 'dm', id: payload.agentInstance } : undefined;
-      const transcriptText = target ? `<!-- pomp-${target.kind}:${target.id} -->\nMock target: ${target.id}\n<!-- /pomp-${target.kind} -->\n\n${payload.text}` : payload.text;
+      // Like the host: the routing brief, then the sending tab's origin marker (PromptDisplay.cs), then the user's text.
+      const origin = payload.from ? `<!-- pomp-from:${payload.from.kind}:${payload.from.id} -->\n\n` : '';
+      const transcriptText = target ? `<!-- pomp-${target.kind}:${target.id} -->\nMock target: ${target.id}\n<!-- /pomp-${target.kind} -->\n\n${origin}${payload.text}` : `${origin}${payload.text}`;
       messages.push({ role: 'user', text: transcriptText }, { role: 'assistant', text: turnKind === 'error' ? '모델 제공자가 일시적으로 과부하 상태입니다.' : SHORT_ANSWER });
       transcripts.set(entry.id, messages);
       entry.messageCount = messages.length;
@@ -1340,21 +1342,21 @@ export function installMockHost(): void {
         login = { state: 'running', provider, url, instructions: 'Sign in in the browser, then copy the authorization code it shows and paste it below.' };
         loginTimers.push(
           later(700, () => {
-            login = { ...login, progress: 'Waiting for the authorization code…', prompt: { id: `prompt-${++promptCounter}`, message: 'Paste the authorization code', placeholder: 'code#state' } };
+            login = { ...login, progress: 'Waiting for the authorization code', prompt: { id: `prompt-${++promptCounter}`, message: 'Paste the authorization code', placeholder: 'code#state' } };
             postSetup();
           }),
         );
         break;
       case 'github-copilot':
-        login = { state: 'running', provider, url: 'https://github.com/login/device', instructions: 'Enter the device code ABCD-1234 on the page that opened.', progress: 'Waiting for authorization…' };
+        login = { state: 'running', provider, url: 'https://github.com/login/device', instructions: 'Enter the device code ABCD-1234 on the page that opened.', progress: 'Waiting for authorization' };
         loginTimers.push(later(4_000, () => finishLogin(provider)));
         break;
       case 'google-antigravity':
-        login = { state: 'running', provider, progress: 'Starting the sign-in…' };
+        login = { state: 'running', provider, progress: 'Starting the sign-in' };
         loginTimers.push(later(1_200, () => finishLogin(provider, 'This provider needs a terminal: the secret must be typed in a console window (stdin is not available here).')));
         break;
       default:
-        login = { state: 'running', provider, url, progress: 'Waiting for the browser…' };
+        login = { state: 'running', provider, url, progress: 'Waiting for the browser' };
         loginTimers.push(later(3_000, () => finishLogin(provider)));
     }
   };
@@ -1415,7 +1417,7 @@ export function installMockHost(): void {
           postSetup(requestId);
           break;
         }
-        login = { ...login, progress: 'Checking the code…', prompt: undefined };
+        login = { ...login, progress: 'Checking the code', prompt: undefined };
         delete login.prompt;
         postSetup(requestId);
         loginTimers.push(later(800, () => finishLogin(login.provider)));
@@ -1629,7 +1631,9 @@ export function installMockHost(): void {
     for (let index = 0; index < messages.length; index += 2) {
       const promptId = nextId('replay-prompt');
       const messageId = nextId('replay-message');
-      frames.push({ type: 'chat/turnStarted', payload: { promptId, text: messages[index]!.text } });
+      // The host turns the origin marker back into chat/turnStarted.from and never shows it (PompSession.Restore.cs).
+      const user = messages[index]!.text; const origin = /<!-- pomp-from:(agent|team):([a-z0-9-]{2,40}) -->\n\n/.exec(user);
+      frames.push({ type: 'chat/turnStarted', payload: { promptId, text: origin ? user.replace(origin[0], '') : user, ...(origin ? { from: { kind: origin[1]!, id: origin[2]! } } : {}) } });
       const assistant = messages[index + 1];
       if (assistant) {
         frames.push(
@@ -1796,6 +1800,7 @@ export function installMockHost(): void {
     postInteractive(command.requestId);
   };
   let approvalMode: ApprovalMode = 'alwaysAsk';
+  let editorFollow: HostToUi['host/editorFollow'] = { live: false, bookmarks: false };
   const postHello = (): void => {
     post('host/hello', { version: '0.3.0-mock', vsVersion: '17.12 (mock)', locale: opts.locale, includeEditorContextByDefault: true, composerPredictions: new URLSearchParams(window.location.search).get('composerPredictions') === '1', approvalMode, shortcuts: { ...DEFAULT_SHORTCUTS } });
   };
@@ -1808,6 +1813,7 @@ export function installMockHost(): void {
     ready = true;
     // The real host replays everything queued before ui/ready, starting with host/hello.
     postHello();
+    post('host/editorFollow', editorFollow);
     post('theme/changed', {
       kind: opts.theme,
       colors: opts.theme === 'light' ? LIGHT : DARK,
@@ -1829,8 +1835,8 @@ export function installMockHost(): void {
     work.snapshot();
     postInteractive();
     // The real host sends engine/info at every engine start and in the ui/ready snapshot.
-    if (opts.engine === 'bundled') post('engine/info', { source: 'bundled', version: '18.10.4', verified: true, expectedVersion: '18.10.4' });
-    else if (opts.engine === 'settings') post('engine/info', { source: 'settings', version: '18.9.0', verified: false, expectedVersion: '18.10.4', path: 'D:\\tools\\omp-next\\omp.exe' });
+    if (opts.engine === 'bundled') post('engine/info', { source: 'bundled', version: '18.12.1', verified: true, expectedVersion: '18.12.1' });
+    else if (opts.engine === 'settings') post('engine/info', { source: 'settings', version: '18.9.0', verified: false, expectedVersion: '18.12.1', path: 'D:\\tools\\omp-next\\omp.exe' });
     else if (opts.engine === 'installed') post('engine/info', { source: 'installed', version: '18.4.1', verified: false, path: 'C:\\Users\\dev\\AppData\\Local\\omp\\omp.exe' });
     postHistory(undefined, opts.sessions === 'error' ? 'The session list could not be read (mock failure).' : undefined);
     if (new URLSearchParams(window.location.search).get('taskApproval') === '1') post('permission/request', {
@@ -1869,6 +1875,12 @@ export function installMockHost(): void {
         case 'ui/ready':
           onReady();
           break;
+        case 'ui/editorFollow': {
+          const command = payload as unknown as UiToHost['ui/editorFollow'];
+          editorFollow = { ...editorFollow, live: command.live ?? editorFollow.live, bookmarks: command.bookmarks ?? editorFollow.bookmarks };
+          post('host/editorFollow', { ...editorFollow, requestId: command.requestId });
+          break;
+        }
         case 'workspace/hooks': {
           const command = payload as unknown as UiToHost['workspace/hooks'];
           if (command.action === 'enable') projectHooksEnabled = command.enabled === true;

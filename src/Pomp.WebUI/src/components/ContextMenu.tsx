@@ -5,6 +5,8 @@ export interface ContextMenuItem {
   id: string;
   label: string;
   testId?: string;
+  /** A show/hide style choice: rendered as a menuitemcheckbox with a check mark when true. */
+  checked?: boolean;
   onSelect: () => void;
 }
 
@@ -36,7 +38,7 @@ export function useContextMenu() {
     if (!pos) return;
     if (focusFirstRef.current) {
       focusFirstRef.current = false;
-      menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+      menuRef.current?.querySelector<HTMLButtonElement>('[role^="menuitem"]')?.focus();
     }
     const onPointerDown = (event: PointerEvent): void => {
       if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
@@ -63,8 +65,10 @@ export function useContextMenu() {
       if (items.length === 0) return;
       const margin = 8;
       const width = 240;
-      const height = Math.min(320, 8 + items.length * 36);
-      invokerRef.current = invoker;
+      const height = Math.min(window.innerHeight - 2 * margin, 8 + items.length * 34);
+      // Focus goes back to what had it inside the target (a button, the message box), not to a container that cannot take focus.
+      const focused = document.activeElement;
+      invokerRef.current = focused instanceof HTMLElement && focused !== invoker && invoker.contains(focused) ? focused : invoker;
       itemsRef.current = items;
       focusFirstRef.current = keyboard;
       setPos({
@@ -107,9 +111,10 @@ export function useContextMenu() {
           <button
             key={item.id}
             type="button"
-            role="menuitem"
+            role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+            aria-checked={item.checked}
             data-testid={item.testId ?? `context-menu-item-${item.id}`}
-            className="context-menu-item"
+            className={item.checked === undefined ? 'context-menu-item' : 'context-menu-item checkable'}
             onClick={() => {
               const run = item.onSelect;
               close(false);
@@ -117,7 +122,7 @@ export function useContextMenu() {
             }}
             onKeyDown={(event) => {
               const menu = (event.currentTarget as HTMLElement).closest('[data-testid="context-menu"]');
-              const entries = menu ? Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')) : [];
+              const entries = menu ? Array.from(menu.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]')) : [];
               const at = entries.indexOf(event.currentTarget as HTMLButtonElement);
               let next = -1;
               if (event.key === 'ArrowDown') next = (at + 1) % entries.length;
@@ -143,6 +148,7 @@ export function useContextMenu() {
               entries[next]?.focus();
             }}
           >
+            {item.checked !== undefined && <span className="context-menu-check" aria-hidden="true">{item.checked ? '✓' : ''}</span>}
             {item.label}
           </button>
         ))}

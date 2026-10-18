@@ -608,9 +608,9 @@ button.acct-toggle > .acct-who {
   display: inline-block;
   margin-left: 6px;
   padding: 0 5px;
-  border: 1px solid var(--pomp-accent);
+  border: 1px solid var(--pomp-focus-border);
   border-radius: var(--pomp-radius-sm);
-  color: var(--pomp-accent);
+  color: var(--pomp-fg);
   font-size: 0.82em;
   font-weight: 600;
   vertical-align: 1px;

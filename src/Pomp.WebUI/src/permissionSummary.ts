@@ -35,9 +35,9 @@ function taskPreview(lines: string[], start: number): string | undefined {
   if (!text) return undefined;
   if (text.length > PREVIEW_CHARS || (clipped && text.length === PREVIEW_CHARS)) {
     // Do not leave half a surrogate pair at the clipping boundary.
-    return `${text.slice(0, PREVIEW_CHARS - 1).replace(/[\uD800-\uDBFF]$/, '')}…`;
+    return text.slice(0, PREVIEW_CHARS).replace(/[\uD800-\uDBFF]$/, '');
   }
-  return clipped ? `${text}…` : text;
+  return text;
 }
 
 /**

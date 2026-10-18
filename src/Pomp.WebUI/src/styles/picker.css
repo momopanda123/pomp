@@ -220,19 +220,47 @@
   cursor: pointer;
 }
 
-.picker-option:hover {
+/* One highlight, the active row, which follows the pointer (and the arrow keys), in the hover colour the rest of the chat uses. No
+   separate :hover colour: it showed first and then turned into another colour a moment later, so moving over the list flickered.
+   (The selection colour is not used: in some VS themes it is all but the list background.) */
+.picker-option.active {
   background: var(--pomp-hover-bg);
 }
 
-.picker-option.active {
-  background: var(--pomp-selection-bg);
+/* The current item of a list without a check column (markCurrent="background"): tinted with an accent bar on its leading edge, also while
+   the pointer or the keyboard is on it. */
+.picker-option.current {
+  background: var(--pomp-active-bg);
+  box-shadow: inset 2px 0 0 var(--pomp-focus-border);
 }
 
+.picker-option.current.active {
+  background: var(--pomp-hover-bg);
+}
+
+/* The conversation the user is in (the send-target list): always tinted; choosing it keeps the message in this conversation. */
+.picker-option.own {
+  background: var(--pomp-active-bg);
+}
+
+.picker-option.own.active {
+  background: var(--pomp-hover-bg);
+}
+
+/* The current item's check in the text colour, not the accent: the host maps the accent from the selected document tab's background,
+   which in some themes all but vanishes on the list. */
 .picker-check {
   display: inline-flex;
   flex: none;
   width: 12px;
-  color: var(--pomp-accent);
+  color: var(--pomp-fg);
+}
+
+/* The role or team picture of a send-target row (the Agents tab's own shapes and colors). */
+.picker-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
 }
 
 .picker-label {

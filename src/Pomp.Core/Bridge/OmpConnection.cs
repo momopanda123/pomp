@@ -92,7 +92,7 @@ namespace Pomp.Bridge
             }
 
             var summary = string.Join(" | ", shown);
-            return summary.Length <= MaxDescribedStderrChars ? summary : "..." + summary.Substring(summary.Length - MaxDescribedStderrChars);
+            return summary.Length <= MaxDescribedStderrChars ? summary : summary.Substring(summary.Length - MaxDescribedStderrChars);
         }
 
         internal static bool MentionsMissingModel(IReadOnlyList<string> lines) =>

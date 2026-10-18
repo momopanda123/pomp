@@ -253,7 +253,7 @@ namespace Pomp.Hosting
             registry.Register(new KnowledgeReadTool(this));
             _dispatcher = new HostToolDispatcher(registry, _gate, (frame, token) => _bridge.SendFrameAsync(frame, token), _logger);
             _dispatcher.AdmissionCheck = (invocation, kind) => WorkspaceSwitchBlock() ?? ProjectExecutionPolicy.CheckTool(_workingDirectory, invocation.ToolName, invocation.Arguments) ?? ProjectExecutionPolicy.CheckHostPermission(_workingDirectory, kind) ?? _composerWorkflow?.CheckTool(invocation, kind);
-            _contextBuilder = new EditorContextBuilder(adapters, _logger, _options.AdapterTimeout);
+            _contextBuilder = new EditorContextBuilder(adapters, _logger, CurrentEditorContextLimits);
             _vsState = new VsStateWriter(adapters, _logger, _options.AdapterTimeout);
             _vsState.StateObserved = RefreshActiveRules;
 
@@ -491,6 +491,10 @@ namespace Pomp.Hosting
             PublishTrust(trust);
             if (trust.Required && !trust.Trusted)
                 throw new OmpBridgeException(PompLanguage.Pick("이 작업 영역의 설정을 신뢰하지 않았어요.", "This workspace's configuration is not trusted."), BridgeFailureReasons.WorkspaceTrustRequired);
+
+            // A .pomp copied from another project keeps only its settings; a moved project keeps its history (WorkspaceOrigin).
+            try { ReportWorkspaceOrigin(await WorkspaceOrigin.ReconcileAsync(root, _environment as IPompRecycleBin, _logger, cancellationToken).ConfigureAwait(false)); }
+            catch (Exception ex) when (!(ex is OperationCanceledException)) { _logger.Warn("Could not check where this workspace's POMP data came from: " + ex.Message); }
 
             // omp treats any --config overlay problem as a hard startup error: the file must exist (absolute path) before the spawn.
             var overlayPath = Path.Combine(dataDirectory, "omp", "pomp-overlay.yml");

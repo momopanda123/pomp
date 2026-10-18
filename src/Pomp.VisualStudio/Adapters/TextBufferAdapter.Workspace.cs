@@ -45,7 +45,7 @@ namespace Pomp.VisualStudio.Adapters
                     var buffer = DocumentTable.TryGetTextBuffer(context, entry.Path);
                     if (buffer == null)
                     {
-                        EditorAdapter.OpenDocumentOnUiThread(context, entry.Path, null);
+                        OpenEditTarget(entry.Path);
                         buffer = DocumentTable.TryGetTextBuffer(context, entry.Path);
                     }
                     if (buffer == null || !buffer.CheckEditAccess()) throw new InvalidOperationException("Source is not editable: " + entry.Path);
@@ -53,6 +53,7 @@ namespace Pomp.VisualStudio.Adapters
                     if (!string.Equals(buffer.CurrentSnapshot.GetText(), entry.File.Before, StringComparison.Ordinal))
                         throw new InvalidOperationException("Source changed since review: " + entry.Path);
                     entry.Buffer = buffer;
+                    entry.BeforeSnapshot = buffer.CurrentSnapshot;
                 }
                 // All targets are open and checked before the first change. Keep their undo transactions
                 // open until every Apply succeeds, so a normal failure can cancel the entire batch.
@@ -126,6 +127,9 @@ namespace Pomp.VisualStudio.Adapters
                     try { entry.Undo?.Dispose(); } catch (Exception ex) { context.LogUnexpected("Disposing workspace undo", ex); }
                 }
             }
+            if (error == null)
+                foreach (var entry in prepared)
+                    NotifyApplied(entry.Path, entry.Buffer!, entry.BeforeSnapshot!);
             return new WorkspaceApplyResult(outcomes, error);
         }
 
@@ -136,6 +140,7 @@ namespace Pomp.VisualStudio.Adapters
             public string Path { get; }
             public LineDiff Diff { get; }
             public ITextBuffer? Buffer;
+            public ITextSnapshot? BeforeSnapshot;
             public ITextEdit? Edit;
             public ITextUndoTransaction? Undo;
             public bool Completed;

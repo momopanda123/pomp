@@ -289,7 +289,7 @@ namespace Pomp.Tools
 
                 if (IsReservedDeviceName(segment))
                 {
-                    error = "The path contains the reserved Windows device name '" + segment + "' (CON, NUL, COM1, ...), which is not a file.";
+                    error = "The path contains the reserved Windows device name '" + segment + "' (CON, NUL, COM1 and the like), which is not a file.";
                     return false;
                 }
             }

@@ -36,7 +36,7 @@ namespace Pomp.Hosting
 
             string root;
             lock (_stateLock) root = _workingDirectory;
-            var shown = new List<(string Role, string Text, ChatEditorContext? EditorContext, ChatAdvisorNotesPayload? Notes)>();
+            var shown = new List<(string Role, string Text, ChatEditorContext? EditorContext, ConversationPartnerPayload? From, ChatAdvisorNotesPayload? Notes)>();
             foreach (var message in all.OfType<JObject>())
             {
                 var role = message.GetString("role");
@@ -44,7 +44,7 @@ namespace Pomp.Hosting
                 {
                     // The notes advisors gave, where they came in the conversation.
                     var notes = AdvisorNotesPayload(message);
-                    if (notes.Notes.Count > 0) shown.Add(("advisor", string.Empty, null, notes));
+                    if (notes.Notes.Count > 0) shown.Add(("advisor", string.Empty, null, null, notes));
                     continue;
                 }
 
@@ -55,6 +55,8 @@ namespace Pomp.Hosting
 
                 var text = MessageText(message["content"]);
                 var editorContext = role == "user" ? PromptDisplay.EditorContext(text, root) : null;
+                // The agent or team tab a message to another target was sent from, so the restored chat keeps it there.
+                var from = role == "user" ? PromptDisplay.Origin(text) : null;
                 if (role == "user")
                 {
                     text = PromptDisplay.UserText(text, keepRoutingBrief: true);
@@ -62,7 +64,7 @@ namespace Pomp.Hosting
 
                 if (text.Length > 0)
                 {
-                    shown.Add((role!, text.Length > RestoredTextLimit ? text.Substring(0, RestoredTextLimit) + "…" : text, editorContext, null));
+                    shown.Add((role!, text.Length > RestoredTextLimit ? text.Substring(0, RestoredTextLimit) : text, editorContext, from, null));
                 }
             }
 
@@ -79,7 +81,7 @@ namespace Pomp.Hosting
 
             string? openPrompt = null;
             var index = 0;
-            foreach (var (role, text, editorContext, notes) in shown.Skip(skipped))
+            foreach (var (role, text, editorContext, from, notes) in shown.Skip(skipped))
             {
                 index++;
                 if (notes != null)
@@ -97,7 +99,7 @@ namespace Pomp.Hosting
                     }
 
                     openPrompt = id;
-                    _ui.Post(UiMessageTypes.ChatTurnStarted, new ChatTurnStartedPayload { PromptId = id, Text = text, EditorContext = editorContext });
+                    _ui.Post(UiMessageTypes.ChatTurnStarted, new ChatTurnStartedPayload { PromptId = id, Text = text, EditorContext = editorContext, From = from });
                     continue;
                 }
 
@@ -126,9 +128,9 @@ namespace Pomp.Hosting
                 return ((string?)content ?? string.Empty).Trim();
             }
 
+            // Narration (thinking the model addressed to the user) restores as answer text, as it showed live.
             return string.Join("\n\n", (content as JArray ?? new JArray()).OfType<JObject>()
-                .Where(block => block.GetString("type") == "text")
-                .Select(block => (block.GetString("text") ?? string.Empty).Trim())
+                .Select(block => (block.AnswerText() ?? string.Empty).Trim())
                 .Where(text => text.Length > 0));
         }
     }

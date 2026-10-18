@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Pomp.Internal;
 
 namespace Pomp.Features
 {
@@ -15,7 +16,7 @@ namespace Pomp.Features
         {
             var content = message["content"] as JArray;
             var text = content == null ? (message["content"]?.Type == JTokenType.String ? (string?)message["content"] : String(message["text"])) ?? ""
-                : string.Join("\n", content.OfType<JObject>().Where(b => String(b["type"]) == "text" && b["text"]?.Type == JTokenType.String).Select(b => (string)b["text"]!));
+                : string.Join("\n", content.OfType<JObject>().Select(b => b.AnswerText()).Where(t => t != null));
             text = Clean(text);
             if (string.IsNullOrWhiteSpace(text) && String(message["role"]) == "assistant")
             {

@@ -384,7 +384,7 @@ namespace Pomp.Tools
         private static string Preview(JObject arguments, int maxChars)
         {
             var text = arguments.ToString(Formatting.None);
-            return text.Length <= maxChars ? text : text.Substring(0, maxChars) + "...";
+            return text.Length <= maxChars ? text : text.Substring(0, maxChars);
         }
 
         private void RaiseCompleted(HostToolCompletedEventArgs args)

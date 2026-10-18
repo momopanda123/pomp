@@ -493,6 +493,7 @@ namespace Pomp.Hosting
                 Agent = string.IsNullOrWhiteSpace(send.Agent) ? null : send.Agent!.Trim(),
                 AgentInstance = string.IsNullOrWhiteSpace(send.AgentInstance) ? null : send.AgentInstance!.Trim(),
                 Main = string.IsNullOrWhiteSpace(send.Team) && string.IsNullOrWhiteSpace(send.Agent) && string.IsNullOrWhiteSpace(send.AgentInstance) ? true : null,
+                From = send.From,
             });
 
             ChatTurnEndPayload? endedEarly;
@@ -531,6 +532,10 @@ namespace Pomp.Hosting
                 // engineText: the host's own commands (a goal run) say exactly what the engine gets; the bubble keeps what the user typed.
                 var message = engineText ?? await ComposeMessageAsync(editorContext?.Text, text, attachments, sending.Token).ConfigureAwait(false);
                 sending.Token.ThrowIfCancellationRequested();
+                // The tab a message came from when it went elsewhere is recorded in the prompt itself: the engine's transcript is all a
+                // restored chat has (PromptDisplay.Origin). A slash command for POMP stays first, because omp only parses it there.
+                var targeted = !string.IsNullOrWhiteSpace(send.Team) || !string.IsNullOrWhiteSpace(send.Agent) || !string.IsNullOrWhiteSpace(send.AgentInstance);
+                if (send.From != null && (targeted || !message.TrimStart().StartsWith("/", StringComparison.Ordinal))) message = PromptDisplay.OriginMarker(send.From) + "\n\n" + message;
                 // A message for a team or one agent goes through the extension's /pomp-team, /pomp-agent or /pomp-dm (docs/agent-teams.md §3).
                 message = await ApplyTargetAsync(send, message, sending.Token).ConfigureAwait(false);
                 sending.Token.ThrowIfCancellationRequested();

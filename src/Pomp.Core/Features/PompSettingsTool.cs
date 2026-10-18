@@ -65,6 +65,8 @@ namespace Pomp.Features
                         ["nextSendTarget"] = Key(chat.NextTarget),
                         ["contextBasket"] = Key(chat.ContextBasket) + " (arrow keys move between its files, Space checks one)",
                         ["includeEditorContext"] = Key(chat.EditorContext),
+                        ["liveFollow"] = Key(chat.LiveFollow) + " (host-only; no model call)",
+                        ["liveBookmarks"] = Key(chat.LiveBookmarks) + " (host-only; no model call)",
                         ["permissionModePicker"] = Key(chat.PermissionMode),
                         ["allowRequest"] = Key(chat.Allow),
                         ["denyRequest"] = Key(chat.Deny),
@@ -83,8 +85,10 @@ namespace Pomp.Features
                         ["openPomp"] = Key(editor.OpenPomp) + " (global)",
                         ["newConversation"] = Key(editor.NewConversation) + " (global)",
                         ["toggleEditorChatFocus"] = Key(editor.ToggleFocus) + " (global)",
+                        ["liveFollow"] = Key(editor.LiveFollow) + " (global; no model call)",
+                        ["liveBookmarks"] = Key(editor.LiveBookmarks) + " (global; no model call)",
                     },
-                    ["mouse"] = "The same commands are in the editor's right-click POMP menu and in Tools > POMP.",
+                    ["mouse"] = "The editor commands are in the editor's right-click POMP menu; Live and bookmarks are icons above the chat input; View > Other Windows > POMP opens the chat window.",
                 },
                 ["settings"] = new JObject
                 {
@@ -93,6 +97,7 @@ namespace Pomp.Features
                     ["model"] = settings.Model ?? "default (the model chip in the composer bar)",
                     ["thinkingLevel"] = settings.ThinkingLevel ?? "default (the level chip in the composer bar)",
                     ["includeEditorContextByDefault"] = settings.IncludeEditorContextByDefault,
+                    ["editorContext"] = EditorContext((settings as IEditorContextSettings)?.EditorContextLimits ?? EditorContextLimits.Default),
                     ["composerPredictions"] = settings.ComposerPredictions,
                     ["loadPompExtensions"] = settings.LoadOmpExtensions,
                     ["loadDiscoveredExtensions"] = settings.LoadDiscoveredOmpExtensions,
@@ -114,5 +119,18 @@ namespace Pomp.Features
         }
 
         private static string Key(string? chord) => string.IsNullOrEmpty(chord) ? "none" : chord!;
+
+        /// <summary>What the editor context of a message carries (Chat page of the options).</summary>
+        private static JObject EditorContext(EditorContextLimits limits) => new JObject
+        {
+            ["linesAroundCaret"] = limits.WindowLines,
+            ["largeFileLines"] = limits.LargeFileThreshold,
+            ["linesAroundCaretInLargeFile"] = limits.LargeFileWindowLines,
+            ["selectedTextMaxChars"] = limits.SelectedChars,
+            ["lineMaxChars"] = limits.LineChars,
+            ["codeMaxChars"] = limits.WindowChars,
+            ["maxErrors"] = limits.Errors,
+            ["visualStudioWaitSeconds"] = (int)limits.Timeout.TotalSeconds,
+        };
     }
 }

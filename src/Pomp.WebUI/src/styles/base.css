@@ -213,7 +213,8 @@ kbd {
 }
 
 .btn:disabled,
-.icon-btn:disabled {
+.icon-btn:disabled,
+.icon-btn[aria-disabled='true'] {
   opacity: 0.45;
   cursor: default;
 }
@@ -232,7 +233,7 @@ kbd {
   cursor: pointer;
 }
 
-.icon-btn:hover:not(:disabled) {
+.icon-btn:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--pomp-hover-bg);
   color: var(--pomp-fg);
 }
@@ -262,7 +263,7 @@ kbd {
 /* ---- Native controls ---------------------------------------------------------------------------------------------------
    Buttons, fields and selects without a class of their own (work pages, the context basket) get the look of .btn.subtle and
    .field instead of the browser's. :where() keeps these rules at zero specificity, so any component rule
-   (.shell-menu button, .session-rename input ...) still decides; buttons with a role (menu items, options, tabs) are left to
+   (.shell-menu button, .session-rename ...) still decides; buttons with a role (menu items, options, tabs) are left to
    their component. */
 
 :where(button:not([class]):not([role])) {
@@ -430,3 +431,8 @@ kbd {
 .knowledge-checklist > li { min-width: 0; margin: 0; }
 .knowledge-checklist label { display: flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; cursor: pointer; }
 .knowledge-checklist input { flex: none; margin: 0; }
+
+/* The page's tooltips (tooltips.ts): every title, shown by the page instead of WebView2. */
+.pomp-tooltip { position: fixed; z-index: 2000; max-width: min(320px, calc(100vw - 8px)); padding: 3px 7px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius-sm);
+  background: var(--pomp-panel-bg); color: var(--pomp-fg); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); font-size: 12px; line-height: 1.35; white-space: pre-line; overflow-wrap: anywhere; pointer-events: none; }
+.pomp-tooltip[hidden] { display: none; }

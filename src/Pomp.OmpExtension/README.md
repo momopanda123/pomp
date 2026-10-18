@@ -3,12 +3,13 @@
 The omp-side pieces of pomp (Visual Studio 2019/2022/2026 host). Plain TypeScript, zero dependencies, no build step:
 omp (Bun) loads the `.ts` files directly.
 
-**Compatibility:** tested with omp **18.10.4** (earlier with 18.10.3, 18.8.6 and 18.4.3) (`can1357/oh-my-pi`); requires omp **>= 18.3.2** (`ctx.agent`, used to keep the
+**Compatibility:** tested with omp **18.12.1** (earlier with 18.10.4, 18.10.3, 18.8.6 and 18.4.3) (`can1357/oh-my-pi`); requires omp **>= 18.3.2** (`ctx.agent`, used to keep the
 guidance out of subagents; `tool_call` `additionalContext`, used by `warn` mode, exists since 18.3.1). The API facts below
 were read from the upstream docs and source (`main`, tree `33f887a`, the 18.4.x line). Loading the package into a real
 omp 18.8.6 was verified by an out-of-repo test: all modules load, every `/pomp-*` command (including `/pomp-context`, `/pomp-guard`) is registered,
-`/pomp-context` completes and no `extension_error` frame appears. omp 18.10.4 (and 18.10.3 before it) was checked in Visual Studio: the commands are listed, a chat
-turn completes, the advisor and built-in role paths work and the host log shows no extension error. **Not yet verified live:** the dirty-file block, `warn`
+`/pomp-context` completes and no `extension_error` frame appears. omp 18.12.1 was checked in Visual Studio: the commands are listed, `/pomp-context`
+completes, chat turns with tool approvals and editor edits complete and the host log shows no extension error (18.10.4 and 18.10.3 before it also
+covered the advisor and built-in role paths). **Not yet verified live:** the dirty-file block, `warn`
 mode and skill discovery (see "Verification" and "Open questions").
 
 | Piece | File | What it does |
@@ -176,7 +177,7 @@ fail open.
 
 ## Verification
 
-* **Loaded into a real omp 18.10.4** in Visual Studio (18.10.3, 18.8.6 and 18.4.3 before it, the earlier ones by an out-of-repo test with no provider calls): both commands (`pomp-context`,
+* **Loaded into a real omp 18.12.1** in Visual Studio (18.10.4, 18.10.3, 18.8.6 and 18.4.3 before it, the earlier ones by an out-of-repo test with no provider calls): both commands (`pomp-context`,
   `pomp-guard`) are present, `/pomp-context` completes and no `extension_error` frame appears.
 * Type-checked with `tsc --strict` against the real `ExtensionAPI` / event types copied from the upstream tree above
   (a negative test confirmed the types bite), with `verbatimModuleSyntax` + `erasableSyntaxOnly` so the files are plain,
@@ -202,7 +203,7 @@ fail open.
 4. The hook trusts `ctx.cwd` as the base for relative paths (true for the main session; a `task` worktree-isolated subagent
    edits different files anyway).
 5. `edit` mode can differ per model (hashline by default, `replace` for some model families); all modes are parsed.
-6. omp builds newer than 18.10.4 may rename events or fields; the handlers only use `before_agent_start`, `tool_call`,
+6. omp builds newer than 18.12.1 may rename events or fields; the handlers only use `before_agent_start`, `tool_call`,
    `registerCommand`, `sessionManager.getBranch()` and `ctx.agent.kind`.
 
 

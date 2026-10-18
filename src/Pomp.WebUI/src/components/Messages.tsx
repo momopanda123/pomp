@@ -12,6 +12,7 @@ import type {
   UserItem,
 } from '../state';
 import { AttachmentSummary } from './AttachmentSummary';
+import { DestinationAvatar } from './AgentsTables';
 import { Icon } from './Icon';
 import { Markdown } from './Markdown';
 import { plainControls, revealControls } from './RevealControls';
@@ -32,21 +33,27 @@ function selectionIn(root: HTMLElement): string | undefined {
   return text;
 }
 
+/** Who the user's message went to: the destination's picture and name only (the agent of a running member; POMP for the main conversation). */
 function TargetBadge({ target }: { target: SendTarget }) {
   const teamTitle = useTeamTitle(target.id);
   const background = useWorkState('background');
-  const roleTitle = useRoleTitle(target.kind === 'instance' ? background?.jobs.find(job => job.id === target.id)?.agent || target.id : target.id);
-  const title = target.kind === 'team' ? teamTitle : roleTitle;
-  return <div className="message-target-badge" data-testid="message-target-badge">→ {revealControls(title)}{target.kind === 'instance' ? ` #${target.id.slice(-8)}` : ''}</div>;
+  const agent = target.kind === 'instance' ? background?.jobs.find(job => job.id === target.id)?.agent || target.id : target.id;
+  const roleTitle = useRoleTitle(agent);
+  const title = (target.kind === 'main' ? 'POMP' : target.kind === 'team' ? teamTitle : roleTitle) + (target.kind === 'instance' ? ` #${target.id.slice(-8)}` : '');
+  const kind = target.kind === 'main' ? 'main' : target.kind === 'team' ? 'team' : 'agent';
+  return <div className="message-target-badge" data-testid="message-target-badge">
+    <DestinationAvatar kind={kind} id={kind === 'main' ? undefined : agent} size={14} />
+    <span className="message-target-name">{revealControls(title)}</span>
+  </div>;
 }
 
 function TeamBriefCard({ teamId, kind = 'team', content }: { teamId: string; kind?: 'team' | 'agent' | 'dm'; content: string }) {
-  const t = useT();
   const [open, setOpen] = useState(false);
   const teamTitle = useTeamTitle(teamId);
   const background = useWorkState('background');
-  const roleTitle = useRoleTitle(kind === 'dm' ? background?.jobs.find(job => job.id === teamId)?.agent || teamId : teamId);
-  const title = kind === 'team' ? t('msg.teamCard', { title: teamTitle }) : `→ ${roleTitle}`;
+  const agent = kind === 'dm' ? background?.jobs.find(job => job.id === teamId)?.agent || teamId : teamId;
+  const roleTitle = useRoleTitle(agent);
+  const title = kind === 'team' ? teamTitle : roleTitle;
 
   return (
     <div className="team-brief-card" data-testid={`${kind}-brief-card`}>
@@ -58,7 +65,7 @@ function TeamBriefCard({ teamId, kind = 'team', content }: { teamId: string; kin
         onClick={() => setOpen((v) => !v)}
       >
         <Icon name="chevron" size={12} className={open ? 'chevron open' : 'chevron'} />
-        <Icon name="users" size={12} />
+        <DestinationAvatar kind={kind === 'team' ? 'team' : 'agent'} id={agent} size={14} />
         <strong>{revealControls(title)}</strong>
       </button>
       {open && (
@@ -166,8 +173,9 @@ export const UserMessage = memo(function UserMessage({ item }: { item: UserItem 
 
   return (
     <div className={state ? `msg user ${state}` : 'msg user'} ref={bubbleRef} tabIndex={-1} {...bubbleHandlers}>
-      {/* No badge = POMP itself answered. */}
-      {item.target && item.target.kind !== 'main' && <TargetBadge target={item.target} />}
+      {/* No badge = POMP itself answered in its own tab. A message sent to POMP from an agent or team tab names POMP, else it would read as
+          a message to that tab's agent. */}
+      {item.target && (item.target.kind !== 'main' || item.partnerKey) && <TargetBadge target={item.target} />}
       <UserTextBody text={item.text} />
       {item.attachments && item.attachments.length > 0 && <AttachmentSummary files={item.attachments} testId="user-attachments" />}
       <EditorContextChip context={item.editorContext} />

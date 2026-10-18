@@ -21,16 +21,17 @@ namespace Pomp.VisualStudio
     /// <summary>Command IDs; must match the IDSymbols of <c>guidPompCmdSet</c> in Pomp.vsct.</summary>
     internal static class PompCommandIds
     {
+        // View > Other Windows > POMP.
         public const int ShowChatView = 0x0100;
 
-        public const int ShowChatTools = 0x0101;
+        // The code editor's POMP menu: chat (open, new conversation, focus), Ask POMP beside it, code actions and toggles.
+        public const int OpenPomp = 0x0101;
 
         public const int NewSession = 0x0102;
 
         public const int ToggleFocus = 0x0103;
         public const int InlineEdit = 0x0104;
 
-        // The code editor's POMP menu (also in Tools > POMP for the toggles).
         public const int ExplainCode = 0x0105;
         public const int ReviewCode = 0x0106;
         public const int AddFileToContext = 0x0108;
@@ -40,6 +41,11 @@ namespace Pomp.VisualStudio
         public const int WriteTests = 0x010C;
         // The editor menu's "add to knowledge": the selected lines go to the chat window's knowledge form.
         public const int KnowledgeTag = 0x010E;
+        public const int ToggleLiveFollow = 0x0110;
+        public const int ToggleLiveBookmarks = 0x0111;
+        public const int ToggleLiveChanges = 0x0112;
+        public const int CleanupPompBookmarks = 0x0113;
+        public const int ClearLiveChanges = 0x0114;
 
         // The editor menu's "to agent or team" submenu and its dynamic items (DynamicItemStart: one id per entry, every id from this start on, so it stays above all other ids).
         public const int SendToTargetMenu = 0x1102;

@@ -8,11 +8,11 @@
     artifacts\engines\omp\<version>\ (git-ignored) when they are not there yet and fails when a hash does not match.
   -->
   <PropertyGroup>
-    <PompOmpVersion>18.10.4</PompOmpVersion>
-    <PompOmpReleaseUrl>https://github.com/can1357/oh-my-pi/releases/download/v18.10.4/</PompOmpReleaseUrl>
+    <PompOmpVersion>18.12.1</PompOmpVersion>
+    <PompOmpReleaseUrl>https://github.com/can1357/oh-my-pi/releases/download/v18.12.1/</PompOmpReleaseUrl>
     <PompOmpAsset>omp-windows-x64.exe</PompOmpAsset>
-    <PompOmpSha256>391744ed751f56742c85d8fbf2eb7dcb800b83a0eaf6a650e6cae70d29776d44</PompOmpSha256>
-    <PompOmpSize>244276224</PompOmpSize>
+    <PompOmpSha256>1ba0274b48e6d6d095727faf36ec55114f5a6ac05bde5b8714d1565b2b7477bb</PompOmpSha256>
+    <PompOmpSize>222742016</PompOmpSize>
     <PompOmpNoticesSha256>768612d40a4d1788813b997b011290d0f08c426add452de6560bf227cd1fc29d</PompOmpNoticesSha256>
   </PropertyGroup>
 </Project>

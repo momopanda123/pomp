@@ -97,7 +97,7 @@ namespace Pomp.Features
         private static string Describe(byte[] stderr)
         {
             var text = SetupSanitize.Line(new UTF8Encoding(false).GetString(stderr), 300);
-            return text == null ? "(no stderr)" : UrlQuery.Replace(text, "$1?...");
+            return text == null ? "(no stderr)" : UrlQuery.Replace(text, "$1?[query removed]");
         }
 
         /// <summary>Reads to the end of the stream keeping at most <paramref name="max"/> bytes; <paramref name="onOverflow"/> (when given) stops the read instead of discarding. Shared with <see cref="OmpLogoutRunner"/>.</summary>

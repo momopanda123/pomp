@@ -203,7 +203,7 @@ namespace Pomp.Hosting
                     foreach (var message in (page.Data?["messages"] as JArray ?? new JArray()).OfType<JObject>())
                     {
                         var role = message.GetString("role"); if (role != "user" && role != "assistant") continue;
-                        var content = message["content"]; var text = content?.Type == JTokenType.String ? (string?)content : string.Join("\n", (content as JArray ?? new JArray()).OfType<JObject>().Where(p => p.GetString("type") == "text").Select(p => p.GetString("text") ?? ""));
+                        var content = message["content"]; var text = content?.Type == JTokenType.String ? (string?)content : string.Join("\n", (content as JArray ?? new JArray()).OfType<JObject>().Select(p => p.AnswerText()).Where(t => t != null));
                         if (role == "user") text = PromptDisplay.UserText(text);
                         var length = Math.Min(remaining, Math.Min(text?.Length ?? 0, 12000));
                         texts.Add(new JObject { ["role"] = role, ["text"] = (text ?? "").Substring(0,length), ["truncated"] = length < (text?.Length ?? 0) }); remaining -= length;

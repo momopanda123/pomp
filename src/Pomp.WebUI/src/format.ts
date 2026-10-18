@@ -7,7 +7,7 @@ export function newId(): string {
 const collapseWhitespace = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
 export function clip(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  return text.length > max ? text.slice(0, max) : text;
 }
 
 export function formatDuration(ms: number): string {
@@ -26,7 +26,7 @@ const PRIMARY_KEYS = ['command', 'cmd', 'path', 'file_path', 'filePath', 'file',
 function briefValue(value: unknown): string {
   if (typeof value === 'string') return collapseWhitespace(value);
   if (Array.isArray(value)) return `[${value.length}]`;
-  if (value !== null && typeof value === 'object') return '{…}';
+  if (value !== null && typeof value === 'object') return '{}';
   return String(value);
 }
 

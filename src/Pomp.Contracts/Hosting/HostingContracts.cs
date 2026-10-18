@@ -73,6 +73,67 @@ namespace Pomp.Hosting
         UiShortcutsPayload Shortcuts { get; }
     }
 
+    /// <summary>Settings that size the editor context a message carries (Tools > Options > Pomp > Chat); a host without them gets <see cref="EditorContextLimits.Default"/>.</summary>
+    public interface IEditorContextSettings
+    {
+        EditorContextLimits EditorContextLimits { get; }
+    }
+
+    /// <summary>
+    /// How much of the editor the <c>&lt;vs_context&gt;</c> block carries. Immutable; every value is clamped to its range here, so any source
+    /// (the options page, a hand-edited registry value) gives a usable block.
+    /// </summary>
+    public sealed class EditorContextLimits
+    {
+        public const int MinLines = 0, MaxLines = 1000;
+        public const int MinLargeFileThreshold = 100, MaxLargeFileThreshold = 10000000;
+        public const int MinSelectedChars = 0, MaxSelectedChars = 20000; // the editor adapter reads at most 20000 selected characters
+        public const int MinLineChars = 20, MaxLineChars = 10000;
+        public const int MinWindowChars = 0, MaxWindowChars = 100000;
+        public const int MinErrors = 0, MaxErrors = 100;
+        public const int MinTimeoutSeconds = 1, MaxTimeoutSeconds = 10;
+
+        public static readonly EditorContextLimits Default = new EditorContextLimits();
+
+        public EditorContextLimits(int windowLines = 30, int largeFileWindowLines = 100, int largeFileThreshold = 10000, int selectedChars = 2000,
+            int lineChars = 300, int windowChars = 8000, int errors = 10, int timeoutSeconds = 2)
+        {
+            WindowLines = Clamp(windowLines, MinLines, MaxLines);
+            LargeFileWindowLines = Clamp(largeFileWindowLines, MinLines, MaxLines);
+            LargeFileThreshold = Clamp(largeFileThreshold, MinLargeFileThreshold, MaxLargeFileThreshold);
+            SelectedChars = Clamp(selectedChars, MinSelectedChars, MaxSelectedChars);
+            LineChars = Clamp(lineChars, MinLineChars, MaxLineChars);
+            WindowChars = Clamp(windowChars, MinWindowChars, MaxWindowChars);
+            Errors = Clamp(errors, MinErrors, MaxErrors);
+            Timeout = TimeSpan.FromSeconds(Clamp(timeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds));
+        }
+
+        /// <summary>Lines shown on each side of the caret.</summary>
+        public int WindowLines { get; }
+
+        /// <summary>Lines on each side of the caret in a file of at least <see cref="LargeFileThreshold"/> lines.</summary>
+        public int LargeFileWindowLines { get; }
+
+        public int LargeFileThreshold { get; }
+
+        /// <summary>Characters of the selected text (0 = the selected text is left out; its range is still named).</summary>
+        public int SelectedChars { get; }
+
+        /// <summary>Characters of one line around the caret; a longer line is cut.</summary>
+        public int LineChars { get; }
+
+        /// <summary>Characters of all the lines around the caret together (0 = no lines).</summary>
+        public int WindowChars { get; }
+
+        /// <summary>Error List errors (0 = none).</summary>
+        public int Errors { get; }
+
+        /// <summary>How long each Visual Studio query of the block may take before it is left out.</summary>
+        public TimeSpan Timeout { get; }
+
+        private static int Clamp(int value, int min, int max) => value < min ? min : value > max ? max : value;
+    }
+
     /// <summary>
     /// Settings that carry the keyboard shortcuts of POMP's Visual Studio commands (Tools > Options > Pomp > Shortcuts); the VSIX applies
     /// them to the IDE's key bindings, so the options page is the one place the keys live.

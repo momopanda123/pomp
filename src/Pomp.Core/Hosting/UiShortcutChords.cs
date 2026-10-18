@@ -109,7 +109,7 @@ namespace Pomp.Hosting
         /// or "Ctrl+Enter".
         /// </summary>
         public static UiShortcutsPayload NormalizePayload(string? send, string? sendTargetPicker, string? permissionMode, string? allow, string? deny, string? permissionsView, string? toggleFocus = null,
-            string? previousTarget = null, string? nextTarget = null, string? contextBasket = null, string? editorContext = null)
+            string? previousTarget = null, string? nextTarget = null, string? contextBasket = null, string? editorContext = null, string? liveFollow = null, string? liveBookmarks = null)
         {
             var defaults = new UiShortcutsPayload();
             return new UiShortcutsPayload
@@ -120,6 +120,8 @@ namespace Pomp.Hosting
                 NextTarget = nextTarget == null ? defaults.NextTarget : Chord(nextTarget, defaults.NextTarget),
                 ContextBasket = contextBasket == null ? defaults.ContextBasket : Chord(contextBasket, defaults.ContextBasket),
                 EditorContext = editorContext == null ? defaults.EditorContext : Chord(editorContext, defaults.EditorContext),
+                LiveFollow = liveFollow == null ? defaults.LiveFollow : Chord(liveFollow, defaults.LiveFollow),
+                LiveBookmarks = liveBookmarks == null ? defaults.LiveBookmarks : Chord(liveBookmarks, defaults.LiveBookmarks),
                 PermissionMode = Chord(permissionMode, defaults.PermissionMode),
                 Allow = Chord(allow, defaults.Allow),
                 Deny = Chord(deny, defaults.Deny),
@@ -133,7 +135,7 @@ namespace Pomp.Hosting
         /// (<see cref="IsPageChord"/>), empty when the value is blank (no key) and the default otherwise.
         /// </summary>
         public static EditorShortcutsPayload NormalizeEditorPayload(string? openPomp, string? newConversation, string? explainCode, string? reviewCode, string? fixCode,
-            string? writeTests, string? addFileToContext, string? inlineEdit, string? toggleFocus, string? knowledgeTag)
+            string? writeTests, string? addFileToContext, string? inlineEdit, string? toggleFocus, string? knowledgeTag, string? liveFollow = null, string? liveBookmarks = null)
         {
             var defaults = new EditorShortcutsPayload();
             return new EditorShortcutsPayload
@@ -148,6 +150,8 @@ namespace Pomp.Hosting
                 InlineEdit = Chord(inlineEdit, defaults.InlineEdit),
                 ToggleFocus = Chord(toggleFocus, defaults.ToggleFocus),
                 KnowledgeTag = Chord(knowledgeTag, defaults.KnowledgeTag, editor: true),
+                LiveFollow = liveFollow == null ? defaults.LiveFollow : Chord(liveFollow, defaults.LiveFollow),
+                LiveBookmarks = liveBookmarks == null ? defaults.LiveBookmarks : Chord(liveBookmarks, defaults.LiveBookmarks),
             };
         }
 

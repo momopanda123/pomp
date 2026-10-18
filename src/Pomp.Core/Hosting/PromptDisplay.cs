@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Pomp.Adapters;
+using Pomp.Features;
 using Pomp.Ui;
 
 namespace Pomp.Hosting
@@ -21,6 +22,31 @@ namespace Pomp.Hosting
 
         /// <summary>The extension's routing brief of a message for a team or one agent (docs/agent-teams.md §3, §3.1).</summary>
         private static readonly Regex RoutingBrief = new Regex(@"^<!-- pomp-(team|agent|dm):[A-Za-z0-9._:-]{1,128} -->[\s\S]*?<!-- /pomp-\1 -->", RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// Before the composed text (after the routing brief) of a message sent from an agent or team tab to another target
+        /// (PompSession.Ui.cs): the only record of that tab the engine keeps, so a restored chat can leave the message in the tab it came from.
+        /// </summary>
+        private static readonly Regex OriginPattern = new Regex(@"^<!-- pomp-from:(agent|team):([a-z0-9-]{2,40}) -->", RegexOptions.CultureInvariant);
+
+        internal static string OriginMarker(ConversationPartnerPayload from) => "<!-- pomp-from:" + from.Kind + ":" + from.Id + " -->";
+
+        /// <summary>The agent or team tab a recorded prompt was sent from (its origin marker), or null.</summary>
+        public static ConversationPartnerPayload? Origin(string? prompt)
+        {
+            if (string.IsNullOrEmpty(prompt)) return null;
+            var text = prompt!.TrimStart();
+            var brief = RoutingBrief.Match(text);
+            if (brief.Success) text = text.Substring(brief.Length).TrimStart();
+            var origin = OriginPattern.Match(text);
+            return origin.Success && AgentRoster.IsValidName(origin.Groups[2].Value) ? new ConversationPartnerPayload { Kind = origin.Groups[1].Value, Id = origin.Groups[2].Value } : null;
+        }
+
+        private static string WithoutOrigin(string text)
+        {
+            var origin = OriginPattern.Match(text);
+            return origin.Success ? text.Substring(origin.Length).TrimStart() : text;
+        }
 
         /// <summary>The user's saved team notes the host appends to a message for that team (PompSession.Knowledge.cs).</summary>
         internal const string TeamKnowledgeOpen = "<team_knowledge>";
@@ -51,6 +77,7 @@ namespace Pomp.Hosting
             var text = prompt!.TrimStart();
             var brief = RoutingBrief.Match(text);
             if (brief.Success) text = text.Substring(brief.Length).TrimStart();
+            text = WithoutOrigin(text);
             if (!text.StartsWith(ContextOpen, StringComparison.Ordinal)) return null;
             var end = text.IndexOf(ContextClose, StringComparison.Ordinal);
             if (end < 0) return null;
@@ -98,6 +125,7 @@ namespace Pomp.Hosting
 
         private static string WithoutPompAdditions(string text)
         {
+            text = WithoutOrigin(text);
             if (text.StartsWith(ContextOpen, StringComparison.Ordinal))
             {
                 // The block's content is neutralized when built, so the first closing tag is the real end of the block.

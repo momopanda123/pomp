@@ -7,7 +7,8 @@ namespace Pomp.Hosting
 {
     /// <summary>
     /// Recognizes omp's tool-approval prompt (an extension UI <c>select</c> titled <c>Allow tool: &lt;name&gt;</c> with the options
-    /// <c>Approve</c>/<c>Deny</c>) and maps it onto a <see cref="PermissionRequest"/>.
+    /// <c>Approve</c>/<c>Deny</c>, optionally with omp's <c>Approve &lt;subject&gt; for this session</c> between them) and maps it onto a
+    /// <see cref="PermissionRequest"/>. The host answers only <c>Approve</c> or <c>Deny</c>, so every call still passes its gate.
     /// </summary>
     internal static class OmpApprovalMapper
     {
@@ -24,14 +25,21 @@ namespace Pomp.Hosting
         /// <summary>True when the request has exactly the shape of omp's approval prompt.</summary>
         public static bool IsApprovalPrompt(ExtensionUiRequestFrame request)
         {
+            var options = request.Options;
             return request.Method == OmpUiMethods.Select
                 && request.Title != null
                 && request.Title.StartsWith(OmpApprovalPrompt.TitlePrefix, StringComparison.Ordinal)
-                && request.Options != null
-                && request.Options.Count == 2
-                && request.Options[0] == OmpApprovalPrompt.Approve
-                && request.Options[1] == OmpApprovalPrompt.Deny;
+                && options != null
+                && (options.Count == 2 || (options.Count == 3 && IsSessionOption(options[1])))
+                && options[0] == OmpApprovalPrompt.Approve
+                && options[options.Count - 1] == OmpApprovalPrompt.Deny;
         }
+
+        private static bool IsSessionOption(string? option) =>
+            option != null
+            && option.Length > OmpApprovalPrompt.SessionOptionPrefix.Length + OmpApprovalPrompt.SessionOptionSuffix.Length
+            && option.StartsWith(OmpApprovalPrompt.SessionOptionPrefix, StringComparison.Ordinal)
+            && option.EndsWith(OmpApprovalPrompt.SessionOptionSuffix, StringComparison.Ordinal);
 
         /// <summary>Maps an approval prompt; null when <paramref name="request"/> is not one.</summary>
         public static PermissionRequest? TryMap(ExtensionUiRequestFrame request)

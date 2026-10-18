@@ -15,6 +15,7 @@ import type {
   CommandsState,
   DialogRequestPayload,
   EngineInfo,
+  EditorFollowState,
   HostHelloPayload,
   HostMessage,
   KnowledgeDraft,
@@ -46,7 +47,7 @@ export interface UserItem {
   promptId?: string;
   /** Set when the host ended this message's turn without it becoming the running turn (e.g. rejected as busy). */
   failed?: UiErrorInfo;
-  /** The partner tab (`agent:name`/`team:id`) it was sent from: keeps it in that tab before the host names its destination. View only. */
+  /** The partner tab (`agent:name`/`team:id`) it was sent from: keeps it in that tab, also when it went elsewhere (restored from `chat/turnStarted.from`). View only. */
   partnerKey?: string;
 }
 
@@ -222,6 +223,7 @@ export interface AppState {
   computerReply: ComputerReplyPayload | null;
   /** Latest permission/modeResult (the composer's permission-mode chip). */
   permissionModeReply: PermissionModeResult | null;
+  editorFollow: EditorFollowState | null;
   /** Latest workspace/basketTokens (what the next message adds: editor context, attachment list; an estimate). */
   basketTokens: BasketTokens | null;
   activeRules: ActiveRule[];
@@ -267,6 +269,7 @@ export const initialState: AppState = {
   computer: null,
   computerReply: null,
   permissionModeReply: null,
+  editorFollow: null,
   basketTokens: null,
   activeRules: [],
   selectedTarget: undefined,
@@ -494,6 +497,8 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
       return { ...state, workRequest: { view: msg.payload.view, seq: (state.workRequest?.seq ?? 0) + 1 } };
     case 'session/fastResult':
       return state; // The fast-mode toggle waits for its own answer; session/info carries the state.
+    case 'host/editorFollow':
+      return { ...state, editorFollow: msg.payload };
     case 'host/hello': {
       const hello = msg.payload;
       return {
@@ -576,8 +581,11 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
     }
 
     case 'chat/turnStarted': {
-      const { clientMessageId, promptId, text, attachments, editorContext, team, agent, agentInstance, main } = msg.payload;
-      const target: SendTarget | undefined = team ? { kind: 'team', id: team } : agent ? { kind: 'agent', id: agent } : agentInstance ? { kind: 'instance', id: agentInstance } : main ? { kind: 'main', id: '' } : undefined;
+      const { clientMessageId, promptId, text, attachments, editorContext, team, agent, agentInstance, main, from } = msg.payload;
+      // `from` is only sent with another target than the tab's partner; a restored one with no agent/team/instance went to POMP itself.
+      const target: SendTarget | undefined = team ? { kind: 'team', id: team } : agent ? { kind: 'agent', id: agent } : agentInstance ? { kind: 'instance', id: agentInstance } : main || from ? { kind: 'main', id: '' } : undefined;
+      // A replayed or restored message keeps the agent/team tab it was sent from, like the optimistic bubble did.
+      const partnerKey = (from?.kind === 'agent' || from?.kind === 'team') && typeof from.id === 'string' && from.id ? `${from.kind}:${from.id}` : undefined;
       if (!promptId) return state;
       let next = state;
       const index = findLastIndex(state.items, (it) => it.kind === 'user' && (clientMessageId ? it.clientMessageId === clientMessageId : it.promptId === promptId));
@@ -590,7 +598,7 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
         if (pending) next = { ...next, items: [...next.items, { ...pending, editorContext, promptId, failed: undefined }] };
         else if (typeof text === 'string' || attachments?.length) {
           next = withItem(next, (key) => ({
-            kind: 'user', key, clientMessageId: clientMessageId ?? promptId, promptId, text: text ?? '', target, editorContext,
+            kind: 'user', key, clientMessageId: clientMessageId ?? promptId, promptId, text: text ?? '', target, editorContext, ...(partnerKey ? { partnerKey } : {}),
             attachments: attachments?.filter((entry) => typeof entry?.path === 'string').map((entry) => fileFromAttachment(entry.path)),
           }));
         }
@@ -631,6 +639,28 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
         ? { ...item, thinking: item.thinking + piece, ...(cut ? { thinkingTruncated: true } : {}) }
         : { ...item, text: item.text + piece, ...(cut ? { textTruncated: true } : {}) };
       return { ...current, items: replaceAt(current.items, index, next) };
+    }
+
+    case 'chat/assistantNarration': {
+      // The thinking block that just ended was prose addressed to the user: move it from the thinking to the answer text. Only a
+      // thinking that ends with exactly that text is changed (a capped thinking keeps what it has).
+      const { messageId, text } = msg.payload;
+      if (!messageId || typeof text !== 'string' || !text) return state;
+      const index = findOpenAssistant(state.items, messageId);
+      if (index < 0) return state;
+      const item = state.items[index] as AssistantItem;
+      if (item.textTruncated || !item.thinking.endsWith(text)) return state;
+      const thinking = item.thinking.slice(0, item.thinking.length - text.length).trimEnd();
+      const answer = text.trim();
+      if (!answer) return { ...state, items: replaceAt(state.items, index, { ...item, thinking }) };
+      const room = Math.max(0, MAX_ASSISTANT_CHARS - item.text.length);
+      const joined = item.text ? `\n\n${answer}` : answer;
+      const cut = joined.length > room;
+      let piece = cut ? joined.slice(0, room) : joined;
+      // A cut must not leave half of a surrogate pair at the end.
+      if (cut && piece.length > 0) { const last = piece.charCodeAt(piece.length - 1); if (last >= 0xd800 && last <= 0xdbff) piece = piece.slice(0, -1); }
+      const next: AssistantItem = { ...item, thinking, text: item.text + piece, ...(cut ? { textTruncated: true } : {}) };
+      return { ...state, items: replaceAt(state.items, index, next) };
     }
 
     case 'chat/assistantEnd': {

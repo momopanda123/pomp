@@ -42,6 +42,16 @@ namespace Pomp.VisualStudio.Editor
             return controller.OpenPrompt(main);
         }
 
+        /// <summary>The editor the POMP prompt would open in (the last focused one), or null.</summary>
+        public static IWpfTextView? LastFocusedView
+        {
+            get
+            {
+                ThreadHelper.ThrowIfNotOnUIThread();
+                return lastFocused != null && lastFocused.TryGetTarget(out var controller) ? controller.View : null;
+            }
+        }
+
         /// <summary>An editor command of this view (from InlineCompletionKeys): true when the inline completion took it.</summary>
         internal static bool HandleEditorCommand(ITextView view, VSConstants.VSStd2KCmdID command)
         {
@@ -116,6 +126,7 @@ namespace Pomp.VisualStudio.Editor
             private void OnCaret(object sender, CaretPositionChangedEventArgs e) { if (!applying) { Clear(); CancelPending(); } }
             private void OnLayout(object sender, TextViewLayoutChangedEventArgs e) { if (!applying && suggestionSnapshot != null && (suggestionSnapshot != view.TextSnapshot || e.VerticalTranslation || e.HorizontalTranslation)) Clear(); }
             private void OnGotFocus(object sender, EventArgs e) => lastFocused = new WeakReference<ViewController>(this);
+            internal IWpfTextView View => view;
             internal bool OpenPrompt(PromptAction main) { ThreadHelper.ThrowIfNotOnUIThread(); if (closed) return false; return ShowPrompt(main); }
             private void OnLostFocus(object sender, EventArgs e) { Clear(); debounce.Stop(); CancelPending(); }
             private void Schedule()

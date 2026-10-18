@@ -80,7 +80,7 @@ namespace Pomp.Features
                 {
                     if(agentBusy()||terminal.HasUnfinishedWork||ui.PendingRequestCount>0){lock(gate)skipped++;return;}
                     hadCandidates=true; token.ThrowIfCancellationRequested();lock(gate){if(!enabled||session!=expectedSession||attempts>=20)return;attempts++;}
-                    var row=new JObject{["name"]=hook.Name,["event"]=value.Name,["path"]=value.Path.Length>1024?value.Path.Substring(0,1024)+"…":value.Path,["status"]="awaiting approval",["createdUtc"]=DateTimeOffset.UtcNow.ToString("O")};
+                    var row=new JObject{["name"]=hook.Name,["event"]=value.Name,["path"]=value.Path.Length>1024?value.Path.Substring(0,1024):value.Path,["status"]="awaiting approval",["createdUtc"]=DateTimeOffset.UtcNow.ToString("O")};
                     lock(gate){history.Insert(0,row);TrimHistory();}Publish();
                     try
                     {

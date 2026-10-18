@@ -22,11 +22,9 @@
 .session-name { flex: 1; min-width: 0; padding: 2px 4px; border: 0; background: transparent; color: var(--pomp-fg); font-size: .94em; font-weight: 600; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .session-name:disabled { cursor: default; }
 .session-quick-menu { top: 100%; left: 6px; right: 6px; max-height: 50vh; overflow-y: auto; }
-.session-header-error { width: 100%; color: var(--pomp-error); font-size: .88em; overflow-wrap: anywhere; }
-.session-rename { display: flex; flex: 1; gap: 2px; min-width: 0; }
-.session-rename input, .session-search { min-width: 0; min-height: var(--pomp-control-height); padding: 2px 7px; border: 1px solid var(--pomp-input-border); border-radius: var(--pomp-radius); background: var(--pomp-input-bg); color: var(--pomp-input-fg); }
-.session-rename input { flex: 1; width: 0; }
-.session-rename input:focus, .session-search:focus { outline: none; border-color: var(--pomp-focus-border); }
+.session-rename, .session-search { min-width: 0; min-height: var(--pomp-control-height); padding: 2px 7px; border: 1px solid var(--pomp-input-border); border-radius: var(--pomp-radius); background: var(--pomp-input-bg); color: var(--pomp-input-fg); }
+.session-rename { flex: 1; width: 0; }
+.session-rename:focus, .session-search:focus { outline: none; border-color: var(--pomp-focus-border); }
 .activity-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px 8px; }
 .activity-chip, .work-chip { display: inline-flex; gap: 4px; align-items: center; min-width: 0; min-height: var(--pomp-bar-height); padding: 1px 7px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: transparent; color: var(--pomp-muted-fg); font-size: .88em; cursor: pointer; }
 .activity-chip:hover, .work-chip:hover, .work-chip[aria-selected='true'] { background: var(--pomp-hover-bg); color: var(--pomp-fg); }
@@ -50,15 +48,16 @@
 .setup-page { display: flex; flex: 1; min-height: 0; }
 .setup-page .setup-panel { height: 100%; max-width: none; border: 0; border-radius: 0; background: var(--pomp-bg); box-shadow: none; }
 .composer { position: relative; min-width: 0; }
-.composer-bar { gap: 4px; flex-wrap: nowrap; }
+/* The chips are 2px apart, like the tool buttons above the input. */
+.composer-bar { gap: 2px; flex-wrap: nowrap; }
 .context-count { height: var(--pomp-bar-height); padding: 1px 4px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: transparent; color: var(--pomp-muted-fg); font-size: .82em; white-space: nowrap; cursor: pointer; }
 .composer-bar > .btn { flex: none; width: var(--pomp-bar-height); height: var(--pomp-bar-height); min-height: var(--pomp-bar-height); padding: 2px; font-size: 0; gap: 0; }
 .composer-bar > .btn .icon { width: 13px; height: 13px; }
-.composer-bar .pickers-composer { flex: 1; min-width: 0; margin: 0; position: static; }
-.composer-bar .picker-row { flex-wrap: nowrap; gap: 3px; }
-.composer-bar .picker-model { flex: 1; min-width: 36px; }
-.composer-bar .picker-thinking { flex: 0 1 auto; min-width: 34px; max-width: 67px; }
-.composer-bar .chip { width: 100%; min-height: var(--pomp-bar-height); padding: 1px 4px; gap: 2px; font-size: .85em; }
+.composer-bar .pickers-composer { min-width: 0; margin: 0; position: static; }
+.composer-bar .picker-row { flex-wrap: nowrap; gap: 2px; }
+.composer-bar .picker-model { flex: 1 1 auto; min-width: 36px; }
+.composer-bar .picker-thinking { flex: 1 0 auto; }
+.composer-bar .chip { width: 100%; min-height: var(--pomp-bar-height); padding: 1px 4px; gap: 2px; font-size: .85em; justify-content: center; }
 .composer-bar .chip-caret { display: none; }
 .composer-bar .picker-pop.up { left: 8px; right: 8px; bottom: calc(100% - 4px); }
 .basket-anchor { display: flex; }
@@ -66,7 +65,28 @@
 .context-row > .context-meter { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
 .context-row .meter-value { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .context-tools { display: flex; flex: none; align-items: center; gap: 2px; }
-.context-tools .icon-btn { width: 20px; height: 20px; }
+/* Mention, slash, attach, bookmark, Live and editor-context are one size: the same square, 14 px icons, never shrunk by the row. */
+.context-tools .icon-btn { flex: none; width: 20px; height: 20px; }
+/* Live · bookmark toggles sit after the basket, before the editor-context toggle, and share its pressed style. */
+.live-editor-controls { position: relative; display: flex; flex: none; align-items: center; gap: 2px; }
+.live-editor-toggle:hover:not(:disabled) { background: var(--pomp-hover-bg); }
+.live-editor-controls button:disabled { opacity: .45; }
+/* Controls the user hid from the composer's background menu (right-click; data-hide on .composer). Only the visible control goes:
+   shortcuts, slash commands and the popups anchored next to it keep working. */
+.composer[data-hide~='mention'] [data-testid='mention'],
+.composer[data-hide~='slash'] [data-testid='slash'],
+.composer[data-hide~='attach'] [data-testid='attach'],
+.composer[data-hide~='basket'] [data-testid='context-chip'],
+.composer[data-hide~='live'] [data-testid='live-follow'],
+.composer[data-hide~='bookmarks'] [data-testid='live-bookmarks'],
+.composer[data-hide~='editorContext'] [data-testid='editor-context'],
+.composer[data-hide~='contextMeter'] .context-row > .context-meter,
+.composer[data-hide~='permission'] .permission-mode-chip,
+.composer[data-hide~='target'] .send-target-chip,
+.composer[data-hide~='model'] .picker-model,
+.composer[data-hide~='thinking'] .picker-thinking,
+.composer[data-hide~='fast'] .fast-toggle,
+.composer[data-hide~='quota'] .quota-meter { display: none; }
 /* The basket count (0-20) keeps one width, room for two digits, so the context bar beside it does not shift as files come and go. */
 .context-tools .context-count { display: inline-flex; align-items: center; justify-content: center; gap: 2px; height: 20px; padding: 0 3px; font-variant-numeric: tabular-nums; }
 .context-count-value { display: inline-block; min-width: 2ch; text-align: center; }
@@ -140,7 +160,6 @@
 .fast-toggle.failed { color: var(--pomp-error); }
 .fast-toggle .spinner { width: 10px; height: 10px; }
 .picker-option.disabled { color: var(--pomp-muted-fg); cursor: default; }
-.picker-option.disabled:hover { background: transparent; }
 .picker-option.disabled.active { background: var(--pomp-hover-bg); }
 /* A very short pane keeps its height for the conversation: the meters go (the model chip's tooltip still has the context use).
    The context basket and the editor-context toggle stay. The model and thinking lists open right above their chip row (over the
@@ -166,7 +185,7 @@
 }
 @media (min-width: 300px) and (max-width: 359px) {
   .shell-tab { padding: 0 4px; gap: 3px; font-size: .86em; }
-  .context-tools .icon-btn { width: 17px; }
+  .context-tools .icon-btn { width: 18px; height: 18px; }
   .context-count { padding: 1px 3px; }
 }
 .shell-menu-info { margin-top: 3px; padding: 5px 8px 3px; border-top: 1px solid var(--pomp-border); color: var(--pomp-muted-fg); font-size: .92em; overflow-wrap: anywhere; cursor: default; }

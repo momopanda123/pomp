@@ -1,10 +1,10 @@
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useContext, useMemo, useState, type CSSProperties } from 'react';
 import { useT, type MessageKey } from '../i18n';
 import { roleDescription, roleJob, roleTitle } from '../bundledDescriptions';
 import { send, type AgentsStatePayload, type MainRole, type Role, type RoleAvatar, type Team } from '../protocol';
 import { useAvatarImage } from '../avatarImages';
 import type { SetupState } from '../setup';
-import { MAIN_ROLE, isRunnableTeam } from '../teamsCache';
+import { MAIN_ROLE, MainRoleContext, RolesContext, TeamsContext, effectiveRoles, isRunnableTeam } from '../teamsCache';
 import { Icon } from './Icon';
 import { plainControls, revealControls } from './RevealControls';
 import { ViewSection } from './ViewSection';
@@ -31,6 +31,25 @@ export function Avatar({ name, label, size = 24, missing = false, look, scope, i
   return <span className={`ui-avatar agents-avatar shape-${look?.shape ?? 'circle'}${missing ? ' missing' : ''}${shown ? ' has-image' : ''}`} style={style} aria-hidden="true">
     {missing ? <Icon name="warning" size={11} /> : shown ? <img src={shown} alt="" draggable={false} /> : initial}
   </span>;
+}
+
+/**
+ * Where a message goes, pictured as the Agents tab pictures it: POMP's or the role's own picture, a team as its first members'
+ * pictures overlapped (a team has no picture of its own). Reads the roles, teams and POMP's role from the page's contexts.
+ */
+export function DestinationAvatar({ kind, id, size = 16 }: { kind: 'main' | 'agent' | 'team'; id?: string; size?: number }) {
+  const t = useT();
+  const main = useContext(MainRoleContext);
+  const roles = effectiveRoles(useContext(RolesContext));
+  const teams = useContext(TeamsContext);
+  if (kind === 'main' || !id) return <Avatar name={MAIN_ROLE.name} label={MAIN_ROLE.title} size={size} look={main?.avatar} scope={MAIN_ROLE.scope} />;
+  const roleAvatar = (name: string) => {
+    const role = roles.find(item => item.name === name);
+    return <Avatar key={name} name={name} label={roleTitle(role, t, name)} size={size} look={role?.avatar} scope={role?.scope} />;
+  };
+  if (kind === 'agent') return roleAvatar(id);
+  const members = teams.find(team => team.id.toLowerCase() === id.toLowerCase())?.members ?? [];
+  return <span className="agents-avatar-stack destination-avatar-stack">{members.slice(0, 3).map(roleAvatar)}</span>;
 }
 
 type RoleScopeFilter = 'all' | 'project' | 'user';

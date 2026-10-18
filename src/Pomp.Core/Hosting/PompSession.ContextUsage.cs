@@ -269,6 +269,9 @@ namespace Pomp.Hosting
             }
         }
 
+        /// <summary>What the editor context of a message carries (the options' current values, or the defaults for a host without them).</summary>
+        private EditorContextLimits CurrentEditorContextLimits() => (_settings as IEditorContextSettings)?.EditorContextLimits ?? EditorContextLimits.Default;
+
         /// <summary>
         /// workspace/countBasketTokens: what the next message adds beyond its text — the editor context (when on, gathered exactly as a
         /// send would) and the attachment list — as a characters-based estimate (<see cref="EstimateTokens"/>).
@@ -295,7 +298,9 @@ namespace Pomp.Hosting
                 if (args.GetBool("includeEditorContext") == true && _bridge.State == BridgeState.Running)
                 {
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
-                    timeout.CancelAfter(TimeSpan.FromSeconds(5));
+                    // The builder may wait the editor-context timeout twice (the parallel queries, then the buffer read).
+                    var wait = CurrentEditorContextLimits().Timeout;
+                    timeout.CancelAfter(wait + wait + TimeSpan.FromSeconds(1));
                     var contextTask = _contextBuilder.BuildAsync(timeout.Token);
                     contextTask.Observe();
                     var context = await contextTask.WithCancellation(timeout.Token).ConfigureAwait(false);

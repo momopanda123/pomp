@@ -16,7 +16,7 @@ function PartnerBadge({ partner }: { partner: ConversationPartner }) {
   return <span className="session-partner-badge" data-testid="session-partner-badge">{revealControls(t('partner.badge', { name }))}</span>;
 }
 
-/** The full conversation list lives inside Chat; previews expand directly under their row. */
+/** The conversation list: a dropdown under the session header that closes on an outside press, Escape or a choice; previews expand under their row. */
 export function SessionHistory({ locale, sessionId, sessionName, history, disabled, onNew, onOpened, onClose }: {
   locale: string; sessionId?: string; sessionName?: string; history: SessionHistoryController;
   disabled: boolean; onNew: () => void; onOpened: () => void; onClose?: () => void;
@@ -29,20 +29,28 @@ export function SessionHistory({ locale, sessionId, sessionName, history, disabl
   const cancelDelete = () => { setDeleting(undefined); window.requestAnimationFrame(() => opener.current?.focus()); };
   const closeMenu = () => { setMenu(undefined); window.requestAnimationFrame(() => opener.current?.focus()); };
   useEffect(() => { if (menu) document.querySelector<HTMLButtonElement>('[data-testid="sessions-panel"] [role="menuitem"]:not(:disabled)')?.focus(); }, [menu]);
+  // A short list needs no filter field (like the other pickers): the search appears only past ten conversations. Opening puts the
+  // keyboard on the search when there is one, else on the current conversation's row.
+  // A filter in use keeps its field, so a list that shrinks to ten or fewer while filtered can still be cleared.
+  const searchable = history.state.entries.length > 10 || query !== '';
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = panel.current;
+    (root?.querySelector<HTMLElement>('[data-testid="session-search"]') ?? root?.querySelector<HTMLElement>('li.current [data-testid="session-open"]') ?? root?.querySelector<HTMLElement>('[data-testid="session-open"]'))?.focus({ preventScroll: true });
+  }, [searchable]);
   useEffect(() => { setEditing(false); setDeleting(undefined); setMenu(undefined); setPreviewId(undefined); }, [sessionId]);
   const entries = history.state.entries.filter(entry => `${entry.title ?? ''} ${entry.name ?? ''} ${entry.sessionId ?? ''} ${entry.partner?.id ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const paged = usePaged(entries, query);
   const date = (value?: string) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString(locale) : '';
-  return <div className="sessions-panel" data-testid="sessions-panel" onKeyDown={event => {
+  return <div ref={panel} className="sessions-panel" data-testid="sessions-panel" onKeyDown={event => {
     if (event.nativeEvent.isComposing || event.keyCode === 229 || event.key !== 'Escape') return;
     event.preventDefault(); event.stopPropagation(); if (deleting) cancelDelete(); else if (menu) closeMenu(); else onClose?.();
   }}>
     <div className="sessions-toolbar"><strong>{t('session.list')}</strong>
       <button className="icon-btn" type="button" disabled={history.pending} title={t('session.refresh')} aria-label={t('session.refresh')} onClick={() => history.command('refresh')}><Icon name="restart" /></button>
       <button className="icon-btn" type="button" data-testid="sessions-new" disabled={disabled || history.pending} onClick={onNew} title={t('status.newSession')} aria-label={t('status.newSession')}><Icon name="plus" /></button>
-      {onClose && <button className="icon-btn" type="button" data-testid="sessions-close" onClick={onClose} title={t('session.close')} aria-label={t('session.close')}><Icon name="x" /></button>}
     </div>
-    <input autoFocus className="session-search" type="search" data-testid="session-search" aria-label={t('session.search')} placeholder={t('session.search')} value={query} onChange={event => setQuery(event.target.value)} />
+    {searchable && <input className="session-search" type="search" data-testid="session-search" aria-label={t('session.search')} placeholder={t('session.search')} value={query} onChange={event => setQuery(event.target.value)} />}
     {disabled && <p className="hint" data-testid="session-switch-blocked">{t('session.blocked')}</p>}
     {history.pending && <p role="status">{t('session.loading')}</p>}{history.error && <p role="alert">{revealControls(history.error)}</p>}
     <ol className="session-list" data-testid="session-list">{paged.slice.map(entry => {
@@ -71,7 +79,7 @@ export function SessionHistory({ locale, sessionId, sessionName, history, disabl
           <button className="btn subtle danger" type="button" role="menuitem" data-testid="session-delete" disabled={disabled || history.pending} onClick={() => { setMenu(undefined); setDeleting({ id: entry.id, name: entry.title || entry.name || entry.sessionId || entry.id }); }}>{t('session.delete')}</button>
         </div>}
         {preview && <section className="session-preview" data-testid="session-preview-content" aria-label={t('session.preview')}>
-          {preview.messages.map((message, index) => <article key={index}><strong>{message.role === 'user' ? t('session.roleUser') : t('session.roleAssistant')}</strong><p>{revealControls((message.role === 'user' && sentCaseFeedbackSummary(message.text, t)) || message.text)}</p>{message.truncated && <span className="hint">…</span>}</article>)}
+          {preview.messages.map((message, index) => <article key={index}><strong>{message.role === 'user' ? t('session.roleUser') : t('session.roleAssistant')}</strong><p>{revealControls((message.role === 'user' && sentCaseFeedbackSummary(message.text, t)) || message.text)}</p>{message.truncated && <span className="hint">{t('session.messageTruncated')}</span>}</article>)}
           {preview.truncated && <p className="hint">{t('history.truncated')}</p>}
         </section>}
       </li>;
@@ -85,6 +93,6 @@ export function SessionHistory({ locale, sessionId, sessionName, history, disabl
         cancelTestId="session-delete-cancel" confirmTestId="session-delete-accept" className="session-delete-confirm" enterConfirms
         confirmDisabled={disabled || history.pending} onCancel={cancelDelete} onConfirm={() => { if (history.command('delete', deleting.id)) setDeleting(undefined); }} />
     </div>}
-    {editing && <SessionRename name={sessionName || history.state.current?.name || ''} disabled={disabled || history.pending} onSave={value => history.command('rename', value)} onCancel={() => { setEditing(false); window.requestAnimationFrame(() => opener.current?.focus()); }} />}
+    {editing && <SessionRename name={sessionName || history.state.current?.name || ''} disabled={disabled || history.pending} onSave={value => history.command('rename', value)} onDone={restoreFocus => { setEditing(false); if (restoreFocus) window.requestAnimationFrame(() => opener.current?.focus()); }} />}
   </div>;
 }

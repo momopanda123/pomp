@@ -86,57 +86,63 @@ namespace Pomp.VisualStudio.Commands
 
         /// <summary>
         /// The POMP prompt at the selection with "ask in chat" as its main action (its other action proposes an edit, unavailable where
-        /// the code cannot be edited). Without an editor to show it in the chat opens with the editor context switched on, for the
-        /// user's own question.
+        /// the code cannot be edited). Without a selection the question's code is selected first (<see cref="CodeScopeSelection"/>).
+        /// Without an editor to show it in the chat opens with the editor context switched on, for the user's own question.
         /// </summary>
         public async Task ShowInlineEditAsync()
         {
             await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+            var view = InlineEditorFeature.LastFocusedView;
+            if (view != null) await SelectQuestionScopeAsync(view);
             if (InlineEditorFeature.TryShowInlinePrompt(PromptAction.Ask)) return;
             await PrefillChatAsync(new ComposerPrefillPayload { IncludeEditorContext = true });
         }
 
         // ---- the code editor's POMP menu ----------------------------------------------------------------------------------
 
-        /// <summary>Asks the chat to explain the selection (or the code at the caret); the message is sent at once with the editor context.</summary>
-        public Task ExplainCodeAsync() => PrefillChatAsync(new ComposerPrefillPayload
-        {
-            Text = PompLanguage.Pick(
-                "에디터에서 선택한 코드(선택이 없으면 커서 주변 코드)를 설명해 줘. 무엇을 하는지, 입력과 결과, 주의할 점을 짧게 정리해 줘.",
-                "Explain the code selected in the editor (or the code around the caret): what it does, its inputs and results, and anything to watch out for."),
-            IncludeEditorContext = true,
-            Send = true,
-        });
+        /// <summary>Asks the chat to explain the selected code; the message is sent at once with the editor context.</summary>
+        public Task ExplainCodeAsync() => SendCodeRequestAsync(
+            "에디터에서 선택한 코드를 설명해 줘. 무엇을 하는지, 입력과 결과, 주의할 점을 짧게 정리해 줘.",
+            "Explain the code selected in the editor: what it does, its inputs and results, and anything to watch out for.");
 
-        /// <summary>Asks the chat to review the selection (or the code at the caret) without changing it; sent at once with the editor context.</summary>
-        public Task ReviewCodeAsync() => PrefillChatAsync(new ComposerPrefillPayload
-        {
-            Text = PompLanguage.Pick(
-                "에디터에서 선택한 코드(선택이 없으면 커서 주변 코드)를 리뷰해 줘. 버그, 예외 처리, 보안, 성능 문제를 근거와 함께 알려 주고, 코드는 직접 바꾸지 마.",
-                "Review the code selected in the editor (or the code around the caret): point out bugs, error handling, security and performance problems with reasons. Do not change the code."),
-            IncludeEditorContext = true,
-            Send = true,
-        });
+        /// <summary>Asks the chat to review the selected code without changing it; sent at once with the editor context.</summary>
+        public Task ReviewCodeAsync() => SendCodeRequestAsync(
+            "에디터에서 선택한 코드를 리뷰해 줘. 버그, 예외 처리, 보안, 성능 문제를 근거와 함께 알려 주고, 코드는 직접 바꾸지 마.",
+            "Review the code selected in the editor: point out bugs, error handling, security and performance problems with reasons. Do not change the code.");
 
-        /// <summary>Asks the chat to fix the selection (or the code at the caret) as a review proposal; sent at once with the editor context.</summary>
-        public Task FixCodeAsync() => PrefillChatAsync(new ComposerPrefillPayload
-        {
-            Text = PompLanguage.Pick(
-                "에디터에서 선택한 코드(선택이 없으면 커서 주변 코드)의 문제를 찾아 고쳐 줘. 원인을 먼저 짧게 설명하고, 바꾼 내용은 내가 검토할 수 있게 변경 제안으로 올려 줘.",
-                "Find and fix the problem in the code selected in the editor (or the code around the caret). Briefly explain the cause first, and stage the change as a proposal for me to review."),
-            IncludeEditorContext = true,
-            Send = true,
-        });
+        /// <summary>Asks the chat to fix the selected code as a review proposal; sent at once with the editor context.</summary>
+        public Task FixCodeAsync() => SendCodeRequestAsync(
+            "에디터에서 선택한 코드의 문제를 찾아 고쳐 줘. 원인을 먼저 짧게 설명하고, 바꾼 내용은 내가 검토할 수 있게 변경 제안으로 올려 줘.",
+            "Find and fix the problem in the code selected in the editor. Briefly explain the cause first, and stage the change as a proposal for me to review.");
 
-        /// <summary>Asks the chat to write unit tests for the selection (or the code at the caret) as a review proposal; sent at once with the editor context.</summary>
-        public Task WriteTestsAsync() => PrefillChatAsync(new ComposerPrefillPayload
+        /// <summary>Asks the chat to write unit tests for the selected code as a review proposal; sent at once with the editor context.</summary>
+        public Task WriteTestsAsync() => SendCodeRequestAsync(
+            "에디터에서 선택한 코드의 단위 테스트를 작성해 줘. 이 솔루션의 테스트 프레임워크와 기존 테스트 위치·스타일을 따르고, 정상·경계·오류 경우를 다뤄 줘. 바꾼 내용은 내가 검토할 수 있게 변경 제안으로 올려 줘.",
+            "Write unit tests for the code selected in the editor. Follow this solution's test framework and the existing test locations and style, and cover normal, edge and error cases. Stage the change as a proposal for me to review.");
+
+        /// <summary>One of the code requests: the question's code is selected when nothing is, then the request is sent with the editor context.</summary>
+        private async Task SendCodeRequestAsync(string korean, string english)
         {
-            Text = PompLanguage.Pick(
-                "에디터에서 선택한 코드(선택이 없으면 커서 주변 코드)의 단위 테스트를 작성해 줘. 이 솔루션의 테스트 프레임워크와 기존 테스트 위치·스타일을 따르고, 정상·경계·오류 경우를 다뤄 줘. 바꾼 내용은 내가 검토할 수 있게 변경 제안으로 올려 줘.",
-                "Write unit tests for the code selected in the editor (or the code around the caret). Follow this solution's test framework and the existing test locations and style, and cover normal, edge and error cases. Stage the change as a proposal for me to review."),
-            IncludeEditorContext = true,
-            Send = true,
-        });
+            var view = await ActiveViewAsync();
+            await SelectQuestionScopeAsync(view);
+            // Nothing could be selected (a blank line between members, no editor): the request names the code at the caret instead of
+            // a selection that does not exist.
+            var text = PompLanguage.Pick(korean, english);
+            if (view == null || view.IsClosed || view.Selection.IsEmpty)
+                text = text.Replace("에디터에서 선택한 코드", "에디터 커서 위치의 코드").Replace("the code selected in the editor", "the code at the editor's caret");
+            await PrefillChatAsync(new ComposerPrefillPayload { Text = text, IncludeEditorContext = true, Send = true });
+        }
+
+        /// <summary>Selects the code a question is about when the editor has no selection (<see cref="CodeScopeSelection"/>); never fails the command.</summary>
+        private async Task SelectQuestionScopeAsync(Microsoft.VisualStudio.Text.Editor.IWpfTextView? view)
+        {
+            if (view == null) return;
+            await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+            if (!(await package.GetServiceAsync(typeof(SComponentModel)) is IComponentModel components)) return;
+            try { await CodeScopeSelection.SelectAsync(view, components, services.JoinableTaskFactory, package.DisposalToken); }
+            catch (Exception ex) when (!(ex is OperationCanceledException)) { services.Logger.Debug("Selecting the question's code failed: " + ex.Message); }
+            await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+        }
 
         /// <summary>A question from the POMP prompt: into the chat input with the editor context on, sent at once when <paramref name="send"/>.</summary>
         public Task AskInChatAsync(string text, bool send) => PrefillChatAsync(new ComposerPrefillPayload { Text = text, IncludeEditorContext = true, Send = send });
@@ -205,16 +211,24 @@ namespace Pomp.VisualStudio.Commands
         /// <summary>The active text editor and the full path of its file; null without an editor of a file (on the UI thread).</summary>
         private async Task<(Microsoft.VisualStudio.Text.Editor.IWpfTextView View, string Path)?> ActiveFileViewAndPathAsync()
         {
+            var view = await ActiveViewAsync();
+            if (view == null || !(await package.GetServiceAsync(typeof(SComponentModel)) is IComponentModel components)
+                || !components.GetService<ITextDocumentFactoryService>().TryGetTextDocument(view.TextBuffer, out var document)) return null;
+            var path = VsAdapterContext.IsFilePath(document.FilePath) ? VsAdapterContext.NormalizePath(document.FilePath) : null;
+            if (path == null) return null;
+            return (view, path);
+        }
+
+        /// <summary>The last active text editor (the one the editor menu was opened in), or null (on the UI thread).</summary>
+        private async Task<Microsoft.VisualStudio.Text.Editor.IWpfTextView?> ActiveViewAsync()
+        {
             await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
             if (!(await package.GetServiceAsync(typeof(SVsTextManager)) is IVsTextManager textManager)
                 || !(await package.GetServiceAsync(typeof(SComponentModel)) is IComponentModel components)) return null;
             // fMustHaveFocus = 0: the last active text view is the editor the menu was opened in.
             if (Microsoft.VisualStudio.ErrorHandler.Failed(textManager.GetActiveView(0, null, out var native)) || native == null) return null;
             var view = components.GetService<IVsEditorAdaptersFactoryService>().GetWpfTextView(native);
-            if (view == null || view.IsClosed || !components.GetService<ITextDocumentFactoryService>().TryGetTextDocument(view.TextBuffer, out var document)) return null;
-            var path = VsAdapterContext.IsFilePath(document.FilePath) ? VsAdapterContext.NormalizePath(document.FilePath) : null;
-            if (path == null) return null;
-            return (view, path);
+            return view == null || view.IsClosed ? null : view;
         }
 
         private static string FirstLine(string message)
@@ -241,6 +255,63 @@ namespace Pomp.VisualStudio.Commands
             await SetStatusAsync(on
                 ? PompLanguage.Pick("POMP: 코드 캡션을 켰어요.", "POMP: code captions are on.")
                 : PompLanguage.Pick("POMP: 코드 캡션을 껐어요.", "POMP: code captions are off."));
+        }
+
+        public async Task ToggleLiveFollowAsync()
+        {
+            await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+            var on = !services.Settings.AppliedLiveFollowEnabled;
+            services.Settings.SetLiveEditorFeatures(live: on);
+            await SetStatusAsync(on
+                ? PompLanguage.Pick("POMP: Live 변경 따라가기를 켰어요.", "POMP: Live edit following is on.")
+                : PompLanguage.Pick("POMP: Live 변경 따라가기를 껐어요.", "POMP: Live edit following is off."));
+        }
+
+        public async Task ToggleLiveBookmarksAsync()
+        {
+            await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+            var on = !services.Settings.AppliedLiveBookmarksEnabled;
+            services.Settings.SetLiveEditorFeatures(bookmarks: on);
+            await SetStatusAsync(on
+                ? PompLanguage.Pick("POMP: 변경 북마크를 켰어요.", "POMP: edit bookmarks are on.")
+                : PompLanguage.Pick("POMP: 변경 북마크를 껐어요.", "POMP: edit bookmarks are off."));
+        }
+
+        /// <summary>Hides or shows the Live change display; hiding never clears change traces.</summary>
+        public async Task ToggleLiveChangesAsync()
+        {
+            await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+            var on = !services.Settings.AppliedLiveChangesVisible;
+            services.Settings.SetLiveEditorFeatures(changesVisible: on);
+            await SetStatusAsync(on
+                ? PompLanguage.Pick("POMP: Live 변경 내용을 표시해요.", "POMP: Live changes are shown.")
+                : PompLanguage.Pick("POMP: Live 변경 내용을 숨겼어요. 변경 기록은 그대로예요.", "POMP: Live changes are hidden; the change record is kept."));
+        }
+
+        /// <summary>Drops this conversation's Live change marks in every file (the code stays as it is) and reports how many.</summary>
+        public async Task ClearLiveChangesAsync()
+        {
+            await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+            var cleared = services.EditorFollow.ClearChanges();
+            await SetStatusAsync(PompLanguage.Pick("POMP: 변경 내용 표시 " + cleared + "개를 지웠어요. 코드는 그대로예요.", "POMP: cleared " + cleared + " Live change mark(s); the code is unchanged."));
+        }
+
+        /// <summary>Removes POMP's bookmarks (the user's own are kept) and reports the count or the failure in the status bar.</summary>
+        public async Task CleanupPompBookmarksAsync()
+        {
+            await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+            string message;
+            try
+            {
+                var removed = services.EditorFollow.CleanupPompBookmarks();
+                message = PompLanguage.Pick("POMP: 책갈피 " + removed + "개를 정리했어요.", "POMP: removed " + removed + " POMP bookmark(s).");
+            }
+            catch (Exception ex)
+            {
+                services.Logger.Error("Cleaning up POMP bookmarks failed.", ex);
+                message = PompLanguage.Pick("POMP: 책갈피 정리 실패 - " + ex.Message, "POMP: bookmark cleanup failed - " + ex.Message);
+            }
+            await SetStatusAsync(message);
         }
 
         /// <summary>Shows the chat and fills its input (the page gets it now, or with its ready snapshot when the window was just opened).</summary>

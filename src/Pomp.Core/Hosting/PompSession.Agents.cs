@@ -19,11 +19,12 @@ namespace Pomp.Hosting
     /// <summary>An entry of the code editor's "to agent or team" menu: an agent role (<c>agent</c>, name) or a team (<c>team</c>, id).</summary>
     public sealed class EditorSendTarget
     {
-        public EditorSendTarget(string kind, string id, string title)
+        public EditorSendTarget(string kind, string id, string title, bool recent = false)
         {
             Kind = kind;
             Id = id;
             Title = title;
+            Recent = recent;
         }
 
         /// <summary>"agent" or "team".</summary>
@@ -33,6 +34,9 @@ namespace Pomp.Hosting
 
         /// <summary>The menu text.</summary>
         public string Title { get; }
+
+        /// <summary>Sent to recently in this workspace (the agent run history, newest first): the editor menu lists only these.</summary>
+        public bool Recent { get; }
     }
 
     // Agent roles and teams (docs/agent-teams.md §2, §3, §6): agents/command from the page.
@@ -49,10 +53,12 @@ namespace Pomp.Hosting
         }
 
         /// <summary>
-        /// The agents and teams the code editor's POMP menu can send a selection to (its "to agent or team" entries): usable roles
-        /// first, then runnable teams, each by name like the page's lists (Pomp.Internal.NameOrder); all of them (no count limit).
+        /// The agents and teams the code editor's POMP menu can send a selection to (its "to agent or team" entries): the ones sent to
+        /// recently in this workspace first (newest first, from the agent run history, at most <paramref name="recentLimit"/>, marked
+        /// <see cref="EditorSendTarget.Recent"/>), then the other usable roles and runnable teams, each by name like the page's lists
+        /// (Pomp.Internal.NameOrder); all of them (no count limit).
         /// </summary>
-        public IReadOnlyList<EditorSendTarget> ListEditorSendTargets()
+        public IReadOnlyList<EditorSendTarget> ListEditorSendTargets(int recentLimit)
         {
             var state = GetAgentRoster().GetState();
             var targets = new List<EditorSendTarget>();
@@ -73,7 +79,22 @@ namespace Pomp.Hosting
             }
             teams.Sort((left, right) => Pomp.Internal.NameOrder.Compare(left.Title, right.Title));
             targets.AddRange(teams);
-            return targets;
+
+            // Recent ones: distinct agent/team targets of the run history that still exist, newest first.
+            var recent = new List<EditorSendTarget>();
+            var byKey = targets.ToDictionary(target => target.Kind + "\n" + target.Id, StringComparer.Ordinal);
+            foreach (var run in recentLimit > 0 ? RunHistory()?.Targets() ?? new List<AgentRunTargetPayload>() : new List<AgentRunTargetPayload>())
+            {
+                if (recent.Count >= recentLimit) break;
+                var key = run.Kind + "\n" + run.Id;
+                if (!byKey.TryGetValue(key, out var found)) continue;
+                byKey.Remove(key);
+                recent.Add(new EditorSendTarget(found.Kind, found.Id, found.Title, recent: true));
+            }
+            if (recent.Count == 0) return targets;
+            var used = new HashSet<string>(recent.Select(target => target.Kind + "\n" + target.Id), StringComparer.Ordinal);
+            recent.AddRange(targets.Where(target => !used.Contains(target.Kind + "\n" + target.Id)));
+            return recent;
         }
 
         private void PublishAgentsState()
@@ -405,14 +426,11 @@ namespace Pomp.Hosting
                 var sb = new StringBuilder();
                 foreach (var block in contentArray)
                 {
-                    if (block["type"]?.ToString() == "text")
+                    var t = block.AnswerText();
+                    if (!string.IsNullOrEmpty(t))
                     {
-                        var t = block["text"]?.ToString();
-                        if (!string.IsNullOrEmpty(t))
-                        {
-                            if (sb.Length > 0) sb.Append("\n");
-                            sb.Append(t);
-                        }
+                        if (sb.Length > 0) sb.Append("\n");
+                        sb.Append(t);
                     }
                 }
                 if (sb.Length > 0) return sb.ToString();

@@ -189,14 +189,14 @@ namespace Pomp.VisualStudio.Editor
         }
 
         /// <summary>A flat button in the theme's colors (the default WPF button keeps its light hover look in a dark theme).</summary>
-        private static Style ButtonStyle()
+        internal static Style ButtonStyle(Thickness? padding = null)
         {
             var border = new FrameworkElementFactory(typeof(Border), "border");
             border.SetValue(Border.BackgroundProperty, Themed(CommonControlsColors.ButtonColorKey));
             border.SetValue(Border.BorderBrushProperty, Themed(CommonControlsColors.ButtonBorderColorKey));
             border.SetValue(Border.BorderThicknessProperty, new Thickness(1));
             border.SetValue(Border.CornerRadiusProperty, new CornerRadius(2));
-            border.SetValue(Border.PaddingProperty, new Thickness(10, 3, 10, 3));
+            border.SetValue(Border.PaddingProperty, padding ?? new Thickness(10, 3, 10, 3));
             var content = new FrameworkElementFactory(typeof(ContentPresenter));
             content.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
             content.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
