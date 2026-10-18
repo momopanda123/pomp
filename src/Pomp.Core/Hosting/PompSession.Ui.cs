@@ -70,12 +70,6 @@ namespace Pomp.Hosting
                 case "workspace/countDraftTokens":
                     CountDraftTokensAsync(message.Payload ?? new JObject()).Forget(_logger, "draft token count");
                     break;
-                case "workspace/suggestContext":
-                    SuggestContextAsync(message.Payload ?? new JObject()).Forget(_logger, "context suggestions");
-                    break;
-                case "workspace/contextPresets":
-                    HandleContextPresetsAsync(message.Payload ?? new JObject()).Forget(_logger, "context presets");
-                    break;
                 case WorkspaceReviewController.HistoryCommandMessage:
                     _workspaceReview?.HandleHistoryAsync(message.Payload ?? new JObject(), _disposeCts.Token).Forget(_logger, "workspace history");
                     break;
@@ -260,21 +254,6 @@ namespace Pomp.Hosting
                     _logger.Debug("Ignoring the UI message '" + message.Type + "'.");
                     break;
             }
-        }
-
-        private readonly SemaphoreSlim _contextPresetGate = new SemaphoreSlim(1, 1);
-        private async Task HandleContextPresetsAsync(JObject args)
-        {
-            await _contextPresetGate.WaitAsync(_disposeCts.Token).ConfigureAwait(false);
-            try
-            {
-                var root = await _environment.GetWorkspaceRootAsync(_disposeCts.Token).ConfigureAwait(false);
-                var answer = await Task.Run(() => new ContextPresetStore(_environment.DataDirectory, root).Handle(args), _disposeCts.Token).ConfigureAwait(false);
-                answer["requestId"] = args["requestId"];
-                _ui.Post("workspace/contextPresetsState", answer, UiDelivery.State);
-            }
-            catch (Exception ex) { _ui.Post("workspace/contextPresetsState", new JObject { ["requestId"] = args["requestId"], ["error"] = ex.Message }, UiDelivery.State); }
-            finally { _contextPresetGate.Release(); }
         }
 
         /// <summary>workspace/findFiles → workspace/files (the @-mention list).</summary>

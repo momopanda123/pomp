@@ -194,7 +194,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     if (!basketOpen || !focusBasketOnOpen.current) return;
     focusBasketOnOpen.current = false;
     const visible = (element: HTMLElement) => element.getClientRects().length > 0 && !element.closest('[hidden], [inert]');
-    const file = basketByKey.current ? [...(basketPop.current?.querySelectorAll<HTMLElement>('input[data-basket-check]:not(:disabled)') ?? [])].find(visible) : undefined;
+    // Opened from the keyboard: the first attached file (its menu opens with the context-menu key).
+    const file = basketByKey.current ? [...(basketPop.current?.querySelectorAll<HTMLElement>('[data-attachment-menu]') ?? [])].find(visible) : undefined;
     const control = file ?? [...(basketPop.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]') ?? [])]
       .find(visible);
     (control ?? basketPop.current)?.focus({ preventScroll: true });
@@ -407,11 +408,11 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     consumedBasket.current = basketRequest; setBasketOpen(true);
   }, [basketRequest, requestPending]);
   const text = draft.text.trim();
-  const sendPaths = useMemo(() => draft.attachments.filter(file => !file.excluded).map(file => file.fullPath), [draft.attachments]);
+  const sendPaths = useMemo(() => draft.attachments.map(file => file.fullPath), [draft.attachments]);
   const rejection = useMemo(() => promptRejection(draft.text, {
     type: 'chat/send', payload: { clientMessageId: 'draft', text, includeEditorContext, ...targetPayload(selectedTarget), attachments: sendPaths.map(path => ({ path })) },
   }, sendPaths), [text, draft.text, sendPaths, includeEditorContext, selectedTarget]);
-  const canSend = connected && !queueBlocked && !requestPending && !newSessionPending && !draft.composing && (text.length > 0 || draft.attachments.some(file => !file.excluded));
+  const canSend = connected && !queueBlocked && !requestPending && !newSessionPending && !draft.composing && (text.length > 0 || draft.attachments.length > 0);
   const failureMessage = failure ? failureText(t, failure) : rejection ? failureText(t, rejection) : null;
   // The composer's notices go to the VS status bar (with errors in the POMP log), not as text between its controls.
   useStatusReport(failureMessage);
@@ -576,7 +577,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     if (payload.files?.length) dispatch({ type: 'attachmentsAdd', files: payload.files });
     autoSend.current = null;
     if (payload.text && payload.send && connected && !newSessionPending) {
-      const files = [...draft.attachments, ...(payload.files ?? [])].filter((file, index, all) => !file.excluded && all.findIndex(other => other.fullPath === file.fullPath) === index);
+      const files = [...draft.attachments, ...(payload.files ?? [])].filter((file, index, all) => all.findIndex(other => other.fullPath === file.fullPath) === index);
       const result = onSend(payload.text, files, false, MAIN_TARGET, true, payload.includeEditorContext || includeEditorContext, true);
       if (result.ok) return;
     }
@@ -638,8 +639,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
         // A name alone switches the conversation partner (a tab); with a message it is a one-message target.
         if (!args?.[2]?.trim() && onOpenPartner && target.kind !== 'instance') { onOpenPartner(target); result = { ok: true }; }
         // The tab's own partner is this conversation already: the message goes to it as usual, not to a second run of it.
-        else if (partnerTab && args?.[2]?.trim() && target.kind === partnerTab.kind && target.id.toLowerCase() === partnerTab.id.toLowerCase()) result = onSend(args[2].trim(), draft.attachments.filter(file => !file.excluded), true, null);
-        else { onSelectTarget(target); result = args?.[2]?.trim() ? onSend(args[2].trim(), draft.attachments.filter(file => !file.excluded), true, target) : { ok: true }; }
+        else if (partnerTab && args?.[2]?.trim() && target.kind === partnerTab.kind && target.id.toLowerCase() === partnerTab.id.toLowerCase()) result = onSend(args[2].trim(), draft.attachments, true, null);
+        else { onSelectTarget(target); result = args?.[2]?.trim() ? onSend(args[2].trim(), draft.attachments, true, target) : { ok: true }; }
       }
       else result = onCommand(name, command[2]?.trim() ?? '');
       setFailure(result.ok ? null : result);
@@ -649,7 +650,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
       // A slash command takes the basket's checked files when it hands its text to the model; any other command leaves the basket for the next message.
       const keepBasket = command !== null && !slashTakesReferences(text, commands);
       const destination = override ?? (mainPending ? MAIN_TARGET : undefined);
-      const result = onSend(text, keepBasket ? [] : draft.attachments.filter(file => !file.excluded), !keepBasket, destination, false, undefined, destination?.kind === 'main');
+      const result = onSend(text, keepBasket ? [] : draft.attachments, !keepBasket, destination, false, undefined, destination?.kind === 'main');
       setFailure(result.ok ? null : result);
       if (result.ok) recalled.current = null;
       if (result.ok) deferredMain.current = null;
@@ -805,11 +806,11 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     window.requestAnimationFrame(() => { el.focus(); el.setSelectionRange(caret, caret); });
   };
 
-  // Files, folders and symbols that go with the next message (excluded ones stay listed but are not sent), and the knowledge selected for the conversation.
+  // Files, folders and symbols that go with the next message, and the knowledge selected for the conversation.
   const knowledge = useKnowledge();
   const selectedKnowledge = usableKnowledge(knowledge.items).filter(item => knowledge.selected.includes(item.id)).length;
-  const basketCount = draft.attachments.filter(file => !file.excluded).length + selectedKnowledge;
-  const attachmentPaths = useMemo(() => draft.attachments.filter(file => !file.excluded).map(file => file.path), [draft.attachments]);
+  const basketCount = draft.attachments.length + selectedKnowledge;
+  const attachmentPaths = useMemo(() => draft.attachments.map(file => file.path), [draft.attachments]);
   const placeholder = !connected ? t('composer.placeholderOffline') : newSessionPending ? t('composer.placeholderNewSession') : requestPending ? t('composer.placeholderPending') : busy ? t('composer.placeholderBusy') : t('composer.placeholder');
 
   // Right-click on the composer background: which controls it shows (checked = shown). Text fields keep their edit menu.
@@ -863,7 +864,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
                 setBasketOpen(!basketOpen);
               }}><Icon name="paperclip" size={12} /><span className="context-count-value">{basketCount}</span></button>
             <div ref={basketPop} className="context-popover" data-testid="context-popover" hidden={!basketOpen} tabIndex={-1}>
-              <ContextBasket visible={basketOpen} files={draft.attachments} text={draft.text} includeEditorContext={includeEditorContext} onIncludeEditorContextChange={onIncludeEditorContextChange} dispatch={dispatch} locale={locale} workspaceKey={workspaceKey} sessionId={sessionId} model={model} connected={connected} disabled={requestPending || newSessionPending || draft.composing} />
+              <ContextBasket visible={basketOpen} files={draft.attachments} text={draft.text} dispatch={dispatch} locale={locale} workspaceKey={workspaceKey} sessionId={sessionId} model={model} connected={connected} disabled={requestPending || newSessionPending || draft.composing} />
             </div>
           </div>
           <LiveEditorControls state={editorFollow} disabled={requestPending || newSessionPending || draft.composing} shortcuts={shortcuts} inputRef={inputRef} t={t} />

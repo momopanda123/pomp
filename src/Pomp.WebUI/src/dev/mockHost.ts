@@ -1762,10 +1762,6 @@ export function installMockHost(): void {
     }
   };
 
-  // Context presets kept in memory; ?presets=N seeds N of them to check the table with thousands of rows.
-  let contextPresets: NonNullable<HostToUi['workspace/contextPresetsState']['presets']> = Array.from({ length: Math.max(0, Math.min(5000, Number(new URLSearchParams(window.location.search).get('presets')) || 0)) },
-    (_, i) => ({ id: 'preset-seed-' + i, name: (opts.locale.startsWith('ko') ? '프리셋 ' : 'Preset ') + String(i + 1).padStart(4, '0'), includeEditorContext: i % 2 === 0, files: WORKSPACE_FILES.slice(0, 1 + (i % WORKSPACE_FILES.length)) }));
-  let presetSeq = 0;
   let problemItems: HostToUi['workspace/problemsState']['items'] = new URLSearchParams(window.location.search).get('problems') === '1' ? [
     { id: 'mock-agent', source: 'agent', severity: 'warning', code: 'REVIEW', message: 'Null access after cancellation', path: MOCK_ROOT + '/src/Worker.cs', line: 42 },
     { id: 'mock-error', source: 'compiler', severity: 'error', code: 'CS0103', message: "The name 'result' does not exist", path: MOCK_ROOT + '/src/Worker.cs', line: 17 },
@@ -1916,7 +1912,7 @@ export function installMockHost(): void {
         }
         case 'workspace/countDraftTokens': {
           const request = payload as unknown as UiToHost['workspace/countDraftTokens'];
-          window.setTimeout(() => post('workspace/tokenCount', { requestId: request.requestId, root: request.root, modelId: request.modelId, provider: request.provider, tokens: Math.ceil(request.text.length / 3), method: 'byte-estimate', estimated: true }), 60);
+          window.setTimeout(() => post('workspace/tokenCount', { requestId: request.requestId, root: request.root, modelId: request.modelId, provider: request.provider, tokens: Math.ceil(request.text.length / 3) + 40 * (request.attachments?.length ?? 0), method: 'byte-estimate', estimated: true }), 60);
           return;
         }
         case 'workspace/countBasketTokens': {
@@ -1924,18 +1920,6 @@ export function installMockHost(): void {
           const editorContext = includeEditorContext ? 650 : 0;
           const files = 180 * attachments.length;
           window.setTimeout(() => post('workspace/basketTokens', { requestId, ok: true, tokens: files + editorContext, editorContext, attachments: files }), 60);
-          break;
-        }
-        case 'workspace/contextPresets': {
-          const request = payload as unknown as UiToHost['workspace/contextPresets'];
-          if (request.action === 'save') {
-            const name = (request.name ?? '').trim();
-            const existing = request.id ? contextPresets.find(preset => preset.id === request.id) : contextPresets.find(preset => preset.name.toLowerCase() === name.toLowerCase());
-            const preset = { id: existing?.id ?? 'preset-' + ++presetSeq, name, includeEditorContext: !!request.includeEditorContext, files: request.files ?? [] };
-            contextPresets = existing ? contextPresets.map(item => item === existing ? preset : item) : [...contextPresets, preset];
-          }
-          if (request.action === 'delete') contextPresets = contextPresets.filter(preset => preset.id !== request.id);
-          window.setTimeout(() => post('workspace/contextPresetsState', { requestId: request.requestId, root: MOCK_ROOT, presets: contextPresets }), 60);
           break;
         }
         case 'workspace/pickFiles': {

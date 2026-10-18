@@ -638,12 +638,11 @@
 @media (max-width: 480px) { .review-layout-split .review-comparison { display: block; } }
 
 .context-basket { border-bottom: 1px solid var(--pomp-border); margin-bottom: 6px; font-size: .85em; }
-.context-basket-summary { margin: 4px 0; color: var(--pomp-muted-fg); }
-.context-basket-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
-.context-basket-tools .draft-token-counter { display: contents; }
-.context-basket-tools p { flex-basis: 100%; margin: 0; color: var(--pomp-muted-fg); }
+.context-basket-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 6px; color: var(--pomp-muted-fg); }
+.context-basket-summary .draft-token-button { min-height: 20px; height: 20px; padding: 0 7px; font-size: 11px; }
+.context-basket-summary .draft-token-result { color: var(--pomp-fg); font-variant-numeric: tabular-nums; }
+.context-basket > .view-section + .view-section { margin-top: 6px; }
 .perm-remember-scope { overflow-wrap: anywhere; }
-.context-basket-files { margin: 6px 0; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); }
 .context-file-order { text-align: right; font-variant-numeric: tabular-nums; }
 .context-file-handle { cursor: grab; }
 .context-file-path { display: flex; min-width: 0; }

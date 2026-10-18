@@ -593,7 +593,7 @@ A host-level error not tied to a turn. It is sent when:
 | `ui/log` | `{ level: "debug"\|"info"\|"warning"\|"error", message }` | Page-side diagnostics into the host log. |
 | `ui/editorFollow` | `{ requestId, action: "set", live?, bookmarks? }` | Persist the specified editor-follow toggles. |
 | `chat/send` | see [`chat/send`](#chatsend) | Send a message or queue it while busy. |
-| `workspace/countDraftTokens` | `{ requestId, root, sessionId, modelId, provider, text }` | Count the draft with the local tokenizer. |
+| `workspace/countDraftTokens` | `{ requestId, root, sessionId, modelId, provider, text, attachments?: [{ path }] }` | Count the draft, attachments and knowledge with the local tokenizer. |
 | `workspace/countBasketTokens` | `{ requestId, root, sessionId?, includeEditorContext, attachments?: [{ path }] }` | Estimate what the next message adds beyond its text. |
 | `workspace/findFiles` | `{ requestId, query, limit? }` | Files for the `@` mention list. |
 | `workspace/pickFiles` | `{ requestId }` | Show a multi-select file dialog. |
@@ -674,9 +674,11 @@ Payload:
 
 #### `workspace/countDraftTokens`
 
-- This is the basket details' draft counter.
-- The host asks a hidden POMP extension command.
-- The command counts with the engine's local tokenizer for the current model; no provider request is made.
+- This is the basket's **Count tokens** button.
+- The host counts one text: the attachment list as a send writes it, the draft, and the conversation's knowledge block
+  (ticked defaults and picks, as the extension's `<pomp_knowledge>` block renders it).
+- The host asks a hidden POMP extension command, which counts with the engine's local tokenizer for the current model; no provider request is made.
+- Over 128,000 characters, or while a reply runs, the host answers with a characters-based estimate.
 - Answered by `workspace/tokenCount`:
 
 ```
@@ -1752,9 +1754,9 @@ catalog/command: { requestId, action: "refresh"|"install", id?, scope?: "project
 
 ### Attachments with commands
 
-- A command that hands its text to the model takes the context basket's checked files.
+- A command that hands its text to the model takes the context basket's files.
 - Such commands are: POMP's `workflow`, `plan`, `map`, `review`, `skill`, `command` and `recipe`, a skill, or a prompt file (source `file`).
-- The page sends the checked paths as `attachments` with such a command only, then empties the basket, as for a message.
+- The page sends the basket's paths as `attachments` with such a command only, then empties the basket, as for a message.
 - The host puts them after the command's own text under "Work only on these workspace references…".
 - The host keeps a space after the name.
 - Any other command goes without attachments, and the basket stays.

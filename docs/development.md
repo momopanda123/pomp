@@ -201,7 +201,7 @@ Debug 빌드는 실행 중인 IDE 주 버전에 맞는 플레이버만 실험 �
 | `%LOCALAPPDATA%\Pomp\` | 로그, 오버레이, VS 상태 파일, WebView2 데이터 |
 | `%LOCALAPPDATA%\Pomp\logs\pomp-vs.log` | 로그 파일 |
 | `%LOCALAPPDATA%\Pomp\workspace\` | 솔루션이 없을 때의 작업 폴더 |
-| `<작업 영역>\.pomp\local\` | 프로젝트별 데이터. 대화, 프리셋, 체크포인트 등. 지식은 커밋되는 `.pomp\knowledge.json`에 있다. |
+| `<작업 영역>\.pomp\local\` | 프로젝트별 데이터. 대화, 체크포인트 등. 지식은 커밋되는 `.pomp\knowledge.json`에 있다. |
 
 ## 현재 구현 범위
 

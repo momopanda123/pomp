@@ -20,7 +20,7 @@ namespace Pomp.Features
     /// from another project would break those stores and could even resume a conversation in the other project.
     /// <list type="bullet">
     /// <item>Copied (the recorded root still has its own <c>.pomp/local</c>): the records of work done there (conversations,
-    /// checkpoints, presets, caches, isolation copies, ...) go to the Recycle Bin. Settings the user made stay: the shared
+    /// checkpoints, caches, isolation copies, ...) go to the Recycle Bin. Settings the user made stay: the shared
     /// <c>.pomp</c> files, knowledge, role pictures and automation rules.</item>
     /// <item>Moved or renamed (the recorded root has no <c>.pomp/local</c> any more, or is this very folder by another path):
     /// root stamps and paths under the old root are rewritten to the new one, so the history stays. omp's own session files
@@ -39,7 +39,7 @@ namespace Pomp.Features
         private static readonly string[] KeptOnCopy = { ".gitignore", MarkerName, "knowledge.json", "avatars.json", "agent-hooks.json", "engine-plugin" };
 
         // Stores that stamp the workspace root or hold absolute paths under it.
-        private static readonly string[] RebasedFiles = { "recent-sessions.json", "context-presets.json", "reviews.json", "background-agents.json",
+        private static readonly string[] RebasedFiles = { "recent-sessions.json", "reviews.json", "background-agents.json",
             "code-summaries.json", "composer-workflows.json", "terminal-jobs.json" };
         private const string CheckpointFolder = "checkpoints";
         private const string IsolationFolder = "wt";

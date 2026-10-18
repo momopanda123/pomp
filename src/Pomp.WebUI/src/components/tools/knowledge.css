@@ -13,8 +13,11 @@
   background: color-mix(in srgb, var(--knowledge-color, transparent) 12%, transparent); font-weight: 600; }
 .knowledge-tag > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .knowledge-tag .knowledge-dot { border: 0; }
-.knowledge-badges { display: flex; flex-wrap: wrap; gap: 3px; margin: 3px 0 1px 17px; min-width: 0; }
-.knowledge-badges > .ui-badge { max-width: 100%; }
+/* Name and badges on one line: the badges give way (they are cut) before the name does. */
+.knowledge-view .knowledge-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.knowledge-view .knowledge-line > .knowledge-toggle { flex: 0 1 auto; }
+.knowledge-badges { display: flex; flex: 0 100 auto; flex-wrap: nowrap; gap: 3px; min-width: 0; overflow: hidden; }
+.knowledge-badges > .ui-badge { flex: none; }
 .knowledge-count { color: var(--pomp-muted-fg); font-variant-numeric: tabular-nums; }
 /* The Default and Pieces columns: header and cells centered on the same line. */
 .knowledge-view .knowledge-center { display: block; text-align: center; }

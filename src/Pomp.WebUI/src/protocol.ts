@@ -524,8 +524,6 @@ export interface TurnStartedPayload {
 
 export interface WorkspaceFile {
   kind?: string; symbol?: string; line?: number;
-  /** Omitted from automatic attachment paths; does not prohibit explicit model reads. */
-  excluded?: boolean;
   /** Workspace-relative display path, or the full path for a file outside the workspace. */
   path: string;
   fullPath: string;
@@ -1185,7 +1183,6 @@ export interface HostToUi extends ConversationHostToUi, ToolsHostToUi {
   'workspace/problemsState': WorkspaceProblemsState;
   'workspace/problemsReply': { requestId: string; ok: boolean; error?: string };
   'workspace/codeReviewState': CodeReviewState;
-  'workspace/contextPresetsState': { requestId?: string; root?: string; error?: string; presets?: { id: string; name: string; includeEditorContext: boolean; files: WorkspaceFile[] }[] };
   'host/hello': HostHelloPayload;
   'host/editorFollow': EditorFollowState;
   'bridge/state': BridgeStatePayload;
@@ -1224,7 +1221,6 @@ export interface HostToUi extends ConversationHostToUi, ToolsHostToUi {
   'knowledge/draft': KnowledgeDraft;
   'agentHooks/state': AgentHooksState;
   'workspace/tokenCount': { requestId: string; root?: string; modelId?: string; provider?: string; tokens?: number; estimated?: boolean; method?: 'catalog-native' | 'fallback-native' | 'byte-upperbound' | 'byte-estimate' | 'empty'; encoding?: string | null; error?: string };
-  'workspace/contextSuggestions': { requestId: string; root?: string; files: WorkspaceFile[]; mode?: string; notices?: string[]; notice?: string; error?: string };
   'agents/state': AgentsStatePayload;
   'agents/reply': AgentsReplyPayload;
   'advisors/state': AdvisorsStatePayload;
@@ -1255,7 +1251,6 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'feedback/image': { requestId: string; root: string; sessionId: string; proposalId: string; caseId: string };
   'feedback/command': { action: 'refresh' | 'open' | 'draft' | 'submit' | 'delete'; requestId: string; root: string; sessionId?: string; proposalId?: string; revision?: number; draftRevision?: number; selections?: CaseFeedbackSelection[] };
   'workspace/snippet': { requestId: string; root: string; sessionId: string; code: string };
-  'workspace/contextPresets': { requestId: string; action: 'refresh' | 'save' | 'delete'; root?: string; name?: string; id?: string; includeEditorContext?: boolean; files?: WorkspaceFile[] };
   /** deleteRun: remove one previous run (runId) from the history; never the run being shown as latest. */
   'workspace/problems': { requestId: string; action: 'refresh' | 'open' | 'dismiss'; id?: string };
   'workspace/codeReview': { action: 'refresh' | 'scan' | 'cancel' | 'auto' | 'open' | 'acknowledge' | 'openRun' | 'deleteRun'; reviewId?: string; findingId?: string; runId?: string; enabled?: boolean; value?: boolean };
@@ -1302,8 +1297,8 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'workspace/agentPlanEdit': AgentPlanEdit;
   'knowledge/command': { requestId: string; root: string } & KnowledgeCommand;
   'agentHooks/command': { requestId: string; root: string; sessionId: string; action: 'refresh' | 'save' | 'delete' | 'autoForward'; id?: string; revision?: number; rule?: Omit<AgentHookRule, 'id' | 'revision'>; enabled?: boolean };
-  'workspace/countDraftTokens': { requestId: string; root: string; sessionId: string; modelId: string; provider: string; text: string };
-  'workspace/suggestContext': { requestId: string; root: string; query: string; excludePaths: string[] };
+  /** The basket's token count: the draft, the attachment list as a send writes it and the conversation's knowledge; answered by `workspace/tokenCount`. */
+  'workspace/countDraftTokens': { requestId: string; root: string; sessionId: string; modelId: string; provider: string; text: string; attachments?: { path: string }[] };
   'workspace/findFiles': { requestId: string; query: string; limit?: number };
   /** What the next message adds beyond its text (the editor context when on, the attachment list); answered by `workspace/basketTokens`. */
   'workspace/countBasketTokens': { requestId: string; root: string; sessionId?: string; includeEditorContext: boolean; attachments?: { path: string }[] };
@@ -1385,7 +1380,6 @@ const HOST_TYPES: Record<HostMessageType, true> = {
   'workspace/problemsState': true,
   'workspace/problemsReply': true,
   'workspace/codeReviewState': true,
-  'workspace/contextPresetsState': true,
   'host/hello': true,
   'host/editorFollow': true,
   'bridge/state': true,
@@ -1422,7 +1416,6 @@ const HOST_TYPES: Record<HostMessageType, true> = {
   'chat/replayBegin': true,
   'chat/replayEnd': true,
   'workspace/files': true,
-  'workspace/contextSuggestions': true,
   'workspace/composerState': true,
   'workspace/agentPlanResult': true,
   'workspace/agentPlanPageResult': true,

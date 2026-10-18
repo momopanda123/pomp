@@ -165,7 +165,6 @@ export function App() {
     // A one-message target chosen in an agent/team tab goes from that tab too: the message (and its turn) stays visible there.
     const destination = target === undefined ? current.selectedTarget : target ?? undefined;
     const queued = current.phase === 'running' || current.session?.isStreaming === true;
-    attachments = attachments.filter(file => !file.excluded);
     if ((!queued && sending.current) || queueSubmitting.current || current.replaying || current.phase === 'sending' || current.pendingNewSession !== undefined || current.permissions.length > 0 || current.dialogs.length > 0) return { ok: false, reason: 'busy' };
     if (current.bridge.state !== 'running') return { ok: false, reason: 'hostUnavailable' };
     if (current.session?.recoveryStatus === 'restoring' || current.session?.recoveryStatus === 'failed') return { ok: false, reason: 'busy' };

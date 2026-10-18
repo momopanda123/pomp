@@ -307,7 +307,7 @@ function KnowledgeRow({ item, t, ko, open, locked, busy, canInsert, roleTitle, t
   const saved = savedPieces(item); const use = knowledgeUse(item); const content = usedContent(item);
   return <div role="rowgroup" className="knowledge-group" data-testid={`knowledge-row-${item.id}`}>
     <Row className="knowledge-row">
-      <Cell>
+      <Cell className="knowledge-line">
         <button type="button" className="knowledge-toggle" data-testid={`knowledge-toggle-${item.id}`} aria-expanded={open} aria-controls={bodyId} title={t(open ? 'section.collapse' : 'section.expand')} onClick={onToggle}>
           <Icon name={open ? 'chevronDown' : 'chevron'} size={12} /><span className="knowledge-tag" style={{ '--knowledge-color': item.color } as CSSProperties}><KnowledgeDot color={item.color} /><span>{revealControls(item.name)}</span></span>
         </button>

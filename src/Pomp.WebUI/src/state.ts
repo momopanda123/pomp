@@ -300,9 +300,7 @@ export type Action =
   | { type: 'pickerRequested'; requestId: string }
   | { type: 'workspaceFailed'; requestId: string; message: string }
   | { type: 'attachmentsAdd'; files: WorkspaceFile[] }
-  | { type: 'attachmentToggle'; fullPath: string }
   | { type: 'attachmentReorder'; fullPath: string; beforePath?: string }
-  | { type: 'attachmentsReplace'; files: WorkspaceFile[] }
   | { type: 'attachmentRemove'; fullPath: string }
   | { type: 'dialogDraft'; requestId: string; text: string }
   /** `session/new` was posted: wait for the host's `session/newResult` before touching the transcript. */
@@ -459,12 +457,10 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
     case 'workspace/goalState':
     case 'workspace/goalRequest':
     case 'workspace/tokenCount':
-    case 'workspace/contextSuggestions':
     case 'workspace/snippetResult':
     case 'workspace/hooksState':
     case 'workspace/backgroundState':
     case 'session/historyState':
-    case 'workspace/contextPresetsState':
     case 'advisors/state':
     case 'advisors/reply':
     case 'workspace/problemsState':
@@ -1016,15 +1012,6 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'attachmentsAdd':
       return { ...state, composer: addAttachments(state.composer, action.files) };
-
-    case 'attachmentsReplace':
-    {
-      const next = addAttachments({ ...state.composer, attachments: [] }, action.files);
-      const kept = new Set(next.attachments.map(file => fileIdentity(file.fullPath)));
-      return { ...state, composer: withoutMentions(next, state.composer.attachments.filter(file => !kept.has(fileIdentity(file.fullPath)))) };
-    }
-    case 'attachmentToggle':
-      return { ...state, composer: { ...state.composer, attachments: state.composer.attachments.map(file => fileIdentity(file.fullPath) === fileIdentity(action.fullPath) ? { ...file, excluded: !file.excluded } : file) } };
 
     case 'attachmentReorder': {
       const current = state.composer.attachments;
