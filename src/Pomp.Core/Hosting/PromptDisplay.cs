@@ -24,23 +24,10 @@ namespace Pomp.Hosting
         private static readonly Regex RoutingBrief = new Regex(@"^<!-- pomp-(team|agent|dm):[A-Za-z0-9._:-]{1,128} -->[\s\S]*?<!-- /pomp-\1 -->", RegexOptions.CultureInvariant);
 
         /// <summary>
-        /// Before the composed text (after the routing brief) of a message sent from an agent or team tab to another target
-        /// (PompSession.Ui.cs): the only record of that tab the engine keeps, so a restored chat can leave the message in the tab it came from.
+        /// The tab marker an earlier POMP put before the composed text of a message sent from an agent or team tab to another target, when
+        /// those tabs were views of one conversation. Nothing writes it any more; conversations from then still carry it, so it is left out.
         /// </summary>
         private static readonly Regex OriginPattern = new Regex(@"^<!-- pomp-from:(agent|team):([a-z0-9-]{2,40}) -->", RegexOptions.CultureInvariant);
-
-        internal static string OriginMarker(ConversationPartnerPayload from) => "<!-- pomp-from:" + from.Kind + ":" + from.Id + " -->";
-
-        /// <summary>The agent or team tab a recorded prompt was sent from (its origin marker), or null.</summary>
-        public static ConversationPartnerPayload? Origin(string? prompt)
-        {
-            if (string.IsNullOrEmpty(prompt)) return null;
-            var text = prompt!.TrimStart();
-            var brief = RoutingBrief.Match(text);
-            if (brief.Success) text = text.Substring(brief.Length).TrimStart();
-            var origin = OriginPattern.Match(text);
-            return origin.Success && AgentRoster.IsValidName(origin.Groups[2].Value) ? new ConversationPartnerPayload { Kind = origin.Groups[1].Value, Id = origin.Groups[2].Value } : null;
-        }
 
         private static string WithoutOrigin(string text)
         {

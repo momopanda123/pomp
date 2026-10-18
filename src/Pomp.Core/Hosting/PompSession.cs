@@ -247,7 +247,7 @@ namespace Pomp.Hosting
             _backgroundAgents = new BackgroundAgents((command, token) => _bridge.SendCommandAsync(command, TimeSpan.FromSeconds(10), token), environment, _ui);
             _backgroundAgents.JobObserved = ObserveRunJob;
             _backgroundAgents.StopMember = StopMemberAsync;
-            _partners = new ConversationPartnerStore(environment.DataDirectory, _logger);
+            _tabs = new ConversationTabStore(environment.DataDirectory, _logger);
             registry.Register(new CaseFeedbackTool(this));
             registry.Register(new KnowledgeProposalTool(this));
             _dispatcher = new HostToolDispatcher(registry, _gate, (frame, token) => _bridge.SendFrameAsync(frame, token), _logger);

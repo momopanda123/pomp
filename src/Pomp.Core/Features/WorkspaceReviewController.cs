@@ -175,7 +175,7 @@ namespace Pomp.Features
                     SetStatus("validating");
                     var checkedResult = await current.ValidateAsync(ValidatorFor(validator), linked.Token).ConfigureAwait(false);
                     lock (gate) validation = checkedResult;
-                    SetStatus(current.CanApply ? "ready" : "reviewing", current.CanApply ? PompLanguage.Pick("이 선택 항목의 컴파일러 검사를 통과했어요.", "Compiler checks passed for this selection.") : PompLanguage.Pick("현재 선택 항목이 검증을 통과하지 않았어요.", "The current selection has not passed validation."));
+                    SetStatus(current.CanApply ? "ready" : "reviewing", current.CanApply ? PompLanguage.Pick("이 선택 항목의 검사를 통과했어요.", "Checks passed for this selection.") : PompLanguage.Pick("현재 선택 항목이 검증을 통과하지 않았어요.", "The current selection has not passed validation."));
                     return;
                 }
                 var snapshot = ApplySnapshot(current);

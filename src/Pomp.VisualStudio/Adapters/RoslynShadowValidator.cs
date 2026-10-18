@@ -13,7 +13,10 @@ using Task = System.Threading.Tasks.Task;
 
 namespace Pomp.VisualStudio.Adapters
 {
-    /// <summary>Compiles an immutable Roslyn solution branch. Never applies the branch to the live workspace or disk.</summary>
+    /// <summary>
+    /// Compiles an immutable Roslyn solution branch. Never applies the branch to the live workspace or disk. A file without a Roslyn document
+    /// (C++, scripts, data) has no compiler here: it gets a note, not an error, so its proposal can still be applied.
+    /// </summary>
     internal sealed class RoslynShadowValidator : ISourceGeneratorShadowValidator
     {
         private readonly VsAdapterContext context;
@@ -33,11 +36,16 @@ namespace Pomp.VisualStudio.Adapters
                     solution = solution.WithProjectAnalyzerReferences(project.Id, Array.Empty<AnalyzerReference>());
             var affected = new HashSet<ProjectId>();
             var diagnostics = new List<ShadowDiagnostic>();
+            var uncompiled = new List<ShadowDiagnostic>();
             foreach (var file in snapshot.Files)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var ids = original.GetDocumentIdsWithFilePath(file.Path);
-                if (ids.Length == 0) return Unsupported("The file is not a loaded Roslyn source document: " + file.Path);
+                if (ids.Length == 0)
+                {
+                    uncompiled.Add(new ShadowDiagnostic(Pomp.Hosting.PompLanguage.Pick("컴파일러 검사 없음 (Roslyn 문서 아님)", "No compiler check (not a Roslyn document)"), false, file.Path));
+                    continue;
+                }
                 foreach (var id in ids)
                 {
                     var document = original.GetDocument(id);
@@ -49,11 +57,12 @@ namespace Pomp.VisualStudio.Adapters
                     affected.Add(id.ProjectId);
                 }
             }
+            if (affected.Count == 0) return new ShadowValidation(true, uncompiled);
+            diagnostics.AddRange(uncompiled);
             diagnostics.Add(new ShadowDiagnostic(allowSourceGenerators ? Pomp.Hosting.PompLanguage.Pick("소스 생성기를 포함해 검사했어요.", "Checked with source generators.") : Pomp.Hosting.PompLanguage.Pick("소스 생성기는 검사에서 제외했어요.", "Source generators were excluded from the check."), false));
             var graph = solution.GetProjectDependencyGraph();
             foreach (var id in affected.ToArray())
                 foreach (var dependent in graph.GetProjectsThatTransitivelyDependOnThisProject(id)) affected.Add(dependent);
-            if (affected.Count == 0) return Unsupported("No changed source projects to validate.");
             foreach (var id in graph.GetTopologicallySortedProjects(cancellationToken).Where(affected.Contains))
             {
                 var project = solution.GetProject(id);

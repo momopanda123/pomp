@@ -265,6 +265,10 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
 - 다음 두 배열은 병합해서 쓴다. 오버레이 배열은 하위 레이어를 통째로 대체하므로, 병합하지 않으면 사용자 설정이 지워진다.
   - `skills.customDirectories`: POMP 스킬 폴더 2개 + 사용자·프로젝트 설정값
   - `disabledExtensions`: POMP에서 끈 스킬 + 사용자·프로젝트 설정값
+- 다른 프로그램의 스킬 폴더를 끈다: `skills.enableAgentsUser`, `enableAgentsProject`, `enableClaudeUser`, `enableClaudeProject`, `enableCodexUser`가 모두 `false`다.
+  - 그래서 `~/.agents`, `<작업 영역>/.agents`(`.agent` 포함), `~/.claude`, `<작업 영역>/.claude`, `~/.codex`의 스킬은 엔진에 올라가지 않고 도구 › 스킬에도 없다.
+  - omp 자체 폴더(`~/.omp/agent/skills`, `<작업 영역>/.omp/skills`)는 그대로 읽는다. omp의 `enablePiUser`·`enablePiProject`가 이 폴더의 스위치라 쓰지 않는다.
+- `task.maxRecursionDepth: 1`: 메인 대화만 하위 에이전트를 띄운다. 아래 "하위 에이전트와 화면 제어 경계".
 - 절대 경로·유효한 YAML이어야 한다. 오버레이 오류는 omp 시작 실패가 된다.
 
 ### omp 측 확장 로딩
@@ -525,6 +529,10 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
 #### 하위 에이전트와 화면 제어 경계
 
 - **하위 에이전트는 승인 없이 돈다.** omp가 `tools.approvalMode: yolo`로 실행하며, 부모의 `task` 승인이 경계다.
+- **하위 에이전트는 다시 하위 에이전트를 띄우지 못한다.** 오버레이의 `task.maxRecursionDepth: 1` 때문이고, 승인 모드와 관계없다.
+  - omp는 하위 에이전트에게 `task` 도구를 주지 않고, eval의 `agent()`·`workpool()` 도움 함수도 알리지 않는다.
+  - 그래도 띄우려 하면 omp가 "Cannot spawn another agent at task depth 1; maximum depth is 1." 오류를 모델에 돌려준다.
+  - 메인 대화의 `task` 승인은 그대로 승인 모드 규칙을 따른다.
 - POMP는 하위 에이전트에게 화면·브라우저 제어를 주지 않는다.
 - 확장(`extensions/computer-guard.ts`)은 엔진의 `SettingsManager.create(ctx.cwd)`와 `rawValue`로 **호출 세션의 실제 computer/browser 활성 설정**을 읽는다.
 
@@ -551,6 +559,12 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
   - 엔진으로 직접 넘어가 권한을 켤 수 없다. 페이지의 `computer/set`만 토글한다.
 - 켜기 전에 같은 세션의 상태 파일을 먼저 쓴다. 끄기는 omp가 확인한 뒤에 파일을 바꾼다.
 - 새 대화·세션 전환·엔진 재시작이면 꺼진다.
+- 켜져 있는 동안 확장(`extensions/computer-guard.ts`)이 메인 대화의 시스템 프롬프트 끝에 영어 안내 한 절(`## Screen & input control (pomp)`)을 붙인다.
+  - 내용: 이 대화에서 화면·입력 제어가 켜져 있다, Eval 도구의 `computer` prelude를 쓰고 처음 쓰기 전에 `xd://eval/computer`를 읽는다, GUI 제어에 Orca 같은 외부 프로그램·CLI를 실행하거나 쓰지 않는다.
+  - 매 턴 `before_agent_start`에서 `computer-state.json`을 다시 읽는다. 같은 `sessionId`에 `desktop: true`일 때만 붙이고, 꺼지면 다음 턴부터 없다.
+- 엔진 쪽 반영: `/computer on`은 세션 설정만 바꾸고 Eval 도구 설명은 바꾸지 않는다(시작 때 목록 유지).
+  - 대신 다음 턴에 omp가 숨은 알림(`<system-notice id="prelude-extension">`)으로 `computer` prelude가 생겼음과 `xd://eval/computer` 링크, omp의 컴퓨터 사용 지침을 넣는다.
+  - `xd://eval/computer` 문서는 켜진 즉시 읽을 수 있다.
 
 | 옵션 | omp 설정 |
 |---|---|
@@ -1127,6 +1141,14 @@ WebView2 안의 키:
 - 사용자가 요약 버튼을 눌러야 기존 inline assistant 경로를 호출한다.
 - 자동 표시/prefetch는 모델을 호출하지 않는다.
 - 양쪽 VSIX가 provider와 shared contract를 참조하며 CodeLensComponent 자산을 등록한다.
+- 공급자는 `CSharp`·`Basic` 콘텐츠 형식에만 등록한다. CodeLens 데이터 지점은 언어의 CodeLens 태거가 만든 descriptor에만 붙는다. Roslyn은 모든 형식·멤버에 만들지만, VS 2019의 C++ 언어 서비스(`CppCodeLensTaggerProvider`)는 단위 테스트에만 만든다. 그래서 다른 언어 파일은 옵션이 켜져 있어도 POMP 장식 캡션(`CodeCaptionFeature`)을 쓴다.
+
+### 편집기 기능의 언어 범위
+
+- 인라인 자동완성·질문 창(`InlineEditorFeature`)과 POMP 장식 캡션(`CodeCaptionFeature`)은 `code` 콘텐츠 형식에 등록한다. 레거시 언어 서비스의 형식(`C/C++` 등)은 VS 편집기가 `code`를 기반으로 만들고(`LegacyContentTypeSource`), TextMate 언어의 `code++`도 `code`를 기반으로 한다. 언어를 거르는 코드는 없다. 언어 이름(`ContentType.TypeName`)은 모델 프롬프트에만 들어간다.
+- 캡션 대상은 `EditorCaptionSource`가 정한다. Roslyn 문서(C#, VB)는 구문 트리, 그 밖의 파일은 `Pomp.Tools`의 `SourceDeclarations`다. 이것은 `read_buffer` 개요와 같은 어휘 스캐너(`SymbolOutline`)이고 C·C++, TypeScript·JavaScript, C#을 읽는다. 대상의 줄·시작·길이는 선언 첫 토큰부터 본문의 닫는 중괄호나 끝 `;`까지다. 이름공간과 본문 없는 형식 선언(`class Foo;`)은 대상이 아니다.
+- 질문 범위(`CodeScopeSelection`)도 Roslyn 문서가 없으면 같은 스캐너로 가장 안쪽 멤버를 고른다.
+- 변경 제안의 컴파일 검사(`RoslynShadowValidator`)는 Roslyn 문서만 컴파일한다. 그 밖의 파일은 오류가 아닌 메모 `컴파일러 검사 없음 (Roslyn 문서 아님)`을 달고 검사를 끝낸다. 그래서 C++ 파일의 제안도 적용할 수 있다.
 
 ## 8. 에이전트·팀 구현 계약
 
@@ -1263,7 +1285,7 @@ WebView2 안의 키:
 
 **엔진 사실**
 
-- `task` 도구: `{ context, tasks: [{ name?, agent, task }] }`에 그 밖의 필드가 더 있다. 기본으로 동시 32개, 깊이 2. 결과는 부모에게 돌아온다.
+- `task` 도구: `{ context, tasks: [{ name?, agent, task }] }`에 그 밖의 필드가 더 있다. 기본으로 동시 32개다. POMP는 깊이를 1로 둬서(`task.maxRecursionDepth: 1`) 메인 대화만 쓴다. 결과는 부모에게 돌아온다.
 - 에이전트끼리는 `write agent://<id>`와 `agent://all`로 메시지를 주고받는다. 메인 대화에는 중계 메시지로 보인다.
 - POMP는 오간 메시지를 채팅과 해당 대화 상대 탭에 보여 준다.
 - 하위 에이전트의 목록, 대화, 진행 상황은 읽을 수 있다.
@@ -1385,6 +1407,7 @@ WebView2 안의 키:
 
 - 호스트는 `POMP_STATE_DIR/computer-state.json`을 원자적으로 쓴다: `{ sessionId, desktop, browser, updatedAt }`.
 - 확장의 판정 규칙은 §4 "하위 에이전트와 화면 제어 경계"에 있다.
+- 확장은 매 턴 이 파일을 다시 읽어 메인 대화의 화면·입력 제어 안내를 붙일지 정한다. 규칙은 §4 "컴퓨터 사용"에 있다.
 
 **한계**
 
@@ -1446,40 +1469,47 @@ Team { id, title, goal, members: string[], mode: 'lead' | 'parallel' | 'pipeline
 - `computer/state`: `{ policy: 'off' | 'perConversation', browser, confirmReads, desktop, pending, available, message? }`.
 - `computer/set { requestId, desktop }`은 `computer/reply { requestId, ok, error? }`로 답한다.
 
-### 8.8 대화 상대, 대기열, 기록
+### 8.8 대화 탭, 대기열, 기록
 
-**대화 상대 탭**
+**대화 탭**
 
-- 채팅 상단, 세션 이름 아래에 대화 상대 탭이 있다. 닫을 수 없는 기본(POMP) 탭과 고른 에이전트·팀 탭이다.
-- 탭 개수 제한은 없다. 많으면 탭 줄을 가로로 넘기고 ×로 닫는다.
-- 활성 탭이 이 대화의 상대다. 메시지마다 초기화되지 않는다. 대화 목록에도 상대가 보인다.
-- 역할·팀의 "메시지"와 메시지 없는 `/agent 이름`, `/team id`는 그 탭을 연다.
-- 기본(POMP) 탭은 대화 전체를 보이고 대상 배지로 구분한다.
-- 에이전트·팀 탭은 그 상대에게 간 턴과 그 탭에서 보낸 턴을 보인다. 평소에는 그 상대에게 보낸다.
-- 새 대화는 기본이다. 대화 중에 상대를 바꾸면 다음 메시지부터 적용한다.
+- 채팅 상단, 세션 이름 아래에 대화 탭이 있다. 닫을 수 없는 기본(POMP) 탭과 연 에이전트·팀 탭이다.
+- 탭마다 별도 대화(omp 세션 파일)다. 기본 탭은 POMP 대화이고, 에이전트·팀 탭은 그 에이전트·팀이 상대인 대화다.
+- 탭을 바꾸면 엔진이 그 탭의 대화로 바뀌고 그 대화만 다시 표시한다(대화 목록에서 바꿀 때와 같다). 기본 탭에는 다른 탭의 턴이 나오지 않는다.
+- omp는 VS 창마다 하나다. 응답·승인·질문·백그라운드 작업 중에는 다른 탭을 고를 수 없다. 탭은 흐리게 보이고 짧은 도움말이 뜬다. 응답을 멈추면 바꿀 수 있다.
+- 역할·팀의 "메시지", `+` 목록, 메시지 없는 `/agent 이름`, `/team id`는 그 상대의 탭을 연다. 이미 열린 탭이 있으면 그 탭으로 가고, 없으면 새 대화(빈 기록)를 시작한다.
+- ×는 탭만 닫는다. 대화는 대화 목록에 남는다. 지금 탭을 닫으면 기본 탭으로 돌아간다. 닫았다가 다시 열면 새 대화다.
+- 대화 목록에서 에이전트·팀 대화를 열면 그 상대의 탭으로 열린다. POMP 대화를 열면 기본 탭의 대화가 된다.
+- 새 대화(`+`, `/new`)는 POMP 대화이고 기본 탭의 대화가 된다.
+- 메시지를 보내지 않은 대화는 엔진이 파일로 남기지 않는다. 그 탭으로 돌아가면 그 상대의 새 대화를 시작한다.
+- 저장: `<작업 영역>\.pomp\local\chat-tabs.json`(ui-protocol "Conversation tabs"). 기본 탭의 대화, 에이전트·팀 대화와 그 상대, 열린 탭 순서를 둔다. VS를 다시 시작하거나 페이지를 다시 읽어도 남는다.
+- 이전 버전의 `partners.json`(한 대화를 탭으로 거르던 상대 기록)은 읽지 않는다. 그 대화들은 POMP 대화로 열린다.
 
 **한 메시지 대상**
 
-- 대상 칩, `@` 멘션, 메시지가 붙은 `/agent`는 어느 탭에서나 쓰고 그 메시지에만 적용한다.
+- 대상 칩, `@` 멘션, 메시지가 붙은 `/agent`는 어느 탭에서나 쓰고 그 메시지에만 적용한다. 그 탭의 대화 안에서 위임한다(§8.3).
 - 칩은 평소 `보낼 대상`이고, 다른 대상을 골랐을 때만 그 상대를 보인다. 지금 탭의 상대 자신은 칩에 나오지 않는다.
-- 에이전트·팀 탭에서 보낸 메시지와 답은 보낸 탭에 남고, 받은 상대의 탭과 기본 탭에도 보인다.
-- 대화를 다시 열거나 엔진·VS를 다시 시작해도 보낸 탭에 남는다. 표식 규칙은 ui-protocol `chat/send`의 `from`에 있다.
-- 그래서 한 에이전트의 결과를 다른 에이전트에게 넘겨 작업을 이어 갈 수 있다.
-- `/goal`은 기본(POMP) 탭에서만 쓴다. 계획 이어가기와 편집기 코드 동작은 메인 POMP로 보낸다.
+- POMP는 기본 탭에서만 대상 목록에 있다. 에이전트·팀 탭은 그 상대의 대화이기 때문이다.
+- `/goal`은 기본(POMP) 탭에서만 쓴다. 편집기 코드 동작은 기본 탭의 대화로 보낸다. 다른 탭이면 먼저 기본 탭으로 바꾸고 요청은 입력창에서 기다린다.
+- 계획 이어가기는 지금 대화의 계획이므로 지금 대화로 보낸다.
 - 작업 › 코드 점검의 **에이전트에게 해결 요청**은 지금 보낼 대상에 메시지 하나로 보낸다. 편집기 컨텍스트는 끄고, 최대 50개·12,000자다.
 
-**에이전트 상대**
+**에이전트 대화**
 
-- 첫 메시지는 새 일로 보낸다(§8.3). 새 인스턴스다.
-- 호스트는 그 턴에 시작된 그 이름의 작업 id를 상대 인스턴스로 기억한다. 다음 메시지부터 그 인스턴스로 이어 보낸다.
-- 그 id가 이 대화의 작업 목록에서 사라졌으면 새 일로 새 인스턴스를 만들고 그렇게 알린다. 다시 시작한 경우가 그렇다.
+- 에이전트 자신이 대화 상대다. 메시지는 입력한 그대로 보낸다. `/pomp-agent`도, `task` 하위 에이전트도 없다.
+- 엔진 확장 `extensions/partner.ts`가 `chat-tabs.json`에서 대화의 상대를 읽고 역할을 적용한다. 역할 파일은 omp 순서(사용자, 프로젝트, 내장)로 찾는다(`lib/agent-roles.ts`).
+  - 지시문: `before_agent_start`에서 시스템 프롬프트에 `<pomp_conversation_partner>` 블록(이름·설명·역할 본문)과 그 역할의 메모를 더한다. 매 턴 다시 정한다.
+  - 모델·생각 수준: 새 대화를 시작한 뒤 호스트가 `/pomp-partner new`를 보내고, 확장이 역할의 모델(`@smol` 같은 별칭 포함)과 생각 수준을 고른다. 엔진이 대화마다 저장하므로 그 대화로 돌아오면 그대로다.
+  - 도구: `tools.ts`가 대화를 바꿀 때와 도구 초기화 때 역할의 도구 목록만 켠다(읽기 전용 역할은 읽기 도구만). 목록이 없으면 기본 도구다.
+- 기본 탭으로 돌아가면 POMP 대화는 블록이 없고 기본 도구로 돌아간다. 저장한 모델이 없어 에이전트 모델을 물려받은 POMP 대화는 `/pomp-partner`가 마지막 POMP 모델로 되돌린다. VS를 다시 시작한 직후 에이전트 대화에서 새 POMP 대화를 만들면 되돌릴 모델을 모른다.
+- 역할을 찾을 수 없으면 그 대화로는 보내지 않는다.
 
-**팀 상대: 같은 구성원으로 이어 가기**
+**팀 대화: 같은 구성원으로 이어 가기**
 
-- 팀 상대는 메시지마다 팀으로 보낸다(§8.2).
+- 팀 탭은 그 팀의 대화다. 그 대화의 메시지는 메시지마다 팀으로 보낸다(§8.2). 팀 안내와 구성원 실행은 그 대화 안에서 일어난다.
 - 호스트는 대화마다, 팀마다 구성원별 최근 인스턴스를 기억한다: 역할 이름 → 작업 id. 메모리에만 두고, 대화나 연결이 바뀌면 비운다.
 - 기록 대상은 그 팀으로 보낸 턴에서 새로 시작된 작업 중 역할 이름이 팀 구성원인 것이다. 턴은 `chat/turnStarted.team`과 같은 promptId로 가린다.
-- 다음에 그 팀으로 보낼 때는 대화 상대 팀 탭이든 한 메시지 대상이든 이어 가는 구성원을 함께 보낸다.
+- 다음에 그 팀으로 보낼 때는 팀 대화든 한 메시지 대상이든 이어 가는 구성원을 함께 보낸다.
 - 이어 가는 구성원은 이 대화의 현재 작업 목록에 아직 있는 인스턴스만이다. 형식은 `<역할>=<작업id>` 쌍의 목록이다.
 
 | 항목 | 규칙 |
@@ -1490,7 +1520,7 @@ Team { id, title, goal, members: string[], mode: 'lead' | 'parallel' | 'pipeline
 | 개수 | 최대 6개 |
 
 - 남은 인스턴스가 없으면 이어 가는 구성원 없이 보낸다.
-  팀 상대일 때는 `conversation/partnerState.message`로 "이전 구성원을 찾을 수 없어 새로 시작해요"를 알린다.
+  팀 대화일 때는 `conversation/tabsState.message`로 "이전 구성원을 찾을 수 없어 새로 시작해요"를 알린다.
 - 이어 가는 구성원이 있으면 팀 안내 블록에 "이어 가는 구성원" 목록(`역할 → agent://<작업id>`)과 규칙을 넣는다.
 - 규칙: 이미 있는 구성원은 새로 시작하지 않고 `write agent://<id>`로 다음 일을 보낸다. 답은 메시지로 받고 `wait`는 쓰지 않는다.
 - 목록에 없거나 연결되지 않는 구성원만 `task`로 새로 시작한다.

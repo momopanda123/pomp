@@ -4,7 +4,7 @@ import { useT } from './i18n';
 import { send, type UiToHost } from './protocol';
 import type { CommandReply } from './conversationProtocol';
 
-type CommandType = 'conversation/partner' | 'chat/queue' | 'agents/history';
+type CommandType = 'conversation/tab' | 'chat/queue' | 'agents/history';
 export function useConversationCommands(replies: CommandReply[], scope = '') {
   const t = useT();
   const request = useRef<string | null>(null);

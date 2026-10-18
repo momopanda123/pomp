@@ -250,7 +250,7 @@ Host text the page shows says what happened, the current state or a reason.
 | `workspace/trustState` | `{ requestId?, root, required, trusted, fingerprint, files: [{ path, kind, detail? }], truncated?, error? }` | Workspace engine configuration needing trust. See "Workspace trust". |
 | `theme/changed` | `{ kind: "dark"\|"light", colors: { [cssVar]: value }, fontFamily?, fontSizePx? }` | Apply every `colors` entry. |
 | `session/info` | `{ model?, thinkingLevel?, sessionId?, sessionName?, contextUsage?, isStreaming, workingDirectory?, fastMode? }` | Session state for the composer. See "session/info" below. |
-| `chat/turnStarted` | `{ promptId, clientMessageId?, text?, attachments?, editorContext?, team?, agent?, agentInstance?, main?, from? }` | The host took a user message as a prompt. See "chat/turnStarted" below. |
+| `chat/turnStarted` | `{ promptId, clientMessageId?, text?, attachments?, editorContext?, team?, agent?, agentInstance?, main? }` | The host took a user message as a prompt. See "chat/turnStarted" below. |
 | `chat/assistantStart` | `{ messageId }` | New assistant bubble. |
 | `chat/assistantDelta` | `{ messageId, kind: "text"\|"thinking", delta }` | Append; render markdown incrementally. |
 | `chat/assistantNarration` | `{ messageId, text }` | The ended thinking block was narration. See "chat/assistantNarration" below. |
@@ -413,8 +413,7 @@ Payload fields:
 | `text`, `attachments: [{ path }]` | the user's input as typed, without editor context |
 | `editorContext` | `{ path, startLine?, endLine?, caretLine? }`: the active file actually prepended to the prompt |
 | `team`, `agent`, `agentInstance` | the destination the message actually went to |
-| `main` | `true` when POMP itself answered |
-| `from` | `{ kind: "agent"\|"team", id }`: the validated `chat/send.from` |
+| `main` | `true` when the conversation answered itself (no one-message target) |
 
 **Turn lifecycle**
 
@@ -438,20 +437,18 @@ Payload fields:
 - `startLine`/`endLine` are an inclusive non-empty selection range. An end at column 1 excludes that line.
 - Otherwise `caretLine` labels the nearby editor lines.
 - It is omitted for context-off sends, slash commands, or no active document.
-- Restored history recovers it only from POMP's leading `<vs_context>` block, after any host routing brief and origin marker.
+- Restored history recovers it only from POMP's leading `<vs_context>` block, after any host routing brief (and the tab marker an earlier POMP wrote).
 
 **Destination**
 
 - The destination is the explicit target, or the conversation partner the host applied.
 - A replayed bubble thus keeps its "→ target" badge.
-- With `main: true` there is no badge, so a retry after a partner change still goes to POMP.
-- With `from`, a bubble the page creates from this message belongs to that agent/team tab as well as to its destination.
+- With `main: true` there is no badge, and a retry goes to the conversation itself again.
 
 **Restored history of another session**
 
 - It shows the extension's routing brief, such as `<!-- pomp-team:… -->`, at the start of the user text.
-- It gives `from` from the origin marker `<!-- pomp-from:<kind>:<id> -->` the host recorded in the prompt.
-- The origin marker is never shown: the host removes it from `text`.
+- An earlier POMP put a tab marker `<!-- pomp-from:<kind>:<id> -->` after it; the host never shows that marker.
 - Session titles, previews and archive pages leave both out.
 
 ### chat/assistantNarration
@@ -510,6 +507,7 @@ It comes from the code editor's POMP menu: explain, review, ask, add file, and "
 - It is ignored while a permission/dialog is up, and for unknown views.
 - The page also accepts the Tools ids: `extensions`, `instructions`, `index`, and the older `skills`, `mcp`, `rules`, `workflows`.
 - `hooks` opens Agents › 규칙.
+- `background` opens Agents › 실행 중 (Running).
 
 ### Engine version
 
@@ -641,8 +639,7 @@ Payload:
 
 ```
 { clientMessageId, text, includeEditorContext, attachments?: [{ path }],
-  team?: string, agent?: string, agentInstance?: string, main?: true,
-  from?: { kind: "agent"|"team", id: string } }
+  team?: string, agent?: string, agentInstance?: string, main?: true }
 ```
 
 **Turn start and queueing**
@@ -664,21 +661,11 @@ Payload:
 - `agentInstance` delivers the message to that existing agent over omp's IRC (`/pomp-dm`).
 - At most one of `team`/`agent`/`agentInstance` may be set.
 - An unknown target ends the turn with `send_failed` (docs/architecture.md §8.3).
-- `main: true` makes POMP itself answer, whatever the conversation partner is.
-- Uses of `main: true`: page actions of the main conversation, such as work plan continue, code-review discuss and editor menu auto-send; retries of POMP answers.
+- `main: true` makes the conversation answer itself, without a team conversation's team routing.
+- Uses of `main: true`: page actions such as work plan continue, code-review discuss and editor menu auto-send; retries of such answers.
+- Editor menu requests belong to the Default (POMP) tab's conversation: from an agent or team tab the page switches there first and the request waits in the input.
 - `main` combined with another target ends the turn with `send_failed`.
-
-**`from`**
-
-- `from` names the agent/team tab the message was sent from.
-- The page sends it only when that tab sends to a different one-message target: another agent, team, running instance, or `main`.
-- The page never sends it for an editor or work request that moves the view to Default (POMP).
-- It is view only and never routes the message.
-- The host keeps it only when `kind` is `agent`/`team` and `id` is a valid role/team name (the partner-id rule). Otherwise the host ignores it.
-- A kept `from` rides along in `chat/turnStarted.from`, also for a queued message.
-- A kept `from` is recorded as `<!-- pomp-from:<kind>:<id> -->` before the composed prompt, after the extension's routing brief.
-- This way a restored transcript returns it.
-- A slash command for POMP itself gets no marker, because omp parses the command only at the start.
+- Without a target, the current conversation's partner applies ("Conversation tabs" below): an agent conversation gets the message as typed, a team conversation through `/pomp-team`.
 
 #### `workspace/countDraftTokens`
 
@@ -881,44 +868,51 @@ Payload:
 - When unfinished items remain, omp may ask the model to continue at the end of the next run.
 - The page shows these limits in the editor.
 
-## Conversation partners, command queue and agent run history
+## Conversation tabs, command queue and agent run history
 
 - All three state messages below are included in every `ui/ready` snapshot.
 - They are republished on change.
 - Commands are ordered with chat sends on the host's serial command queue.
-- Each command receives its matching reply `{ requestId, ok, error? }` exactly once.
 
-### Conversation partner
+### Conversation tabs
+
+Every chat tab is its own omp conversation: the Default (POMP) tab's, and one per open agent or team tab.
 
 | type | direction | payload |
 |---|---|---|
-| `conversation/partner` | UI → host | `{ requestId, partner: { kind: "main"\|"agent"\|"team", id? } }` |
-| `conversation/partnerReply` | host → UI | Reply to `conversation/partner`. |
-| `conversation/partnerState` | host → UI | `{ sessionId?, partner: { kind, id? }, instance?, title?, message? }` |
+| `conversation/tab` | UI → host | `{ requestId, action: "open"\|"activate"\|"close", partner?: { kind: "agent"\|"team", id }, sessionId? }` |
+| `conversation/tabReply` | host → UI | `{ requestId, ok, error? }`: only for `close` of a tab that is not the current conversation. |
+| `conversation/tabsState` | host → UI | `{ sessionId?, partner: { kind, id? }, title?, message?, main?, tabs: [{ sessionId, partner, title? }] }` |
 
-**Selection**
+**Actions**
 
-- With no explicit `team`, `agent`, `agentInstance` or `main`, `chat/send` uses the current conversation partner.
-- A one-message target overrides it without changing the preference.
-- Only usable, non-shadowed roster roles/teams can be selected.
+- `open` with `partner`: switches to that partner's open tab, or starts a new, empty conversation for it (`new_session`) and opens its tab. A partner never has two open tabs.
+- `activate` with `sessionId`: switches to that open tab's conversation. Without `sessionId`: the Default tab's conversation (`main`), or a new POMP conversation when it has none.
+- `close` with `sessionId`: closes the tab; the conversation stays in the conversation list. Closing the current tab then activates the Default tab.
+- A tab whose conversation the engine never wrote (no message was sent) starts a new conversation for its partner instead of switching.
+- `open`, `activate` and `close` of the current tab change the conversation: they answer with exactly one `session/newResult { requestId, status, message? }` and replay the transcript like a `session/history` switch. They are refused while a reply, approval, question or background work runs.
+
+**State**
+
+- `sessionId`/`partner`/`title`: the current conversation and its partner (`main` for a POMP conversation).
+- `main`: the Default tab's conversation id, or `null`.
+- `tabs`: the open agent and team tabs in order. The page also shows the current conversation as a tab when its tab was closed.
+- `message`: a team conversation's note that its previous members are gone.
 
 **Routing**
 
-- Agent partners start with `/pomp-agent`.
-- The host remembers the first newly started matching job in that turn.
-- Subsequent messages use `/pomp-dm` while that id remains in this conversation's background jobs.
-- If the job disappeared, including after engine restart, the next message starts a new assignment.
-- In that case `message` explains the fallback.
-- Team partners use `/pomp-team` on every message.
+- With no explicit `team`, `agent`, `agentInstance` or `main`, `chat/send` uses the current conversation's partner.
+- An agent conversation sends the message as typed: the engine extension (`extensions/partner.ts`) gives that conversation the role's instructions, model, thinking level and tools. No `/pomp-agent` and no subagent.
+- A team conversation sends every message with `/pomp-team`, as before, inside its own conversation.
+- A one-message target (the composer's send-target chip) overrides the partner for that message.
 
 **Persistence**
 
-- Preferences are persisted per omp session id in the workspace's `.pomp/local/partners.json`, atomically.
-- There is no entry count limit.
-- Past 4 MiB, the conversations used longest ago are removed first.
-- Damaged files reset with a log warning.
-- Process-local instances are not persisted.
-- Session-list `entries[].partner` is `{ kind, id? }` for an agent/team, or `null` for main.
+- `<workspace>\.pomp\local\chat-tabs.json`, written atomically: `{ version: 1, main, conversations: [{ sessionId, partner: { kind, id }, open }] }`.
+- A conversation that is not listed is a POMP conversation. The engine extension reads the partners from this file.
+- There is no entry count limit. Past 1 MiB, closed conversations listed first are removed first. Damaged files reset with a log warning.
+- Session-list `entries[].partner` is `{ kind, id }` for an agent or team conversation, or `null` for a POMP conversation.
+- The earlier `.pomp/local/partners.json` is not read any more: those conversations are POMP conversations.
 
 ### Host command queue
 
@@ -1155,6 +1149,15 @@ Payload:
 - The guard relies on the engine's **session-scoped settings API**.
   Every engine upgrade therefore re-verifies the actual settings resolution and permission bypass.
 
+**Screen & input control note**
+
+- While `computer-state.json` holds `desktop: true` for the current `sessionId`, the same module appends one English section to the main agent's system prompt.
+  Its heading is `## Screen & input control (pomp)`.
+- The section says that screen & input control is enabled for this conversation and that the model uses the Eval tool's `computer` prelude (docs: `xd://eval/computer`).
+  It forbids launching or using external programs or CLIs (such as Orca) for GUI control.
+- It is decided in `before_agent_start` on every turn from the state file. When the switch is off, there is no section.
+- Subagents never get it.
+
 ### Skills
 
 | type | payload | meaning |
@@ -1259,6 +1262,10 @@ Writing:
   2. `<home>/.pomp/skills`
   3. the user's own directories, then the workspace's own directories
   4. POMP's bundled catalog skills, last
+- The overlay also writes `skills.enableAgentsUser`, `enableAgentsProject`, `enableClaudeUser`, `enableClaudeProject` and `enableCodexUser` as `false`.
+  The engine therefore loads no skills from other programs' folders: `~/.agents`, `<workspace>/.agents` (and `.agent`), `~/.claude`, `<workspace>/.claude` and `~/.codex`.
+  Their skills never reach the engine's command list, so they are not rows either.
+- The engine's own folders stay on: `~/.omp/agent/skills` and `<workspace>/.omp/skills` (omp's `enablePiUser`/`enablePiProject` keys, not written).
 - Stock native discovery reads only one-level `*/SKILL.md` files that have a description.
 - Native described one-level POMP skills are omitted from the legacy resource injection and list.
 - Deeper or undescribed skills remain in `/resources`.
@@ -2618,6 +2625,13 @@ Item fields: `{ id, source: "agent"|"compiler", severity: "error"|"warning", cod
   With it, members work in isolated copies.
   Their changes come back as isolated results to review and apply; see "Isolated team runs".
 
+**Nested subagents**
+
+- The overlay writes `task.maxRecursionDepth: 1` in every approval mode: only the main agent spawns subagents.
+- omp gives subagents no `task` tool. A spawn attempt from inside a subagent (eval `agent()`/`workpool()`) fails with omp's
+  "Cannot spawn another agent at task depth 1; maximum depth is 1."
+- The main agent's `task` approval is unchanged.
+
 ### `agents/command` (UI → host)
 
 The UI sends `agents/command` to manage roles and teams. Each is answered by `agents/reply`.
@@ -3126,6 +3140,9 @@ Payload: `{ action: "refresh"|"apply"|"discard"|"openPatch", requestId, root?, i
 - The card shows status, tool count, time, recent tools and an individual stop.
 - The same card is also visible in the partner tab.
 - Only current members without such a call card appear in the collapsible progress row.
+- Agents › 실행 중 (Running) lists every job of the snapshot: running ones first, ended ones by `lastUpdate`, latest first.
+  A `live` snapshot of another conversation is not listed. Each row shows the role, id, description, `team`, status, `progress.durationMs`, the end time (`lastUpdate`) and the same individual stop.
+  Opening the view sends `workspace/background { action: "refresh" }`.
 
 ### Stopping one member
 

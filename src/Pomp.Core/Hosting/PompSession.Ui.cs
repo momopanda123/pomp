@@ -108,8 +108,8 @@ namespace Pomp.Hosting
                     PauseChatQueue(PompLanguage.Pick("사용자가 대화를 중지했어요.", "Conversation stopped by the user."));
                     Cancel(sending);
                     break;
-                case UiMessageTypes.ConversationPartner:
-                    _commands.Enqueue(() => HandlePartnerAsync(message.Payload ?? new JObject()));
+                case UiMessageTypes.ConversationTab:
+                    _commands.Enqueue(() => HandleTabAsync(message.Payload ?? new JObject()));
                     break;
                 case UiMessageTypes.ChatQueue:
                     _commands.Enqueue(() => HandleQueueAsync(message.Payload ?? new JObject()));
@@ -391,7 +391,7 @@ namespace Pomp.Hosting
             catch (Exception ex) { partnerError = ex; }
 
             // Agents this prompt starts must come after the first job snapshot (taken once per connection and conversation, before
-            // the turn is registered): only then are they reported as new and remembered for a partner tab or team continuation.
+            // the turn is registered): only then are they reported as new and remembered for a team continuation.
             await _backgroundAgents.EnsureBaselineAsync(TimeSpan.FromSeconds(3), requestToken).ConfigureAwait(false);
             if (requestToken.IsCancellationRequested) return false;
 
@@ -472,7 +472,6 @@ namespace Pomp.Hosting
                 Agent = string.IsNullOrWhiteSpace(send.Agent) ? null : send.Agent!.Trim(),
                 AgentInstance = string.IsNullOrWhiteSpace(send.AgentInstance) ? null : send.AgentInstance!.Trim(),
                 Main = string.IsNullOrWhiteSpace(send.Team) && string.IsNullOrWhiteSpace(send.Agent) && string.IsNullOrWhiteSpace(send.AgentInstance) ? true : null,
-                From = send.From,
             });
 
             ChatTurnEndPayload? endedEarly;
@@ -511,13 +510,11 @@ namespace Pomp.Hosting
                 // engineText: the host's own commands (a goal run) say exactly what the engine gets; the bubble keeps what the user typed.
                 var message = engineText ?? await ComposeMessageAsync(editorContext?.Text, text, attachments, sending.Token).ConfigureAwait(false);
                 sending.Token.ThrowIfCancellationRequested();
-                // The tab a message came from when it went elsewhere is recorded in the prompt itself: the engine's transcript is all a
-                // restored chat has (PromptDisplay.Origin). A slash command for POMP stays first, because omp only parses it there.
-                var targeted = !string.IsNullOrWhiteSpace(send.Team) || !string.IsNullOrWhiteSpace(send.Agent) || !string.IsNullOrWhiteSpace(send.AgentInstance);
-                if (send.From != null && (targeted || !message.TrimStart().StartsWith("/", StringComparison.Ordinal))) message = PromptDisplay.OriginMarker(send.From) + "\n\n" + message;
                 // A message for a team or one agent goes through the extension's /pomp-team, /pomp-agent or /pomp-dm (docs/architecture.md §8.2).
                 message = await ApplyTargetAsync(send, message, sending.Token).ConfigureAwait(false);
                 sending.Token.ThrowIfCancellationRequested();
+                // An agent conversation answers as the agent only with the engine extension that gives it the role (extensions/partner.ts).
+                if (partner?.Kind == "agent") await RequireEngineCommandsAsync(connection, sending.Token, "pomp-partner").ConfigureAwait(false);
 
                 // omp reads each command as one line and asks clients to stay within its physical frame limit (1 MiB).
                 var probe = OmpCommands.Prompt(message, null);
@@ -538,7 +535,7 @@ namespace Pomp.Hosting
                 }
 
                 lock (_stateLock) if (expectedSession != null && _info.SessionId != expectedSession) throw new InvalidOperationException("POMP Workflow conversation changed before dispatch.");
-                BeginRun(turn, send, partner);
+                BeginRun(turn, send);
                 var response = await SendPromptCommandAsync(connection, promptId, message, sending.Token).ConfigureAwait(false);
                 sending.Token.ThrowIfCancellationRequested();
                 if (!response.Success)

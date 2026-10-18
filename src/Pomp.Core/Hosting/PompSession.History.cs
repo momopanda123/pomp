@@ -244,7 +244,7 @@ namespace Pomp.Hosting
                     var listing = await Task.Run(() => store.List(path, id, name), _disposeCts.Token).ConfigureAwait(false);
                     answer["root"] = listing["root"];
                     var listedRoot = (string?)listing["root"] ?? "";
-                    var partners = _partners.All(listedRoot);
+                    var partners = _tabs.All(listedRoot);
                     var entries = (listing["entries"] as JArray ?? new JArray()).OfType<JObject>().ToList();
                     foreach (var entry in entries)
                     {

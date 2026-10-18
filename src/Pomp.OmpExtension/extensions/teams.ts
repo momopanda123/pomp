@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from '@oh-my-pi/pi-coding-agent';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { directPath, resolveRole, type RoleInfo } from '../lib/agent-roles.ts';
 import { isPompHost, readVsState } from '../lib/vs-state.ts';
 
 // Teams (docs/architecture.md §8.2): /pomp-team and membersOnly.
@@ -28,102 +28,9 @@ export function isolationOf(input: unknown): { any: boolean; all: boolean } {
   return { any: top || flags.some(Boolean), all: flags.length > 0 && flags.every(Boolean) };
 }
 
-interface MemberInfo {
-  name: string;
-  title: string;
-  job: string;
-  model: string;
-}
-
 const ID_REGEX = /^[a-z0-9-]{2,40}$/;
 const INSTANCE_REGEX = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const MAX_TEAM_BYTES = 32 * 1024;
-const MAX_ROLE_BYTES = 64 * 1024;
-
-const BUNDLED_ROLES: Record<string, { title: string; job: string; model: string }> = {
-  task: { title: 'Task', job: 'General-purpose delegated tasks', model: '@task' },
-  sonic: { title: 'Sonic', job: 'Mechanical updates and data collection', model: '@smol' },
-  scout: { title: 'Scout', job: 'Codebase exploration and research', model: '@smol' },
-  reviewer: { title: 'Reviewer', job: 'Code review and quality analysis', model: '@slow' },
-  'security-reviewer': { title: 'Security Reviewer', job: 'Security and vulnerability specialist', model: 'default' },
-};
-
-function directPath(file: string): boolean {
-  try {
-    const full = path.resolve(file);
-    for (let cur = full; cur && path.dirname(cur) !== cur; cur = path.dirname(cur)) {
-      try {
-        if (fs.existsSync(cur) && fs.lstatSync(cur).isSymbolicLink()) return false;
-      } catch {
-        return false;
-      }
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function unquote(raw: string): string {
-  const trimmed = raw.trim();
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    try {
-      return JSON.parse(trimmed.startsWith("'") ? `"${trimmed.slice(1, -1)}"` : trimmed) as string;
-    } catch {
-      return trimmed.slice(1, -1);
-    }
-  }
-  return trimmed;
-}
-
-function parseRoleFrontmatter(text: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  if (!text.startsWith('---')) return result;
-  const second = text.indexOf('\n---', 3);
-  if (second < 0) return result;
-  const fm = text.substring(3, second);
-  const lines = fm.split(/\r?\n/);
-  for (const line of lines) {
-    // Only top-level keys: a nested "name:" under another key is not the role's.
-    if (/^[\s-]/.test(line)) continue;
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const colon = trimmed.indexOf(':');
-    if (colon <= 0) continue;
-    const key = trimmed.substring(0, colon).trim().toLowerCase();
-    const val = trimmed.substring(colon + 1).trim();
-    result[key] = unquote(val);
-  }
-  return result;
-}
-
-// omp's precedence: the user's definition, then the project's (POMP hands .pomp/agents to omp as a plugin folder, which ranks after the user's), then the bundled one of that name.
-function resolveMember(member: string, solutionRoot: string): MemberInfo | null {
-  const projectFile = path.join(solutionRoot, '.pomp', 'agents', `${member}.md`);
-  const userHome = os.homedir();
-  const userFile = path.join(userHome, '.omp', 'agent', 'agents', `${member}.md`);
-
-  const candidate = fs.existsSync(userFile) ? userFile : fs.existsSync(projectFile) ? projectFile : null;
-  if (!candidate) {
-    const b = BUNDLED_ROLES[member];
-    return b ? { name: member, title: b.title, job: b.job, model: b.model } : null;
-  }
-
-  if (!directPath(candidate)) return null;
-
-  try {
-    const stat = fs.statSync(candidate);
-    if (stat.size > MAX_ROLE_BYTES) return null;
-    const content = fs.readFileSync(candidate, 'utf8');
-    const fm = parseRoleFrontmatter(content);
-    const title = fm['pomp-title'] || fm.name || member;
-    const job = fm['pomp-job'] || (fm.description ? fm.description.slice(0, 80) : 'Specialist');
-    const model = fm.model || 'default';
-    return { name: member, title, job, model };
-  } catch {
-    return null;
-  }
-}
 
 export function approvalTasks(input: unknown): { agent: string; task: string }[] | undefined {
   if (!input || typeof input !== 'object') return undefined;
@@ -205,7 +112,7 @@ export default function teams(pi: ExtensionAPI): void {
         return;
       }
       const name = match[1]!;
-      const info = resolveMember(name, readVsState()?.solutionRoot ?? ctx.cwd);
+      const info = resolveRole(name, readVsState()?.solutionRoot ?? ctx.cwd);
       if (!info) {
         ctx.ui.notify(`Agent not found: ${name}`, 'warning');
         return;
@@ -335,13 +242,13 @@ export default function teams(pi: ExtensionAPI): void {
       }
       const isolated = team.isolation === true;
 
-      const membersInfo: MemberInfo[] = [];
+      const membersInfo: RoleInfo[] = [];
       for (const member of team.members) {
         if (typeof member !== 'string' || !ID_REGEX.test(member)) {
           ctx.ui.notify(`Invalid member name: ${member}`, 'warning');
           return;
         }
-        const info = resolveMember(member, solutionRoot);
+        const info = resolveRole(member, solutionRoot);
         if (!info) {
           ctx.ui.notify(`Team member role not found: ${member}`, 'warning');
           return;

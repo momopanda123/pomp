@@ -94,8 +94,8 @@ namespace Pomp.Ui
         /// <summary>Host → UI: agent roles and teams (docs/architecture.md §8), and the reply to one agents/command.</summary>
         public const string AgentsState = "agents/state";
         public const string AgentsReply = "agents/reply";
-        public const string ConversationPartnerState = "conversation/partnerState";
-        public const string ConversationPartnerReply = "conversation/partnerReply";
+        public const string ConversationTabsState = "conversation/tabsState";
+        public const string ConversationTabReply = "conversation/tabReply";
         public const string ChatQueued = "chat/queued";
         public const string ChatQueueState = "chat/queueState";
         public const string ChatQueueReply = "chat/queueReply";
@@ -171,7 +171,7 @@ namespace Pomp.Ui
         public const string SessionHistory = "session/history";
         public const string SessionFast = "session/fast";
         public const string AgentsCommand = "agents/command";
-        public const string ConversationPartner = "conversation/partner";
+        public const string ConversationTab = "conversation/tab";
         public const string ChatQueue = "chat/queue";
 
         /// <summary>Edit of the agent's current plan (engine todo phases): <c>{requestId, sessionId, base, phases}</c>.</summary>
@@ -598,14 +598,8 @@ namespace Pomp.Ui
 
         public string? AgentInstance { get; set; }
 
-        /// <summary>True when POMP itself answered (no team, agent or instance), so a retry keeps that destination after a partner change.</summary>
+        /// <summary>True when the conversation answered itself (no team, agent or instance), so a retry keeps that destination.</summary>
         public bool? Main { get; set; }
-
-        /// <summary>
-        /// The agent or team tab the message was sent from when it went to another target (<see cref="ChatSendPayload.From"/>), so the
-        /// sending tab keeps it after a replay or a restored transcript. Null for a message sent to the tab's own partner or from Default.
-        /// </summary>
-        public ConversationPartnerPayload? From { get; set; }
     }
 
     public sealed class ChatAssistantStartPayload
@@ -806,17 +800,10 @@ namespace Pomp.Ui
         public string? AgentInstance { get; set; }
 
         /// <summary>
-        /// True: POMP itself answers, whatever the conversation partner is (docs/architecture.md §8.8). Used by page actions that belong to
-        /// the main conversation (work plan, code review, editor menu) and by retries of messages POMP answered. Excludes the targets above.
+        /// True: the conversation answers itself, without the team routing of a team conversation (docs/architecture.md §8.8). Used by page
+        /// actions (work plan, code review, editor menu) and by retries of such messages. Excludes the targets above.
         /// </summary>
         public bool? Main { get; set; }
-
-        /// <summary>
-        /// The agent or team tab (kind <c>agent</c>/<c>team</c>, a valid role or team name) this message was sent from when it goes to a
-        /// different target, so that tab keeps showing it after the conversation is restored. View only: it never changes where the
-        /// message goes. Anything else is ignored.
-        /// </summary>
-        public ConversationPartnerPayload? From { get; set; }
     }
 
     /// <summary>workspace/findFiles: workspace files whose path contains <see cref="Query"/> (the @-mention list).</summary>
@@ -1534,22 +1521,36 @@ namespace Pomp.Ui
         public string? Id { get; set; }
     }
 
-    public sealed class ConversationPartnerCommandPayload
+    /// <summary>conversation/tab: <c>open</c> (partner), <c>activate</c> (sessionId; none = the Default tab) or <c>close</c> (sessionId).</summary>
+    public sealed class ConversationTabCommandPayload
     {
         public string RequestId { get; set; } = string.Empty;
-        public ConversationPartnerPayload Partner { get; set; } = new ConversationPartnerPayload();
+        public string Action { get; set; } = string.Empty;
+        public ConversationPartnerPayload? Partner { get; set; }
+        public string? SessionId { get; set; }
     }
 
-    public sealed class ConversationPartnerStatePayload
+    /// <summary>An open agent or team tab: its own conversation.</summary>
+    public sealed class ConversationTabPayload
+    {
+        public string SessionId { get; set; } = string.Empty;
+        public ConversationPartnerPayload Partner { get; set; } = new ConversationPartnerPayload();
+        public string? Title { get; set; }
+    }
+
+    /// <summary>conversation/tabsState: the current conversation's partner and the workspace's chat tabs (docs/architecture.md §8.8).</summary>
+    public sealed class ConversationTabsStatePayload
     {
         public string? SessionId { get; set; }
         public ConversationPartnerPayload Partner { get; set; } = new ConversationPartnerPayload();
-        public string? Instance { get; set; }
         public string? Title { get; set; }
         public string? Message { get; set; }
+        /// <summary>The Default (POMP) tab's conversation; null when it has none yet (activating it starts a new one).</summary>
+        public string? Main { get; set; }
+        public List<ConversationTabPayload> Tabs { get; set; } = new List<ConversationTabPayload>();
     }
 
-    /// <summary>Exactly one reply to a partner, queue or run-history command.</summary>
+    /// <summary>Exactly one reply to a tab close, queue or run-history command.</summary>
     public sealed class UiCommandReplyPayload
     {
         public string RequestId { get; set; } = string.Empty;

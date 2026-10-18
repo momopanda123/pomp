@@ -54,7 +54,7 @@ namespace Pomp.Hosting
             catch (Exception ex) { cleanupFailed = true; _logger.Warn("Deleted conversation reference cleanup failed: " + ex.Message); }
             foreach (var clean in new Action[] {
                 () => new KnowledgeSelection(_environment.DataDirectory, root).Remove(target.SessionId),
-                () => _partners.Remove(root, target.SessionId),
+                () => _tabs.Remove(root, target.SessionId),
                 () => new AgentRunHistory(_environment.DataDirectory, root, _logger).RemoveSession(target.SessionId) })
                 try { clean(); } catch (Exception ex) { cleanupFailed = true; _logger.Warn("Deleted conversation data cleanup failed: " + ex.Message); }
             try { await _backgroundAgents.ForgetSessionAsync(root, target.SessionId).ConfigureAwait(false); }
@@ -62,10 +62,10 @@ namespace Pomp.Hosting
             lock (_stateLock)
             {
                 if (_queueSession == target.SessionId) { _chatQueue.Clear(); _queueSession = null; _queueReason = null; _queuePaused = false; }
-                if (_partnerSession == target.SessionId) { _partnerSession = null; _partner = new ConversationPartnerPayload(); _partnerInstance = null; _partnerMessage = null; _partnerInstances.Clear(); _teamInstances.Clear(); _unavailableTeams.Clear(); }
+                if (_partnerSession == target.SessionId) { _partnerSession = null; _partner = new ConversationPartnerPayload(); _partnerMessage = null; _teamInstances.Clear(); _unavailableTeams.Clear(); }
                 _recordedSession = "";
             }
-            PublishChatQueue(); PublishPartner(); PublishRunHistory();
+            PublishChatQueue(); PublishTabs(); PublishRunHistory();
             if (cleanupFailed) throw new SessionDeletionException(PompLanguage.Pick("대화 파일은 휴지통으로 옮겼지만 일부 대화 자료를 지우지 못했어요.", "The conversation files were recycled, but some conversation data could not be removed."));
         }
     }

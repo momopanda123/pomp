@@ -1066,7 +1066,7 @@ namespace Pomp.Hosting
                 .Append(new UiMessage(UiMessageTypes.HooksState, HooksView()))
                 .Append(ComputerStateMessage())
                 .Append(AgentsStateMessage())
-                .Append(new UiMessage(UiMessageTypes.ConversationPartnerState, PartnerView()))
+                .Append(new UiMessage(UiMessageTypes.ConversationTabsState, TabsView()))
                 .Append(new UiMessage(UiMessageTypes.ChatQueueState, QueueView()))
                 .Append(new UiMessage(UiMessageTypes.AgentsHistoryState, RunHistory()?.View() ?? new AgentsHistoryStatePayload()))
                 .Concat(GoalRequestSnapshot())
@@ -1505,8 +1505,6 @@ namespace Pomp.Hosting
             public Pomp.Features.AgentRunHistory? History { get; set; }
             public string? RunId { get; set; }
             public AgentRunTargetPayload? FeedbackTarget { get; set; }
-            public string? PartnerAgent { get; set; }
-            public bool PartnerJobCaptured { get; set; }
             public string? Team { get; set; }
             public HashSet<string>? TeamMembers { get; set; }
             public OmpConnection? TeamConnection { get; set; }

@@ -11,13 +11,18 @@ using Pomp.Tools;
 using Task = System.Threading.Tasks.Task;
 namespace Pomp.VisualStudio.Adapters
 {
-    internal sealed class RoslynEditorCaptionSource : IEditorCaptionLocationSource
+    /// <summary>
+    /// Caption targets of an editor file: Roslyn's syntax tree where the file is a Roslyn document (C#, VB), otherwise the lexical
+    /// declaration scanner (<see cref="SourceDeclarations"/>: C/C++, TypeScript/JavaScript, C# outside Roslyn). Other file types have none.
+    /// </summary>
+    internal sealed class EditorCaptionSource : IEditorCaptionLocationSource
     {
         private static readonly HashSet<string> Kinds = new HashSet<string>(StringComparer.Ordinal) {
             "MethodDeclarationSyntax", "ConstructorDeclarationSyntax", "PropertyDeclarationSyntax", "ClassDeclarationSyntax", "StructDeclarationSyntax", "InterfaceDeclarationSyntax", "RecordDeclarationSyntax", "EnumDeclarationSyntax", "LocalFunctionStatementSyntax",
             "MethodBlockSyntax", "PropertyBlockSyntax", "ClassBlockSyntax", "StructureBlockSyntax", "InterfaceBlockSyntax", "ModuleBlockSyntax" };
+        private const int MaxTargets = 12;
         private readonly VsAdapterContext context;
-        public RoslynEditorCaptionSource(VsAdapterContext context) { this.context = context; }
+        public EditorCaptionSource(VsAdapterContext context) { this.context = context; }
         public Task<EditorCaptionSnapshot> CaptureAsync(string root, string path, string exactText, int firstLine, int lastLine, CancellationToken token)
             => CaptureCoreAsync(root, path, exactText, firstLine, lastLine, null, token);
         public Task<EditorCaptionSnapshot> CaptureLocationAsync(string root, string path, string exactText, int position, CancellationToken token)
@@ -28,9 +33,9 @@ namespace Pomp.VisualStudio.Adapters
             var workspace = context.ComponentModel.GetService<VisualStudioWorkspace>();
             var solution = workspace?.CurrentSolution;
             await TaskScheduler.Default;
-            if (!new PathGuard(root).TryResolve(path, out var file, out _)) return new EditorCaptionSnapshot(true, Array.Empty<EditorCaptionTarget>());
+            if (!new PathGuard(root).TryResolve(path, out var file, out _) || exactText.Length > 500000) return new EditorCaptionSnapshot(true, Array.Empty<EditorCaptionTarget>());
             var document = solution?.GetDocumentIdsWithFilePath(file).Select(id => solution.GetDocument(id)).FirstOrDefault(d => d?.SupportsSyntaxTree == true);
-            if (document == null || exactText.Length > 500000) return new EditorCaptionSnapshot(true, Array.Empty<EditorCaptionTarget>());
+            if (document == null) return Lexical(file, exactText, firstLine, lastLine, position);
             var text = await document.GetTextAsync(token).ConfigureAwait(false);
             if (!string.Equals(text.ToString(), exactText, StringComparison.Ordinal)) return new EditorCaptionSnapshot(false, Array.Empty<EditorCaptionTarget>());
             var syntax = await document.GetSyntaxRootAsync(token).ConfigureAwait(false);
@@ -56,7 +61,32 @@ namespace Pomp.VisualStudio.Adapters
                     ?? text.Lines.GetLineFromPosition(head.RawKind != 0 ? head.SpanStart : node.SpanStart).ToString().Trim();
                 if (name.Length > 120) name = name.Substring(0, 120);
                 targets.Add(new EditorCaptionTarget(name, line, node.SpanStart, node.Span.Length));
-                if (targets.Count == 12) break;
+                if (targets.Count == MaxTargets) break;
+            }
+            return new EditorCaptionSnapshot(true, targets.AsReadOnly());
+        }
+
+        /// <summary>
+        /// The same targets from the lexical scanner, which reads <paramref name="exactText"/> itself (so the source always matches): every
+        /// type and member declaration starting in the lines, or the innermost one around <paramref name="position"/>.
+        /// </summary>
+        private static EditorCaptionSnapshot Lexical(string file, string exactText, int firstLine, int lastLine, int? position)
+        {
+            var declarations = SourceDeclarations.Find(file, exactText);
+            if (declarations == null) return new EditorCaptionSnapshot(true, Array.Empty<EditorCaptionTarget>());
+            var targets = new List<EditorCaptionTarget>(); var lines = new HashSet<int>();
+            if (position.HasValue)
+            {
+                // Source order puts an enclosing declaration before the ones inside it: the last one around the position is the innermost.
+                var around = declarations.LastOrDefault(d => d.Start <= position.Value && position.Value < d.Start + d.Length);
+                if (around != null) targets.Add(new EditorCaptionTarget(around.Name, around.Line, around.Start, around.Length));
+                return new EditorCaptionSnapshot(true, targets.AsReadOnly());
+            }
+            foreach (var declaration in declarations)
+            {
+                if (declaration.Line < firstLine || declaration.Line > lastLine || !lines.Add(declaration.Line)) continue;
+                targets.Add(new EditorCaptionTarget(declaration.Name, declaration.Line, declaration.Start, declaration.Length));
+                if (targets.Count == MaxTargets) break;
             }
             return new EditorCaptionSnapshot(true, targets.AsReadOnly());
         }

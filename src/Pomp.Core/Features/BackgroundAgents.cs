@@ -330,7 +330,7 @@ namespace Pomp.Features
         /// <summary>
         /// Takes the first job snapshot (with the progress subscription) before a prompt goes out. Jobs in that baseline are never
         /// attributed to a turn, so an agent a prompt starts must come after it to be reported as new and remembered for its
-        /// partner tab or team. Bounded: when the engine is slow the prompt goes out without it, as before.
+        /// team. Bounded: when the engine is slow the prompt goes out without it, as before.
         /// </summary>
         public async Task EnsureBaselineAsync(TimeSpan budget, CancellationToken token)
         {

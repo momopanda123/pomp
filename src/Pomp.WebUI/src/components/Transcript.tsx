@@ -81,8 +81,6 @@ interface TranscriptProps {
   onRetry: (item: TurnErrorItem) => void;
   /** The pending permission / dialog card, shown after the conversation (the oldest request only). */
   request?: ReactNode;
-  /** The agent/team partner tab whose turns `items` holds; undefined = Default (POMP), every turn. */
-  partnerName?: string;
 }
 
 /** Scrollable message list. Follows the newest content until the user scrolls up; scrolling back down resumes it. */

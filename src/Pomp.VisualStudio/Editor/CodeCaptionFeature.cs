@@ -57,7 +57,10 @@ namespace Pomp.VisualStudio.Editor
             private bool closed, formatting;
             private Style? buttonStyle;
             private Brush? buttonForeground;
-            private bool Enabled => PompServices.Current?.Settings.CodeCaptionsEnabled == true && PompServices.Current?.Settings.NativeCodeLensCaptionsEnabled != true;
+            // Native CodeLens captions replace these only in the languages the POMP CodeLens provider registers for (C#, VB: see
+            // CodeLensCaptionFeature); every other language keeps these.
+            private bool Enabled => PompServices.Current?.Settings.CodeCaptionsEnabled == true &&
+                !(PompServices.Current?.Settings.NativeCodeLensCaptionsEnabled == true && (view.TextBuffer.ContentType.IsOfType("CSharp") || view.TextBuffer.ContentType.IsOfType("Basic")));
             private bool Korean => Pomp.Hosting.PompLanguage.IsKorean;
             public Controller(IWpfTextView view, ITextDocumentFactoryService documents)
             {

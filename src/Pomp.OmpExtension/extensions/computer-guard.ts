@@ -1,4 +1,7 @@
-/** Session-bound host authorization for desktop/browser preludes, and the subagent eval guard. */
+/**
+ * Session-bound host authorization for desktop/browser preludes, the subagent eval guard, and the main agent's per-turn
+ * screen & input control note (`before_agent_start`; docs/architecture.md §8.5).
+ */
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as engine from "@oh-my-pi/pi-coding-agent";
@@ -61,6 +64,25 @@ export function computerToolBlock(tool: string, sessionId: string | undefined, k
 	return kind === "main" ? undefined : subagentBlocked();
 }
 
+export const COMPUTER_MARKER = "## Screen & input control (pomp)";
+
+export const COMPUTER_GUIDANCE = [
+	COMPUTER_MARKER,
+	"Screen & input control is enabled for this conversation. To see and operate the desktop, use the `computer` prelude of the Eval tool; read `xd://eval/computer` before first use.",
+	"Never launch or use external programs or CLIs (such as Orca) for GUI control.",
+].join("\n");
+
+/** The note is present exactly while the host's switch is on for this session; read from the state file at every turn. */
+export function computerGuidanceOn(sessionId: string | undefined, state: ComputerState): boolean {
+	return !!sessionId && state !== "unreadable" && state.sessionId === sessionId && state.desktop;
+}
+
+export function withComputerGuidance(systemPrompt: readonly unknown[], on: boolean): unknown[] | undefined {
+	const rest = systemPrompt.filter(part => !(typeof part === "string" && part.startsWith(COMPUTER_MARKER)));
+	if (on) return [...rest, COMPUTER_GUIDANCE];
+	return rest.length === systemPrompt.length ? undefined : rest;
+}
+
 export default function computerGuard(pi: ExtensionAPI): void {
 	if (!isPompHost()) return;
 	pi.on("tool_call", (event, ctx) => {
@@ -70,5 +92,15 @@ export default function computerGuard(pi: ExtensionAPI): void {
 			const reason = computerToolBlock(event.toolName, typeof id === "string" ? id : undefined, ctx.agent?.kind, readComputerState(), event.toolName === "eval" ? readEngineComputerState(ctx.cwd) : "unreadable");
 			return reason ? { block: true, reason } : undefined;
 		} catch { return { block: true, reason: unauthorized() }; }
+	});
+	pi.on("before_agent_start", (event, ctx) => {
+		try {
+			if (ctx?.agent?.kind !== "main") return undefined;
+			const id = ctx.sessionManager?.getSessionId();
+			const systemPrompt = withComputerGuidance(event.systemPrompt, computerGuidanceOn(typeof id === "string" ? id : undefined, readComputerState()));
+			return systemPrompt ? { systemPrompt: systemPrompt as typeof event.systemPrompt } : undefined;
+		} catch {
+			return undefined;
+		}
 	});
 }

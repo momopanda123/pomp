@@ -163,8 +163,8 @@ Live 변경 북마크를 끄면 새 북마크만 멈춘다. 이미 만든 북마
 |---|---|---|
 | 자동 인라인 완성 켜기 (`Enable automatic inline completions`) | 꺼짐 | 입력이 멈추면 주변 코드를 설정된 모델에 보내 자동 완성을 받는다. |
 | 보조 모델 (`Helper model`) | 비어 있음 (빠른 모델) | 자동완성, 질문의 수정 제안, 코드 캡션, 지식 변환, 입력 예측 문장에 쓰는 모델이다. 채팅 모델과 별개다. |
-| POMP 코드 캡션 표시 (`Show POMP code captions`) | 꺼짐 | 보이는 선언 아래에 작은 POMP 요약 행을 단다. |
-| 캡션에 기본 CodeLens 사용 (`Use native CodeLens for POMP captions`) | 꺼짐 | POMP 장식 대신 IDE CodeLens 서비스로 캡션을 표시한다. C#과 VB에서 쓴다. |
+| POMP 코드 캡션 표시 (`Show POMP code captions`) | 꺼짐 | 보이는 선언 아래에 작은 POMP 요약 행을 단다. C#·VB는 Roslyn으로, C·C++·TypeScript·JavaScript는 POMP의 어휘 스캐너로 선언을 찾는다. |
+| 캡션에 기본 CodeLens 사용 (`Use native CodeLens for POMP captions`) | 꺼짐 | C#·VB 파일에서는 POMP 장식 대신 IDE CodeLens 서비스로 캡션을 표시한다. 다른 언어 파일에는 POMP 장식이 그대로 보인다. VS의 C++ CodeLens는 단위 테스트에만 붙기 때문이다. |
 
 - 자동 인라인 완성은 공급자 비용이 생길 수 있다.
 - 보조 모델은 계정 탭에서 **빠른 모델**, **채팅 모델과 같게**, **모델 직접 선택** 중에 고른다.

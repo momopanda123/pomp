@@ -23,14 +23,16 @@ import { AgentDialog } from './AgentDialog';
 import { AgentRulesView } from './AgentRulesView';
 import { AdvisorsPanel } from './AdvisorsPanel';
 import { Avatar, RolesCard, TeamsCard } from './AgentsTables';
+import { RunningCard, useObservedAgents } from './AgentsRunning';
 import { AvatarEditor } from './AvatarEditor';
 import { MainRoleEditor } from './MainRoleEditor';
 import { Actions, Badge, Cell, DataTable, IconButton, PAGE_SIZE, Pager, Row, SearchBox, Switch, Toolbar, byName, matches, usePaged, type BadgeTone } from './ui';
 import { advisorCount, useAdvisorsController } from '../advisors';
 
-export const agentsViews = ['roles', 'teams', 'advisors', 'hooks'] as const;
+export const agentsViews = ['roles', 'teams', 'advisors', 'hooks', 'running'] as const;
 export type AgentsView = typeof agentsViews[number] | 'history' | 'runs';
-export function normalizeAgentsView(view: AgentsView): typeof agentsViews[number] { return view === 'history' || view === 'runs' ? 'roles' : view; }
+/** Ids older builds used: `history` opens Roles, `runs` the Running view. */
+export function normalizeAgentsView(view: AgentsView): typeof agentsViews[number] { return view === 'history' ? 'roles' : view === 'runs' ? 'running' : view; }
 import { RoleModelPicker } from './RoleModelPicker';
 import { Icon } from './Icon';
 import { revealControls } from './RevealControls';
@@ -174,8 +176,9 @@ export function AgentsPanel({ agents, replies, setup, setupReplies, locale, conn
   const t = useT();
   const [automationCount, setAutomationCount] = useState<number | undefined>(undefined);
   const advisors = useAdvisorsController({ root: workspaceKey, sessionId, connected });
-  // POMP's own role heads the roles list.
-  const counts = { roles: agents ? agents.roles.length + 1 : 0, teams: agents?.teams.length ?? 0, advisors: advisorCount(advisors.state), hooks: automationCount };
+  const observed = useObservedAgents(sessionId);
+  // POMP's own role heads the roles list. Running: the chip counts what still runs; the view is empty only when nothing ran.
+  const counts = { roles: agents ? agents.roles.length + 1 : 0, teams: agents?.teams.length ?? 0, advisors: advisorCount(advisors.state), hooks: automationCount, running: observed.jobs.length };
   const [view, chooseView] = useViewChoice({ views: agentsViews, requested: normalizeAgentsView(requestedView), active: !inert, scope: (workspaceKey ?? '') + ':' + (sessionId ?? ''), count: item => counts[item], onChange: onViewChange });
   const { post: postSetup, feedback: setupFeedback } = useSetupCommands(setupReplies);
   const modelsRequested = useRef(false);
@@ -203,6 +206,10 @@ export function AgentsPanel({ agents, replies, setup, setupReplies, locale, conn
     previousRoster.current = { view, connected };
     if (connected && !inert && (view === 'roles' || view === 'teams') && (previous.view !== view || !previous.connected))
       send('agents/command', { requestId: newId(), action: 'refresh' });
+  }, [view, connected, inert]);
+  // The Running view asks for a fresh snapshot of the engine's subagents whenever it is shown.
+  useEffect(() => {
+    if (connected && !inert && view === 'running') send('workspace/background', { action: 'refresh' });
   }, [view, connected, inert]);
 
   // Editor states
@@ -327,7 +334,7 @@ export function AgentsPanel({ agents, replies, setup, setupReplies, locale, conn
     <div className="agents-panel" data-testid="agents-panel" inert={inert || undefined} onClickCapture={event => {
       if (event.target instanceof Element && !event.target.closest('.agents-dialog')) dialogOpenerRef.current = event.target.closest<HTMLElement>('button');
     }}>
-      <ViewChips prefix="agents" label={t('tab.agents')} views={agentsViews.map(id => ({ id, label: t(`agents.view.${id}`), badge: counts[id] }))} active={view} onChange={chooseView} inert={inert} />
+      <ViewChips prefix="agents" label={t('tab.agents')} views={agentsViews.map(id => ({ id, label: t(`agents.view.${id}`), badge: id === 'running' ? observed.running : counts[id] }))} active={view} onChange={chooseView} inert={inert} />
       <div className="agents-scroll">
       {actionError && (
         <div className="agents-banner error" role="alert" data-testid="agents-action-error">
@@ -385,6 +392,8 @@ export function AgentsPanel({ agents, replies, setup, setupReplies, locale, conn
       <section id="agents-advisors" role="tabpanel" aria-labelledby="agents-tab-advisors" hidden={view !== 'advisors'}><AdvisorsPanel controller={advisors} setup={setup} setupReplies={setupReplies} connected={connected} selected={view === 'advisors'} inert={inert} root={workspaceKey} sessionId={sessionId} /></section>
 
       <section id="agents-hooks" role="tabpanel" aria-labelledby="agents-tab-hooks" hidden={view !== 'hooks'}><AgentRulesView onCount={setAutomationCount} locale={locale} workspaceKey={workspaceKey} sessionId={sessionId} agents={agents} connected={connected} busy={busy} newSessionPending={newSessionPending} inert={inert} selected={view === 'hooks'} onShowPermissions={onShowPermissions} /></section>
+
+      <section id="agents-running" role="tabpanel" aria-labelledby="agents-tab-running" className="agents-section" data-testid="agents-running-section" hidden={view !== 'running'}><RunningCard observed={observed} sessionId={sessionId} connected={connected} inert={inert} /></section>
 
       {editingMain && <MainRoleEditor returnFocus={dialogOpenerRef.current} disabled={!connected || inert} replies={replies} onClose={() => setEditingMain(false)} />}
 

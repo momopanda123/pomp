@@ -21,6 +21,7 @@
       "./extensions/delegation.ts",
       "./extensions/computer-guard.ts",
       "./extensions/role-memory.ts",
+      "./extensions/partner.ts",
       "./extensions/member-stop.ts",
       "./extensions/advisor.ts",
       "./extensions/untrusted-content.ts",

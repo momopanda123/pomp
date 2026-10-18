@@ -63,8 +63,8 @@ interface ComposerProps {
   onIncludeEditorContextChange: (value: boolean) => void;
   draft: ComposerState;
   dispatch: Dispatch<Action>;
-  /** `target` undefined: the chosen one-message target (else the partner); null: the tab's partner, whatever is chosen. `toMain`: an editor
-   *  request of the main conversation (the view moves to Default (POMP) once it is accepted). */
+  /** `target` undefined: the chosen one-message target (else the tab's conversation); null: the tab's conversation, whatever is chosen. `toMain`:
+   *  an editor request of the Default (POMP) tab's conversation (from another tab it waits in the input while the page switches there). */
   onSend: (text: string, attachments: WorkspaceFile[], clearDraft?: boolean, target?: SendTarget | null, preserveDraftTarget?: boolean, includeEditorContext?: boolean, toMain?: boolean) => SendResult;
   onStop: () => void;
   commands: CommandInfo[];
@@ -244,9 +244,9 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     }),
   ], [runnableTeams, runnableRoles, instances, t]);
   // The list: teams, agents, then this conversation's running members; each group by name, except that the row of the conversation the
-  // user is in (POMP in its own tab, the agent or team of an agent/team tab) heads its group, tinted: choosing it clears the one-message
-  // target, so the next message continues this conversation (never a subagent run of itself). POMP heads the agents in its own tab and
-  // in a team tab, and comes right under the agent in that agent's tab. Running members of the tab's own role are left out.
+  // user is in (POMP in the Default tab, the agent or team of an agent/team tab) heads its group, tinted: choosing it clears the one-message
+  // target, so the next message continues this conversation (never a subagent run of itself). POMP is listed only in the Default tab: an
+  // agent or team tab is its own conversation, where POMP does not answer. Running members of the tab's own role are left out.
   const partnerTab = partner?.id && partner.kind !== 'main' ? { kind: partner.kind, id: partner.id } : undefined;
   const listed = useMemo(() => {
     const own = (item: (typeof destinations)[number]) => !partnerTab ? item.target.kind === 'main'
@@ -254,31 +254,27 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
       : item.target.kind === 'agent' && item.target.id === partnerTab.id;
     const main: (typeof destinations)[number] = { target: MAIN_TARGET, name: t('partner.main'), label: t('partner.main'), chip: 'POMP', title: 'POMP', groupKey: 'agents', group: t('composer.targetAgents'), avatar: { kind: 'main' } };
     const ownFirst = (items: (typeof destinations)[number][]) => [...items.filter(own), ...items.filter(item => !own(item))];
-    const agents = ownFirst(destinations.filter(item => item.target.kind === 'agent'));
-    const ownAgent = agents.length > 0 && own(agents[0]!);
     return [
       ...ownFirst(destinations.filter(item => item.target.kind === 'team')),
-      ...(ownAgent ? [agents[0]!, main, ...agents.slice(1)] : [main, ...agents]),
+      ...(partnerTab ? [] : [main]), ...ownFirst(destinations.filter(item => item.target.kind === 'agent')),
       ...destinations.filter(item => item.target.kind === 'instance' && !(partnerTab?.kind === 'agent' && item.avatar.id === partnerTab.id)),
     ].map(item => ({ ...item, own: own(item) }));
   }, [destinations, partnerTab?.kind, partnerTab?.id, t]);
   const choices = useMemo(() => listed.filter(item => !item.own), [listed]);
   const hasTargets = choices.length > 0;
   const selectedDestination = choices.find(item => targetKey(item.target) === targetKey(selectedTarget));
-  // Where a message without a one-message target goes: the active partner tab (named when a lost target is reported).
+  // Where a message without a one-message target goes: the active tab's conversation (named when a lost target is reported).
   const partnerLabel = partnerName || t('partner.main');
-  // An editor menu request that could not go out at once (a reply was running, or a draft was there) still belongs to POMP
-  // when the user sends it later, whatever partner tab is active then.
+  // An editor menu request that could not go out at once (a reply was running, or a draft was there) still belongs to the Default (POMP)
+  // tab's conversation when the user sends it later (from another tab the page switches there first).
   const deferredMain = useRef<string | null>(null);
   useEffect(() => { deferredMain.current = null; }, [sessionId]);
   // A one-message target the user picks afterwards wins: the chip and the send must agree.
   const mainPending = !selectedDestination && deferredMain.current !== null && draft.text.includes(deferredMain.current);
   // The chip names only a target other than the conversation the user is in; without one it is just the send-target button (a picked POMP
-  // in its own tab, or this tab's own partner, would read as a message to itself). A deferred editor request is POMP's: a target only in an
-  // agent/team tab.
-  const chosen = selectedDestination ?? (mainPending && partnerTab ? choices.find(item => item.target.kind === 'main') : undefined);
-  const targetLabel = chosen ? (chosen.chip ?? chosen.label) : t('composer.sendTarget');
-  const targetTitle = chosen ? t('composer.targetPartnerTitle', { name: chosen.label }) : t('composer.sendTarget');
+  // in the Default tab, or this tab's own partner, would read as a message to itself).
+  const targetLabel = selectedDestination ? (selectedDestination.chip ?? selectedDestination.label) : t('composer.sendTarget');
+  const targetTitle = selectedDestination ? t('composer.targetPartnerTitle', { name: selectedDestination.label }) : t('composer.sendTarget');
   // What the chosen target is called, to name it if it disappears later.
   const selectedName = useRef<{ key: string; name: string }>(undefined);
   if (selectedDestination) selectedName.current = { key: targetKey(selectedTarget), name: selectedDestination.name };
@@ -597,7 +593,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     const pending = autoSend.current;
     if (pending === null || draft.text !== pending || (prefill?.payload.includeEditorContext && !includeEditorContext)) return;
     autoSend.current = null;
-    // Editor menu requests belong to the main conversation: POMP answers them whatever partner tab is active.
+    // Editor menu requests belong to the Default (POMP) tab's conversation (from another tab the page switches there first).
     if (canSend && !busy) submit(MAIN_TARGET);
   });
 
@@ -1001,7 +997,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
               aria-expanded={targetOpen}
               onClick={() => setTargetOpen(!targetOpen)}
             >
-              {chosen ? <DestinationAvatar kind={chosen.avatar.kind} id={chosen.avatar.id} size={14} /> : <Icon name="users" size={12} />}
+              {selectedDestination ? <DestinationAvatar kind={selectedDestination.avatar.kind} id={selectedDestination.avatar.id} size={14} /> : <Icon name="users" size={12} />}
               <span className="chip-text">{revealControls(targetLabel)}</span>
               <Icon name="chevronDown" size={11} className="chip-caret" />
             </button>

@@ -11,7 +11,11 @@ using Pomp.CodeLens.Contracts;
 
 namespace Pomp.CodeLens.Provider
 {
-    /// <summary>Runs in the CodeLens service. No file reads, provider calls or process launches.</summary>
+    /// <summary>
+    /// Runs in the CodeLens service. No file reads, provider calls or process launches. C# and VB only: a data point exists only where
+    /// the language's own CodeLens tagger puts a descriptor. Roslyn puts one on every type and member; the C++ language service (VS 2019)
+    /// only on unit tests, so other languages keep POMP's own caption rows (CodeCaptionFeature) instead.
+    /// </summary>
     [Export(typeof(IAsyncCodeLensDataPointProvider))]
     [Name("POMP AI summaries")]
     [ContentType("CSharp")]

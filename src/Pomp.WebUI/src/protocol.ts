@@ -516,10 +516,8 @@ export interface TurnStartedPayload {
   team?: string | null;
   agent?: string | null;
   agentInstance?: string | null;
-  /** POMP itself answered: a retry keeps that destination after a partner change. */
+  /** The conversation answered itself (no team, agent or instance): a retry keeps that destination. */
   main?: boolean | null;
-  /** The agent/team tab a message to another target was sent from (also restored from the engine's transcript): keeps it in that tab. */
-  from?: { kind: string; id?: string | null } | null;
 }
 
 export interface WorkspaceFile {
@@ -1284,10 +1282,8 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
     team?: string;
     agent?: string;
     agentInstance?: string;
-    /** POMP itself answers, whatever the conversation partner is; never combined with the targets above. */
+    /** The conversation answers itself, without a team conversation's team routing; never combined with the targets above. */
     main?: true;
-    /** The agent/team tab it is sent from, only when it goes to a different target: that tab keeps it after a restore. View only. */
-    from?: { kind: 'agent' | 'team'; id: string };
   };
   'chat/stop': Empty;
   /** start: begin a new run from a saved workflow's task/steps (no active run; unpaused; sends no model request — the page sends the chat message). */
@@ -1357,8 +1353,8 @@ const HOST_TYPES: Record<HostMessageType, true> = {
   'rules/state': true, 'rules/reply': true, 'rules/active': true,
   'workflows/state': true, 'workflows/reply': true,
   'hooks/state': true, 'hooks/reply': true,
-  'conversation/partnerState': true,
-  'conversation/partnerReply': true,
+  'conversation/tabsState': true,
+  'conversation/tabReply': true,
   'chat/queued': true,
   'chat/queueState': true,
   'chat/queueReply': true,
