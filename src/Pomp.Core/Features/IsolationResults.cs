@@ -16,7 +16,7 @@ using Pomp.Ui;
 namespace Pomp.Features
 {
     /// <summary>
-    /// Results of isolated team members (docs/agent-teams.md §13). omp keeps each one as a git patch next to the member's session
+    /// Results of isolated team members (docs/architecture.md §8.11). omp keeps each one as a git patch next to the member's session
     /// file and never applies it (<c>task.isolation.apply: false</c>). A result waits here and is shown in the review view; files
     /// change only when the user applies it through the approval card, and an applied result is a checkpoint in the change
     /// history like any reviewed edit. Strict throughout: a patch that does not fit exactly is shown with its reason, never forced.

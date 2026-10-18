@@ -12,7 +12,7 @@ using Pomp.Ui;
 
 namespace Pomp.Hosting
 {
-    // Computer use for this conversation (docs/agent-teams.md §4). The page's toggle runs omp's /computer on|off, a builtin answered with
+    // Computer use for this conversation (docs/architecture.md §8.5). The page's toggle runs omp's /computer on|off, a builtin answered with
     // command_output and no model request. The extension's guard keeps subagents (they run unasked) away from Eval while it is on, so the
     // guard's state file is written before switching on and after switching off. Everything starts off: each omp process (the overlay),
     // another conversation, and a reconnect.

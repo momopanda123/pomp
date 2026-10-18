@@ -4,7 +4,7 @@ import type { TranscriptItem, UserItem } from './state';
 
 /** Relayed subagent IRC lines are user items inside a turn, not the start of a new one. */
 const IRC_LINE = /^\[IRC `[^`\r\n]+` → `[^`\r\n]+`\]\r?\n/;
-/** The extension's routing brief at the start of a restored user message (docs/agent-teams.md §3). */
+/** The extension's routing brief at the start of a restored user message (docs/architecture.md §8.2). */
 const ROUTING_BRIEF = /<!--\s*pomp-(team|agent|dm):([^\s>]+)\s*-->/;
 
 /** Where a user message went: its badge target, else the routing brief of a restored message, else POMP. */

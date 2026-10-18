@@ -44,7 +44,7 @@ namespace Pomp.Features
             public string Event { get; set; } = "agent.completed";
             public string SourceKind { get; set; } = "any";
             public string? SourceId { get; set; }
-            /// <summary>ide.saved only: workspace-relative glob, default "**" (docs/agent-teams.md §12).</summary>
+            /// <summary>ide.saved only: workspace-relative glob, default "**" (docs/architecture.md §8.10).</summary>
             public string? Glob { get; set; }
             public string Action { get; set; } = "notify";
             public string? TargetKind { get; set; }
@@ -96,7 +96,7 @@ namespace Pomp.Features
             var glob = input.Glob;
             if (ideEvent)
             {
-                // Routine rules (docs/agent-teams.md §12) watch the whole IDE, not one agent or team.
+                // Routine rules (docs/architecture.md §8.10) watch the whole IDE, not one agent or team.
                 if (input.SourceKind != "any" || input.SourceId != null) throw Bad();
                 // A glob filters only saves; build outcomes have no path to match.
                 if (input.Event == "ide.saved")

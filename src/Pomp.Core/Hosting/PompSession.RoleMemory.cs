@@ -10,7 +10,7 @@ using Pomp.Internal;
 
 namespace Pomp.Hosting
 {
-    // Role memory (docs/agent-teams.md §11): the knowledge assigned to each agent role, handed to the omp extension through
+    // Role memory (docs/architecture.md §8.9): the knowledge assigned to each agent role, handed to the omp extension through
     // POMP_STATE_DIR/role-memory.json (that role's notes in its subagent system prompt, as reference material), and the
     // conversation's selected knowledge through session-knowledge.json (the main session's system prompt).
     public sealed partial class PompSession

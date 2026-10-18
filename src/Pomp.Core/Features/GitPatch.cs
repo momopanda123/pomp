@@ -9,7 +9,7 @@ using Pomp.Hosting;
 namespace Pomp.Features
 {
     /// <summary>
-    /// The git unified diff omp keeps for an isolated task (docs/agent-teams.md §13): read strictly and applied exactly.
+    /// The git unified diff omp keeps for an isolated task (docs/architecture.md §8.11): read strictly and applied exactly.
     /// Only text additions, modifications and deletions. Renames, copies and binary changes are refused; mode-only entries carry
     /// nothing and are dropped. A hunk applies only where its context and removed lines match the current text exactly (no fuzz,
     /// no offsets), and line endings are kept as they are in the file.

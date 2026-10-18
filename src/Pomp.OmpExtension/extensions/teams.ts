@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { isPompHost, readVsState } from '../lib/vs-state.ts';
 
-// Teams (docs/agent-teams.md §3): /pomp-team and membersOnly.
+// Teams (docs/architecture.md §8.2): /pomp-team and membersOnly.
 
 interface TeamData {
   version: 1;
@@ -15,7 +15,7 @@ interface TeamData {
   mode?: 'lead' | 'parallel' | 'pipeline';
   instructions?: string;
   membersOnly?: boolean;
-  /** Members work in isolated copies (docs/agent-teams.md §13). */
+  /** Members work in isolated copies (docs/architecture.md §8.11). */
   isolation?: boolean;
 }
 
@@ -148,7 +148,7 @@ export default function teams(pi: ExtensionAPI): void {
   // Which agents the main agent may spawn until its turn ends: a team's members (membersOnly), the one addressed agent, or none for a
   // direct message to an existing agent.
   let activeMembersOnly: { teamId: string; label: string; allowed: Set<string> } | null = null;
-  // The isolation team whose turn is running (docs/agent-teams.md §13): only its member tasks run isolated, and all of them do.
+  // The isolation team whose turn is running (docs/architecture.md §8.11): only its member tasks run isolated, and all of them do.
   let activeIsolation: string | null = null;
 
   pi.on('tool_call', (event, ctx) => {
@@ -195,7 +195,7 @@ export default function teams(pi: ExtensionAPI): void {
     }
   });
 
-  // A new assignment for exactly one agent (docs/agent-teams.md §3.1): the main agent only relays.
+  // A new assignment for exactly one agent (docs/architecture.md §8.3): the main agent only relays.
   pi.registerCommand('pomp-agent', {
     description: 'Give the message to one agent as a new assignment (the main agent only relays it)',
     handler: async (args, ctx) => {
@@ -222,7 +222,7 @@ export default function teams(pi: ExtensionAPI): void {
     },
   });
 
-  // A direct message to an agent this conversation already ran (docs/agent-teams.md §3.1): delivered over omp's IRC, so that agent
+  // A direct message to an agent this conversation already ran (docs/architecture.md §8.3): delivered over omp's IRC, so that agent
   // continues its own context (a parked agent is revived by omp).
   pi.registerCommand('pomp-dm', {
     description: 'Send the message to an existing agent of this conversation and show its reply',

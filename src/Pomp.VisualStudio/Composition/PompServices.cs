@@ -378,7 +378,7 @@ namespace Pomp.VisualStudio.Composition
                 loadDiscoveredOmpExtensions = settings.LoadDiscoveredOmpExtensions;
                 blockOmpNetworkTools = settings.BlockOmpNetworkTools;
                 verifyAfterEdits = settings.VerifyAfterEdits;
-                // Computer use lives in omp's config overlay and its start-up state (docs/agent-teams.md §4).
+                // Computer use lives in omp's config overlay and its start-up state (docs/architecture.md §8.5).
                 var computer = (settings as IComputerUseSettings)?.ComputerUse ?? ComputerUseOptions.Default;
                 computerPolicy = computer.Policy;
                 browserControl = computer.Browser;

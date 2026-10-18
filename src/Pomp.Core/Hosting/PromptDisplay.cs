@@ -20,7 +20,7 @@ namespace Pomp.Hosting
 
         internal const string AttachmentsHeader = "Attached workspace references, highest priority first. Folder references are metadata, not recursively attached contents; inspect folders with bounded directory tools and select relevant files. Use read_buffer for workspace text to include unsaved editor changes; use read for images:";
 
-        /// <summary>The extension's routing brief of a message for a team or one agent (docs/agent-teams.md §3, §3.1).</summary>
+        /// <summary>The extension's routing brief of a message for a team or one agent (docs/architecture.md §8.2, §8.3).</summary>
         private static readonly Regex RoutingBrief = new Regex(@"^<!-- pomp-(team|agent|dm):[A-Za-z0-9._:-]{1,128} -->[\s\S]*?<!-- /pomp-\1 -->", RegexOptions.CultureInvariant);
 
         /// <summary>

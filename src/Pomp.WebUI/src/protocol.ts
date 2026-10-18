@@ -395,7 +395,7 @@ export interface AgentHookRule {
   id: string; name: string; enabled: boolean;
   event: 'agent.completed' | 'agent.failed' | 'team.completed' | 'team.failed' | 'feedback.waiting' | 'ide.saved' | 'ide.build.succeeded' | 'ide.build.failed';
   sourceKind: 'any' | 'agent' | 'team'; sourceId?: string;
-  /** ide.saved only: workspace-relative glob, default `**` (docs/agent-teams.md §12). */
+  /** ide.saved only: workspace-relative glob, default `**` (docs/architecture.md §8.10). */
   glob?: string;
   action: 'notify' | 'forward'; targetKind?: 'main' | 'agent' | 'team'; targetId?: string;
   message: string; revision: number;
@@ -686,7 +686,7 @@ export interface WorkspaceReviewState {
   outcomes: { path: string; state: string; error?: string }[];
 }
 
-/** Results of isolated team members (docs/agent-teams.md §13): files change only when one is applied after approval. */
+/** Results of isolated team members (docs/architecture.md §8.11): files change only when one is applied after approval. */
 export interface IsolationResult {
   id: string; root: string; agent: string; job: string;
   status: 'pending' | 'blocked' | 'applying' | 'applied' | 'failed';
@@ -914,11 +914,11 @@ export interface BackgroundAgentJob {
 
 export interface BackgroundAgentState { root: string; sessionId: string; state: string; message: string;
   controlVersion?: number; controlPending?: boolean; controlRequestId?: string; controlMessage?: string;
-  /** The engine offers POMP's stop-one-member command (docs/agent-teams.md §14). */
+  /** The engine offers POMP's stop-one-member command (docs/architecture.md §8.12). */
   stopAvailable?: boolean;
   jobs: BackgroundAgentJob[]; }
 
-// ---- Agents & Teams (docs/agent-teams.md) ----------------------------------------------------
+// ---- Agents & Teams (docs/architecture.md §8) ----------------------------------------------------
 
 export type RoleScope = 'project' | 'user' | 'bundled' | 'extension';
 export type RoleTools = 'all' | 'readOnly' | 'custom';
@@ -966,7 +966,7 @@ export interface Team {
   mode: TeamMode;
   instructions: string;
   membersOnly: boolean;
-  /** Members work in isolated copies; their changes come back as review proposals (docs/agent-teams.md §13). */
+  /** Members work in isolated copies; their changes come back as review proposals (docs/architecture.md §8.11). */
   isolation?: boolean;
   scope: TeamScope;
   file: string;
@@ -1027,7 +1027,7 @@ export interface AgentsCommand {
   instructions?: string;
 }
 
-/** How a team template would land in the chosen scope (docs/agent-teams.md §15). */
+/** How a team template would land in the chosen scope (docs/architecture.md §8.13). */
 export interface TeamImportPreview {
   hash: string;
   team: { id: string; title: string; mode: TeamMode; members: string[]; status: 'new' | 'same' | 'conflict' };
@@ -1107,7 +1107,7 @@ export interface AdvisorsStatePayload {
   implicitDefault: boolean; updatedUtc: string;
 }
 
-// ---- Computer use (docs/agent-teams.md §4, §6) -----------------------------------------------
+// ---- Computer use (docs/architecture.md §8.5, §8.7) -----------------------------------------------
 
 export interface ComputerStatePayload {
   policy: 'off' | 'perConversation';

@@ -145,7 +145,7 @@ VS 2017·2019는 32비트, 2022·2026은 64비트 프로그램이어서 패키�
 | [빠른 시작](docs/quick-start.md) | 설치부터 첫 질문·첫 변경·에이전트 위임까지 |
 | [화면 가이드](docs/screen-guide.md) | 실제 화면으로 보는 탭·버튼 설명 |
 | [설정 안내](docs/settings.md) | 도구 > 옵션 > Pomp의 각 설정이 하는 일·기본값·재시작 여부 |
-| [에이전트·팀](docs/agent-teams.md) | 역할 에이전트, 팀, 대화 상대, 구성원 중지·자동화의 동작 규칙 |
+| [에이전트·팀](docs/agent-teams.md) | 에이전트·팀 만들기와 쓰기, 구성원 중지, 자동화 |
 | [개발 문서](docs/development.md) | 빌드, 디버깅, 구성, 구현 범위 |
 | [아키텍처](docs/architecture.md) · [UI 프로토콜](docs/ui-protocol.md) | 구현 기준과 내부 메시지 규약 |
 

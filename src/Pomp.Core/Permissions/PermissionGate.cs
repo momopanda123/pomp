@@ -120,7 +120,7 @@ namespace Pomp.Permissions
         /// <see cref="OmpApprovalMode.Write"/> allows the host's file, project, breakpoint and bookmark changes (omp's own write tier it
         /// approves itself); <see cref="OmpApprovalMode.Yolo"/> allows every request. Never a prompt a person must answer
         /// (<paramref name="forced"/>: omp's "Reason:" and provider safety prompts) and never omp's computer and browser helpers, whose
-        /// input on the user's screen always asks (docs/agent-teams.md §4).
+        /// input on the user's screen always asks (docs/architecture.md §8.5).
         /// </summary>
         public static bool AllowedByMode(OmpApprovalMode mode, PermissionRequest request, bool forced)
         {

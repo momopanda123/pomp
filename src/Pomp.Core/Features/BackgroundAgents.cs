@@ -41,7 +41,7 @@ namespace Pomp.Features
         private string? currentTurnTeam, currentTurnPrompt;
         private readonly System.Collections.Generic.Dictionary<string, string?> jobPrompts = new System.Collections.Generic.Dictionary<string, string?>(StringComparer.Ordinal);
         public void SetCurrentTurnPrompt(string? promptId) { lock (gate) currentTurnPrompt = SafePromptId(promptId); }
-        /// <summary>Stopping one member through POMP's extension command (docs/agent-teams.md §14); set by the session, which knows the engine's commands.</summary>
+        /// <summary>Stopping one member through POMP's extension command (docs/architecture.md §8.12); set by the session, which knows the engine's commands.</summary>
         public Func<string, CancellationToken, Task>? StopMember { get; set; }
         private bool stopAvailable;
         /// <summary>Whether the engine currently lists the stop command; called outside the session's state lock.</summary>

@@ -51,7 +51,7 @@ namespace Pomp.Features
         public string Instructions { get; set; } = string.Empty;
         public bool MembersOnly { get; set; } = true;
 
-        /// <summary>Members work in isolated copies; their changes come back as review proposals (docs/agent-teams.md §13).</summary>
+        /// <summary>Members work in isolated copies; their changes come back as review proposals (docs/architecture.md §8.11).</summary>
         public bool Isolation { get; set; }
         public string Scope { get; set; } = "project"; // 'project' | 'user'
         public string? File { get; set; }
@@ -95,7 +95,7 @@ namespace Pomp.Features
     }
 
     /// <summary>
-    /// Manages discovery, validation, saving and deletion of agent roles and teams (docs/agent-teams.md §2–§3, §6).
+    /// Manages discovery, validation, saving and deletion of agent roles and teams (docs/architecture.md §8.1–§8.2, §8.7).
     /// </summary>
     public sealed class AgentRoster
     {
@@ -694,7 +694,7 @@ namespace Pomp.Features
         /// <summary>The name shape omp agents and POMP roles share (bundled names included).</summary>
         public static bool IsValidName(string name) => ValidNameRegex.IsMatch(name);
 
-        /// <summary>Validated role fields without touching the file system (docs/agent-teams.md §15 shares SaveRole's rules).</summary>
+        /// <summary>Validated role fields without touching the file system (docs/architecture.md §8.13 shares SaveRole's rules).</summary>
         internal sealed class ValidatedRole
         {
             public string Name { get; set; } = string.Empty;
@@ -708,7 +708,7 @@ namespace Pomp.Features
             public JArray? CustomToolsArray { get; set; }
         }
 
-        /// <summary>Validated team fields without touching the file system (docs/agent-teams.md §15 shares SaveTeam's rules).</summary>
+        /// <summary>Validated team fields without touching the file system (docs/architecture.md §8.13 shares SaveTeam's rules).</summary>
         internal sealed class ValidatedTeam
         {
             public string Id { get; set; } = string.Empty;
@@ -911,11 +911,11 @@ namespace Pomp.Features
             return ParseTeamFile(filePath, scope, _workspaceRoot, known);
         }
 
-        /// <summary>Bundled role names (docs/agent-teams.md §15): templates reference them by name only, never carry them.</summary>
+        /// <summary>Bundled role names (docs/architecture.md §8.13): templates reference them by name only, never carry them.</summary>
         internal static bool IsBundledRoleName(string name) =>
             BundledRoles.Any(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
 
-        /// <summary>Whether the local lists resolve this name anywhere (docs/agent-teams.md §15 'existing').</summary>
+        /// <summary>Whether the local lists resolve this name anywhere (docs/architecture.md §8.13 'existing').</summary>
         internal bool HasUsableRole(string name) =>
             ListRoles().Any(r => string.IsNullOrEmpty(r.Error) && string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
 

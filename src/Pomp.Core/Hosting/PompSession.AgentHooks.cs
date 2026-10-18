@@ -21,7 +21,7 @@ namespace Pomp.Hosting
     {
         private const int MaxHookForwards = 10;
         internal const string HookMessagePrefix = "hook-";
-        /// <summary>One routine message per rule at most this often (docs/agent-teams.md §12); replaceable in tests.</summary>
+        /// <summary>One routine message per rule at most this often (docs/architecture.md §8.10); replaceable in tests.</summary>
         internal static readonly TimeSpan RoutineCooldown = TimeSpan.FromSeconds(60);
         internal Func<DateTimeOffset> RoutineClock = () => DateTimeOffset.UtcNow;
 
@@ -83,7 +83,7 @@ namespace Pomp.Hosting
                 RaiseHookEvent(status == "completed" ? "agent.completed" : "agent.failed", "agent", agent, (string?)job["description"] ?? "", id + ":" + status, fromHook);
         }
 
-        /// <summary>IDE save/build events for routine rules (docs/agent-teams.md §12). Called on the IDE's thread: never blocks, never throws.</summary>
+        /// <summary>IDE save/build events for routine rules (docs/architecture.md §8.10). Called on the IDE's thread: never blocks, never throws.</summary>
         private void OnProjectEventForRules(object? sender, ProjectEvent value)
         {
             // Off the IDE thread: the rule work below reads the store and posts to the UI.
@@ -91,7 +91,7 @@ namespace Pomp.Hosting
         }
 
         /// <summary>
-        /// One IDE save or build completion as a routine rule event (docs/agent-teams.md §12). Only while the conversation is idle:
+        /// One IDE save or build completion as a routine rule event (docs/architecture.md §8.10). Only while the conversation is idle:
         /// a save the agent's own edit triggers must not loop back into a new turn. Never throws; cheap exits first.
         /// </summary>
         private void FireRoutineEvent(ProjectEvent value)

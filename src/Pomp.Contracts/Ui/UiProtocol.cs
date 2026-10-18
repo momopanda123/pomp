@@ -91,7 +91,7 @@ namespace Pomp.Ui
         public const string AdvisorsReply = "advisors/reply";
         public const string AdvisorsState = "advisors/state";
 
-        /// <summary>Host → UI: agent roles and teams (docs/agent-teams.md), and the reply to one agents/command.</summary>
+        /// <summary>Host → UI: agent roles and teams (docs/architecture.md §8), and the reply to one agents/command.</summary>
         public const string AgentsState = "agents/state";
         public const string AgentsReply = "agents/reply";
         public const string ConversationPartnerState = "conversation/partnerState";
@@ -137,7 +137,7 @@ namespace Pomp.Ui
         /// <summary>Host → UI: event rules between agents and teams, this conversation's forwarding switch and recent firings.</summary>
         public const string AgentHooksState = "agentHooks/state";
 
-        /// <summary>Host → UI: computer use for this conversation (docs/agent-teams.md §4), and the reply to one computer/set.</summary>
+        /// <summary>Host → UI: computer use for this conversation (docs/architecture.md §8.5), and the reply to one computer/set.</summary>
         public const string ComputerState = "computer/state";
         public const string ComputerReply = "computer/reply";
         public const string Error = "error";
@@ -591,7 +591,7 @@ namespace Pomp.Ui
         /// <summary>The editor reference actually composed for this turn; omitted when no active file context was included.</summary>
         public ChatEditorContext? EditorContext { get; set; }
 
-        /// <summary>The message's target as sent (docs/agent-teams.md §3, §3.1), so a replayed bubble keeps its "→ target" badge.</summary>
+        /// <summary>The message's target as sent (docs/architecture.md §8.2, §8.3), so a replayed bubble keeps its "→ target" badge.</summary>
         public string? Team { get; set; }
 
         public string? Agent { get; set; }
@@ -796,17 +796,17 @@ namespace Pomp.Ui
 
         public List<ChatAttachment>? Attachments { get; set; }
 
-        /// <summary>A team id (docs/agent-teams.md §3): the message goes to that team through <c>/pomp-team</c>; null = this conversation.</summary>
+        /// <summary>A team id (docs/architecture.md §8.2): the message goes to that team through <c>/pomp-team</c>; null = this conversation.</summary>
         public string? Team { get; set; }
 
-        /// <summary>A role name (docs/agent-teams.md §3.1): a new assignment run by exactly that agent (<c>/pomp-agent</c>).</summary>
+        /// <summary>A role name (docs/architecture.md §8.3): a new assignment run by exactly that agent (<c>/pomp-agent</c>).</summary>
         public string? Agent { get; set; }
 
-        /// <summary>A subagent id of this conversation (docs/agent-teams.md §3.1): a direct message to that existing agent (<c>/pomp-dm</c>).</summary>
+        /// <summary>A subagent id of this conversation (docs/architecture.md §8.3): a direct message to that existing agent (<c>/pomp-dm</c>).</summary>
         public string? AgentInstance { get; set; }
 
         /// <summary>
-        /// True: POMP itself answers, whatever the conversation partner is (docs/agent-teams.md §8). Used by page actions that belong to
+        /// True: POMP itself answers, whatever the conversation partner is (docs/architecture.md §8.8). Used by page actions that belong to
         /// the main conversation (work plan, code review, editor menu) and by retries of messages POMP answered. Excludes the targets above.
         /// </summary>
         public bool? Main { get; set; }

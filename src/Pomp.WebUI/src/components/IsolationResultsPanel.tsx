@@ -16,7 +16,7 @@ const REPLY_TIMEOUT_MS = 15000;
 const COLUMNS = 'minmax(0, 1fr) auto auto auto';
 
 /**
- * Results of isolated team members (docs/agent-teams.md §13). Nothing here writes files: Apply asks the host, which shows
+ * Results of isolated team members (docs/architecture.md §8.11). Nothing here writes files: Apply asks the host, which shows
  * its approval card and writes after approval with a checkpoint. One request at a time; pushes refresh the list only.
  */
 export function IsolationResultsPanel({ locale, inert, connected = true }: { locale: string; inert: boolean; connected?: boolean; layout?: WorkLayout }) {

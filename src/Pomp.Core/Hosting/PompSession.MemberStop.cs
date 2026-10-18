@@ -13,7 +13,7 @@ using Pomp.Protocol;
 
 namespace Pomp.Hosting
 {
-    // Stopping one team member (docs/agent-teams.md §14). The official engine has no RPC for it; POMP's extension command
+    // Stopping one team member (docs/architecture.md §8.12). The official engine has no RPC for it; POMP's extension command
     // /pomp-stop does what the engine's collaboration "kill" does. Offered only while the engine lists that command, and the
     // extension checks again that the member is running and was started by this conversation.
     public sealed partial class PompSession

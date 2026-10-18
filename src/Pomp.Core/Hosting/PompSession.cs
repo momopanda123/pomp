@@ -106,7 +106,7 @@ namespace Pomp.Hosting
         private readonly InteractiveTerminal _interactiveTerminal;
         private readonly BackgroundAgents _backgroundAgents;
         private readonly ProjectHookController? _projectHooks;
-        /// <summary>IDE save/build events for routine event rules (docs/agent-teams.md §12); separate from the .pomp/hooks scripts.</summary>
+        /// <summary>IDE save/build events for routine event rules (docs/architecture.md §8.10); separate from the .pomp/hooks scripts.</summary>
         private readonly IProjectEventSource? _projectEvents;
         private readonly CodeReviewController? _codeReview;
         private readonly ProblemsController _problems;
@@ -525,7 +525,7 @@ namespace Pomp.Hosting
             // Subagents cannot ask for approval: without the extension's guard keeping them away, neither computer nor browser use runs.
             var computerGuardInstalled = extensionArguments.Count > 0 && OmpExtensionArguments.ContainsModule(_environment.ExtensionDirectory, "./extensions/computer-guard.ts");
             var computer = PrepareComputerUse(stateDirectory, computerGuardInstalled, blockNetwork);
-            // Isolated tasks only with the extension that limits them to isolation teams (docs/agent-teams.md §13).
+            // Isolated tasks only with the extension that limits them to isolation teams (docs/architecture.md §8.11).
             var worktreeBase = extensionArguments.Count > 0 && OmpExtensionArguments.ContainsModule(_environment.ExtensionDirectory, "./extensions/teams.ts") ? ProjectData.Folder(root, "wt") : null;
             // The conversations live in the workspace's .pomp folder; the ones omp kept in its own folder move there first.
             var sessionDirectory = ProjectData.Sessions(root, ToolResourceFiles.Home(_options.UserHome), out var movedSessions);
@@ -605,7 +605,7 @@ namespace Pomp.Hosting
             }
 
             PublishKnowledgeChanged();
-            // After the root is current: the role memory the extension reads belongs to this workspace (docs/agent-teams.md §11).
+            // After the root is current: the role memory the extension reads belongs to this workspace (docs/architecture.md §8.9).
             PrepareRoleMemory(stateDirectory);
             return launch;
         }

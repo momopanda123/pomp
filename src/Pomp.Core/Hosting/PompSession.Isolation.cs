@@ -8,7 +8,7 @@ using Pomp.Internal;
 
 namespace Pomp.Hosting
 {
-    // Isolated team runs (docs/agent-teams.md §13): the engine keeps each member's changes as a patch; IsolationResults holds them
+    // Isolated team runs (docs/architecture.md §8.11): the engine keeps each member's changes as a patch; IsolationResults holds them
     // for review and applies one only through the approval card.
     public sealed partial class PompSession
     {

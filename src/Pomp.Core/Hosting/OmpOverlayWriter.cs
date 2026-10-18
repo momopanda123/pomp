@@ -25,10 +25,10 @@ namespace Pomp.Hosting
         /// The overlay text: <c>tools.approval.&lt;name&gt;: allow</c> for every host tool, and <c>deny</c> for
         /// <paramref name="deniedTools"/> (omp built-ins the user turned off; a user <c>deny</c> wins in every approval mode).
         /// A name in both lists stays allowed: host tools are gated by the host itself.
-        /// With <paramref name="computer"/> (docs/agent-teams.md §4): omp's computer helpers start off (a conversation switches them on
+        /// With <paramref name="computer"/> (docs/architecture.md §8.5): omp's computer helpers start off (a conversation switches them on
         /// with <c>/computer on</c>), browser control follows the option but never runs with the network tools denied, and the computer
         /// helpers get <see cref="ComputerUse.ApprovalPolicy"/>.
-        /// With <paramref name="worktreeBase"/> (docs/agent-teams.md §13): task isolation is available, and an isolated task's changes
+        /// With <paramref name="worktreeBase"/> (docs/architecture.md §8.11): task isolation is available, and an isolated task's changes
         /// stay a patch under that folder (never applied by omp) for the host to stage as change-review proposals.
         /// <paramref name="skillDirectories"/> and <paramref name="disabledExtensions"/> are the merged arrays: omp replaces arrays
         /// wholesale at each layer, so the overlay repeats the user's and the workspace's own values together with POMP's.
