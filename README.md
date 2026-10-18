@@ -162,9 +162,9 @@ VS 2017·2019는 32비트, 2022·2026은 64비트 프로그램이어서 패키�
 
 ## 라이선스
 
-**POMP**(이 저장소의 코드·문서·화면)는 **`momopanda123`**이 만들고 배포하는 소스 공개(source-available) 소프트웨어로,
+**POMP**(이 저장소의 코드·문서·화면)는 **momopanda123**이 만들고 배포하는 소스 공개(source-available) 소프트웨어로,
 **PolyForm Noncommercial License 1.0.0**을 따른다. 개인·비상업적 사용은 무료이며 상업적 사용은 허용하지 않는다.
-전체 조건은 [`LICENSE.txt`](LICENSE.txt). Marketplace Publisher ID는 **`momopanda123`**이다.
+전체 조건은 [`LICENSE.txt`](LICENSE.txt). Marketplace Publisher ID는 **momopanda123**이다.
 
 POMP의 대화·에이전트 엔진 **omp**는 [oh-my-pi](https://github.com/can1357/oh-my-pi)(**MIT 라이선스**)의 공식 릴리스 바이너리로,
 POMP의 PolyForm 라이선스가 적용되지 않는다. VSIX 안의
