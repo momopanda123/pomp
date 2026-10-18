@@ -5,7 +5,7 @@ using Pomp.Internal;
 
 namespace Pomp.Features
 {
-    /// <summary>Whether a conversation may switch on omp's computer use (docs/agent-teams.md §4).</summary>
+    /// <summary>Whether a conversation may switch on omp's computer use (docs/architecture.md §8.5).</summary>
     public enum ComputerUsePolicy
     {
         /// <summary>Off in every new conversation; the user switches it on for one conversation (default).</summary>

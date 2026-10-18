@@ -52,7 +52,7 @@ function pathsMatch(root:string,folders:string[],input:unknown,deny=false):boole
  return deny?matches.some(Boolean):matches.every(Boolean);
 }
 /**
- * An isolated team member's own copy (docs/agent-teams.md §13): a subagent whose working directory is `<base>\<id>\m` (or a
+ * An isolated team member's own copy (docs/architecture.md §8.11): a subagent whose working directory is `<base>\<id>\m` (or a
  * folder in it) under the host's worktree base. Anything else that differs from the workspace stays blocked.
  */
 export function isolatedCopy(cwd:string,base:string|undefined,kind:unknown):boolean {

@@ -1,5 +1,5 @@
 /**
- * pomp delegation guidance (omp extension module, `before_agent_start`; docs/agent-teams.md, "Splitting work without a team").
+ * pomp delegation guidance (omp extension module, `before_agent_start`; docs/architecture.md §8.2 "팀 없이 일 나누기").
  *
  * Adds one fixed section to the MAIN agent's system prompt: when to split independent work across subagents with the engine's
  * `task` tool, what each brief must hold, and how to integrate the results in Visual Studio. The text never changes within a

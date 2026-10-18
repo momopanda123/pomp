@@ -3,7 +3,7 @@
 [한국어](README.md) | **English**
 
 **An AI coding partner inside Visual Studio.** In a window next to the editor, an AI agent reads and changes code, builds,
-runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+), 2022 and 2026.
+runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+), 2022 and 2026, in English and Korean.
 
 | Component | Version | What it does |
 |---|---|---|
@@ -14,8 +14,6 @@ runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+)
 
 <!-- howto-videos -->
 ## Feature videos
-
-The videos show the Korean UI. Shortcuts are left out because every key can be changed in Tools > Options > Pomp.
 
 **Explain code from the editor** — Select code, right-click › POMP › Explain. The answer appears in the chat.
 
@@ -82,15 +80,6 @@ The videos show the Korean UI. Shortcuts are left out because every key can be c
 | draw.io diagrams | Draw diagrams from the code, and apply edits made in the diagram back to the code. |
 | `.pomp` folder | Project agents, rules, skills and policies travel with the repository; conversations stay in `.pomp\local\` (not committed). |
 
-### New in 0.5.6
-
-- Engine updated to omp 18.12.1.
-- Live: choose where `+`/`−` marks go (after the line or in a left column) and how the comparison is laid out (stacked or side by side); `Esc` closes it.
-- Short notices show in the Visual Studio status bar instead of the page.
-- What the model says between tool calls (Claude Opus 5.5 and others) shows as answer text.
-- A message sent from an agent tab stays in that tab after Visual Studio restarts.
-- Live marks work in Visual Studio 2017, and shortcuts register correctly in non-English Visual Studio.
-
 ## Screenshots
 
 <table>
@@ -102,9 +91,6 @@ The videos show the Korean UI. Shortcuts are left out because every key can be c
 </table>
 
 ![POMP in Visual Studio](docs/media/vs-overview.png)
-
-The screenshots show the Korean UI. The UI follows the Visual Studio display language; to force English, use
-**Tools > Options > Pomp > General > Chat > Language**.
 
 ## Install
 

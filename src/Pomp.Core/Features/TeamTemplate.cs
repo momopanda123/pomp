@@ -11,7 +11,7 @@ using Pomp.Internal;
 namespace Pomp.Features
 {
     /// <summary>
-    /// Team template export/import (docs/agent-teams.md §15): one JSON text carrying a team and its user-defined member roles.
+    /// Team template export/import (docs/architecture.md §8.13): one JSON text carrying a team and its user-defined member roles.
     /// Preview compares parsed fields (never bytes); import creates new files only and removes its own files when a later write fails.
     /// </summary>
     public sealed class TeamTemplate

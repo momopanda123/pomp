@@ -536,7 +536,7 @@ namespace Pomp.Hosting
                 // restored chat has (PromptDisplay.Origin). A slash command for POMP stays first, because omp only parses it there.
                 var targeted = !string.IsNullOrWhiteSpace(send.Team) || !string.IsNullOrWhiteSpace(send.Agent) || !string.IsNullOrWhiteSpace(send.AgentInstance);
                 if (send.From != null && (targeted || !message.TrimStart().StartsWith("/", StringComparison.Ordinal))) message = PromptDisplay.OriginMarker(send.From) + "\n\n" + message;
-                // A message for a team or one agent goes through the extension's /pomp-team, /pomp-agent or /pomp-dm (docs/agent-teams.md §3).
+                // A message for a team or one agent goes through the extension's /pomp-team, /pomp-agent or /pomp-dm (docs/architecture.md §8.2).
                 message = await ApplyTargetAsync(send, message, sending.Token).ConfigureAwait(false);
                 sending.Token.ThrowIfCancellationRequested();
 

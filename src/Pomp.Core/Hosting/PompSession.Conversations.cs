@@ -18,7 +18,7 @@ namespace Pomp.Hosting
         private ConversationPartnerPayload _partner = new ConversationPartnerPayload();
         private string? _partnerSession, _partnerInstance, _partnerMessage;
         // Agent name → the instance its partner tab talks to in this conversation, so switching tabs back and forth keeps each
-        // agent's own context (docs/agent-teams.md §8.2). Engine jobs do not outlive the conversation or the engine.
+        // agent's own context (docs/architecture.md §8.8). Engine jobs do not outlive the conversation or the engine.
         private readonly Dictionary<string, string> _partnerInstances = new Dictionary<string, string>(StringComparer.Ordinal);
         private readonly Dictionary<string, Dictionary<string, string>> _teamInstances = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
         private readonly HashSet<string> _unavailableTeams = new HashSet<string>(StringComparer.Ordinal);
@@ -126,7 +126,7 @@ namespace Pomp.Hosting
         }
         private string TeamContinuation(AgentTeam team)
         {
-            // Isolated members cannot be resumed later (docs/agent-teams.md §13): an isolation team always starts new ones, in Git only.
+            // Isolated members cannot be resumed later (docs/architecture.md §8.11): an isolation team always starts new ones, in Git only.
             if (team.Isolation)
             {
                 string root; lock (_stateLock) { root = _workingDirectory; _teamInstances.Remove(team.Id); }

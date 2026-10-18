@@ -68,7 +68,7 @@ omp --mode rpc
 | `POMP_VERIFY_GATE` | `1` (default) lets the verification gate continue a settling turn once after unverified source edits; `0` turns the nudge off (the static evidence section still applies). |
 | `POMP_HOST_VERSION`, `POMP_VS_VERSION` | Only shown by `/pomp-context`. |
 | `POMP_SOLUTION_ROOT` | Not read by these two modules (the state file carries `solutionRoot`); the permission guard compares the engine's working directory with it. |
-| `POMP_WORKTREE_BASE` | Folder of isolated team members' copies (docs/agent-teams.md §13). The permission guard lets a subagent work in `<base>\<id>\m` and judges it by the workspace's `.pomp/permissions.json`, never the copy's. |
+| `POMP_WORKTREE_BASE` | Folder of isolated team members' copies (docs/architecture.md §8.11). The permission guard lets a subagent work in `<base>\<id>\m` and judges it by the workspace's `.pomp/permissions.json`, never the copy's. |
 
 Strict alternative (no ambient extension discovery, load errors abort startup): repeat
 `--trusted-extension "<abs>\extensions\pre-edit.ts" --trusted-extension "<abs>\extensions\pomp-context.ts" --trusted-extension "<abs>\extensions\network.ts"` instead of `-e`

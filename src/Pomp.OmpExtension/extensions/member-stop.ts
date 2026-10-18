@@ -1,5 +1,5 @@
 /**
- * pomp member stop (omp extension module; docs/agent-teams.md §14).
+ * pomp member stop (omp extension module; docs/architecture.md §8.12).
  *
  * The official engine has no RPC that stops one subagent. `/pomp-stop <agent id> --request <id>` does what the engine's own
  * collaboration "kill" does: abort that member's session and release it as a tombstone, so the main turn gets a cancelled result

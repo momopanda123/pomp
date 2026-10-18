@@ -1,5 +1,5 @@
 /**
- * pomp role memory (omp extension module, `before_agent_start`; docs/agent-teams.md §11).
+ * pomp role memory (omp extension module, `before_agent_start`; docs/architecture.md §8.9).
  *
  * The host writes the notes the user saved for each agent role to `${POMP_STATE_DIR}/role-memory.json`. In a subagent session this
  * adds that role's notes (by `ctx.agent.name`) to the system prompt inside a `<role_memory>` block marked as reference material.

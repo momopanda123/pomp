@@ -39,7 +39,7 @@ namespace Pomp.Hosting
         public bool Recent { get; }
     }
 
-    // Agent roles and teams (docs/agent-teams.md §2, §3, §6): agents/command from the page.
+    // Agent roles and teams (docs/architecture.md §8.1, §8.2, §8.7): agents/command from the page.
     public sealed partial class PompSession
     {
         private AgentRoster GetAgentRoster()
@@ -443,7 +443,7 @@ namespace Pomp.Hosting
         }
 
         /// <summary>
-        /// The prompt text for the message's target (docs/agent-teams.md §3, §3.1): a team, one agent (a new assignment) or an agent
+        /// The prompt text for the message's target (docs/architecture.md §8.2, §8.3): a team, one agent (a new assignment) or an agent
         /// this conversation ran (a direct message). No target: <paramref name="message"/> unchanged. Throws when the target cannot take it.
         /// </summary>
         private Task<string> ApplyTargetAsync(ChatSendPayload send, string message, CancellationToken cancellationToken)

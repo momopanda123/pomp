@@ -352,7 +352,7 @@ namespace Pomp.VisualStudio.Options
         public bool EnableInteractiveTerminal { get; set; } = false;
         bool IInteractiveTerminalSettings.EnableInteractiveTerminal => Applied.EnableInteractiveTerminal;
 
-        // ---- Computer use (docs/agent-teams.md §4) ---------------------------------------------------
+        // ---- Computer use (docs/architecture.md §8.5) ---------------------------------------------------
 
         [PompCategory("컴퓨터 사용", "Computer use")]
         [PompDisplayName("컴퓨터 사용", "Computer use")]
