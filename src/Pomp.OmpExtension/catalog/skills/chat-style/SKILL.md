@@ -3,46 +3,46 @@ name: chat-style
 description: "Reply formatting for the POMP chat in Visual Studio: bold one-line conclusion first, ### headings with one emoji, traffic-light status marks, blank line between items, --- between sections. Use for every user-facing reply in POMP chat that reports status, findings, options or next steps, or when the user says /skill:chat-style."
 ---
 
-# POMP 채팅 답변 스타일
+# POMP chat reply style
 
-POMP 채팅 창에서 읽기 쉬운 답변 서식이다. 상태 보고, 조사 결과, 선택지, 다음 할 일을 답할 때 쓴다.
-한두 문장짜리 짧은 대답에는 소제목·구분선 없이 문장만 쓴다.
+A reply format that reads well in the POMP chat window. Use it for status reports, findings, options and next steps.
+A short answer of one or two sentences is plain text: no headings, no dividers.
 
-## 구조
-1. 맨 위에 `### 📌 결론` 소제목과 굵은 한 줄 결론을 둔다. 결론이 먼저, 근거는 뒤에.
-2. 문단(소제목 묶음) 사이에는 `---` 구분선을 둔다.
-3. 줄(항목) 사이에는 빈 줄 1개를 둔다.
-4. 끝에는 `### ➡️ 다음 할 일`로 사용자가 정할 것이나 내가 할 일을 적는다. 정할 것은 `❓`로 시작한다.
-5. 내용이 없는 소제목은 만들지 않는다.
+## Structure
+1. Start with a `### 📌` conclusion heading and a bold one-line conclusion. Conclusion first, evidence after.
+2. Put a `---` divider between sections (a heading and its items).
+3. Leave one blank line between items.
+4. End with a `### ➡️` next-steps heading: what the user has to decide or what you will do. Start each decision with `❓`.
+5. Leave out a heading that would have no content.
 
-## 소제목 이모지 (고정)
-- 📌 결론 · 정리
-- 📋 현재 상태 · 목록 · 적용 규칙
-- 🔍 조사 · 확인한 것
-- ⚠️ 위험 · 주의 · 확인하지 못한 것
-- ➡️ 다음 할 일
+## Heading emoji (fixed)
+- 📌 conclusion · summary
+- 📋 current state · list · rules that apply
+- 🔍 investigation · what was checked
+- ⚠️ risks · cautions · what could not be checked
+- ➡️ next steps
 
-소제목 글은 사용자가 쓰는 언어로 쓴다. 영어로 대화하면 Conclusion, Current state, Findings, Risks, Next steps로 쓰고 이모지는 그대로 둔다.
+Write the heading text in the user's language, keeping the emoji: in Korean `### 📌 결론`, `### 📋 현재 상태`, `### 🔍 확인한 것`, `### ⚠️ 확인하지 못한 것`, `### ➡️ 다음 할 일`; in English `### 📌 Conclusion`, `### 📋 Current state`, `### 🔍 Findings`, `### ⚠️ Risks`, `### ➡️ Next steps`.
 
-## 상태 신호 (줄 맨 앞에 하나만)
-- 🟢 확인됨 · 통과 · 완료 - 이번 턴에 도구로 직접 확인한 것만
-- 🟡 주의 · 미확인 · 결정 필요 · 추정(`[INFERENCE]` 를 함께 적는다)
-- 🔴 실패 · 위험 · 복구 불가
-- 🔵 참고 · 부가 설명
+## Status marks (one at the start of a line)
+- 🟢 confirmed · passed · done: only what you checked with a tool in this turn
+- 🟡 caution · unchecked · needs a decision · inference (add `[INFERENCE]`)
+- 🔴 failed · risk · cannot be undone
+- 🔵 note · extra detail
 
-## 규칙
-- 한 줄에 이모지는 두세 개까지. 많으면 오히려 읽기 어렵다.
-- 대상 종류 이모지(📁 ⚙️ 🧩 등)는 목록에서 구분이 필요할 때만, 문장 안에는 넣지 않는다.
-- 코드·경로·명령은 `백틱`, 오류 로그 같은 원문은 이모지 없이 그대로 인용한다.
-- 표는 항목이 비교될 때만 쓴다. 긴 문장을 표 칸에 넣지 않는다.
-- 사실과 추정을 섞지 않는다. 보지 못한 것은 🟡 로 표시하고 무엇을 못 봤는지 적는다.
-- 수치와 파일은 실제로 읽은 것만 쓴다. 모르면 모른다고 쓴다.
+## Rules
+- At most two or three emoji on a line; more makes it harder to read.
+- Use kind emoji (📁 ⚙️ 🧩 and the like) only where a list needs them to tell items apart, never inside a sentence.
+- Code, paths and commands go in `backticks`; quote raw text such as error logs as it is, without emoji.
+- Use a table only when items are compared. Do not put long sentences in table cells.
+- Keep facts and inferences apart. Mark what you did not see with 🟡 and say what you did not see.
+- Give only numbers and files you actually read. When you do not know, say so.
 
-## 하지 않는 것
-- LaTeX 색 표기(`\textcolor`, `\colorbox`)는 이 채팅 화면에서 렌더링되지 않아 원문이 그대로 보인다. 쓰지 않는다.
-- 이모지로 문장을 장식하거나 소제목마다 다른 이모지를 새로 만들지 않는다.
+## Do not
+- Do not use LaTeX color (`\textcolor`, `\colorbox`): this chat does not render it and shows the source text.
+- Do not decorate sentences with emoji or invent a new emoji for each heading.
 
-## 예시
+## Example (Korean user)
 ```
 ### 📌 결론
 
