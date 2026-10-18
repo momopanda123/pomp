@@ -2,15 +2,13 @@
 
 [한국어](README.md) | **English**
 
-**An AI coding partner inside Visual Studio.** Chat with an AI agent in a tool window next to the editor and have it read and
-change code, build, run tests and debug. Supports Visual Studio 2019 (16.10+), 2022 and 2026.
+**An AI coding partner inside Visual Studio.** In a window next to the editor, an AI agent reads and changes code, builds,
+runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+), 2022 and 2026.
 
 | Component | Version | What it does |
 |---|---|---|
-| POMP | 0.5.6 | The Visual Studio extension: chat UI, Visual Studio tools (editor, solution, build, tests, debugger, Git, NuGet), approval cards, agent/team/rule/knowledge management |
-| omp | 18.12.1 | The conversation and agent engine bundled in POMP, [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT): model calls, the tool-call loop, subagents, skills and MCP, conversation history |
-
-POMP ships omp inside the VSIX and pins it to the version above. See [POMP and omp](#pomp-and-omp) for how they fit together.
+| POMP | 0.5.6 | The Visual Studio extension: chat UI, Visual Studio tools, approval cards, agents and teams |
+| omp | 18.12.1 | The bundled conversation and agent engine, [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT) |
 
 ![POMP intro](docs/media/pomp-intro.gif)
 
@@ -30,6 +28,10 @@ The videos show the Korean UI. Shortcuts are left out because every key can be c
 **Approve a fix, then the Work tab** — Read the diff on the request card; allowed, it goes into the editor buffer and the Work tab keeps the record.
 
 ![Approve a fix, then the Work tab](docs/media/howto-fix.gif)
+
+**Live marks and POMP bookmarks** — With Live and bookmarks on, the editor follows the edit and marks the changed line with `+`; click it for the before/after comparison. The Bookmarks window gets a folder per conversation.
+
+![Live marks and POMP bookmarks](docs/media/howto-live.gif)
 
 **Selected lines as knowledge** — Keep selected lines as named knowledge to send along with chats and agents.
 
@@ -59,98 +61,35 @@ The videos show the Korean UI. Shortcuts are left out because every key can be c
 </table>
 <!-- /howto-videos -->
 
-POMP's agent uses Visual Studio itself as its tools: the open editor buffers (including unsaved changes), the solution and its
-projects, the Error List, builds, tests, the debugger, NuGet and Git. It asks before it changes or runs anything, and shows
-the exact diff of what will change. POMP ships as one VSIX, so there is nothing else to install.
-
 ## POMP and omp
 
-POMP's conversations and agent behaviour come from the open-source coding agent **omp**
-([oh-my-pi](https://github.com/can1357/oh-my-pi)); POMP connects that engine to Visual Studio. You never install or start omp
-yourself.
-
-```
-Visual Studio
-  Editor · Solution · Error List · Build · Tests · Debugger · Git · NuGet
-     ▲  Visual Studio tools (reads run directly, changes and runs after an approval card)
-     │
-  POMP extension — chat UI (WebView2) · approvals · agents, teams, rules, knowledge
-     │  standard input/output (omp RPC)
-     ▼
-omp.exe (inside the VSIX) ──▶ model provider (subscription sign-in · API key · your own server)
-```
-
-- **Running** — POMP starts the VSIX's `omp\omp.exe` in the solution folder as `omp --mode rpc` and talks to it over standard
-  input/output. Changing the solution, or an option that affects the run (model, thinking level, approval mode and so on),
-  restarts the engine.
-- **What omp does** — model calls, planning and the tool-call loop, the basic tools (file reads, search, shell, web), subagents
-  (`task`) and team members, skills and MCP servers, saving and resuming conversations, account sign-in, model lists and usage.
-- **What POMP adds** — it registers the Visual Studio tools with omp as host tools, so the agent works with Visual Studio
-  directly (unsaved editor buffers included). In the default approval mode every change or run waits for an approval card, and
-  only the approved diff goes into the editor buffer. The omp extension shipped with POMP (`omp-extension`) adds Visual Studio
-  state, protection for unsaved buffers, team and verification rules, and POMP's skills. Role agents are written as omp's
-  standard definition files; messages to a team go through that extension and are split into omp subagents.
-- **Pinned version** — one POMP release, one omp version (table at the top). The build downloads omp's official release, checks
-  its hash and puts it in the VSIX; every start checks its size and SHA-256 again. On a mismatch POMP does not fall back to
-  another omp on the PC and asks you to reinstall POMP. omp updates arrive only with POMP updates.
-- **Data** — omp writes conversations to the project's `.pomp\local\sessions`; the settings POMP gives the engine are in
-  `%LOCALAPPDATA%\Pomp\omp\pomp-overlay.yml`. Code and questions go only to the model providers you connect.
-
-The implementation reference (launch arguments, RPC messages, engine checks) is in [Architecture](docs/architecture.md)
-(Korean), sections "omp 실행 계약" and "엔진 버전".
+- **omp** is the engine: model calls, the tool-call loop, subagents, skills and MCP, conversation history. It ships inside the VSIX; nothing else to install.
+- **POMP** connects omp to Visual Studio: the editor, solution, builds, tests, debugger, Git and NuGet become the agent's tools, and every change or run waits for an approval card.
+- Each POMP release pins one omp version (table above). Details: [Architecture](docs/architecture.md) (Korean).
 
 ## Features
 
-- **Right from the editor** — select code and use the right-click **POMP** menu or a shortcut to have it explained, reviewed,
-  fixed or covered by tests. **Ask POMP** asks about the selection in place: send it to the chat, move it to the input box, or
-  get an edit proposal for the selection. Each prompt carries the file and line range it came from. Selected lines can be kept as
-  color-marked **knowledge** that goes along with a chat or an agent.
-- **Context basket** — put files, folders and symbols into the basket above the input box; the checked ones are the scope of the
-  next message and of slash commands and skills. **Include editor context** adds the file and selection you are looking at.
-  Frequent sets are saved as presets.
-- **Only what you approve is applied** — changes are shown as a diff and go into the editor buffer exactly as approved. One undo
-  step per file; saving stays with you. Builds, tests, Git, NuGet and debugger actions also wait for approval. On an approval card
-  `Enter` allows and `Esc` denies.
-- **Agents and teams** — open role agents such as a reviewer, architect or scout as partner tabs and talk to each one directly.
-  An agent can hand parts of a task to other agents. Teams run several roles together; the chat's task card shows each member's
-  status and stops members one by one. A message sent from an agent tab to another agent, a team or POMP stays in that tab after
-  Visual Studio restarts. Every role has a picture (shape, color or image); the bundled roles and POMP's own
-  instructions can be edited too. **Advisors** watch the main agent's work beside the conversation and comment; they are switched
-  on and off per conversation, with a history of their notes. **Automation** attaches notifications, chat messages or scripts to
-  events such as an agent finishing, a failed build or a saved file.
-- **Work tab** — **Progress** (plan, workflows, automatic continuation), **Changes** (pending proposals, isolated results, applied
-  history and restore) and **Code check** (agent findings plus Visual Studio compiler errors and warnings, sent as one fix request;
-  each finding shows the reporting agent's picture and name).
-- **Tools tab** — **Conversation · Permissions · Skills · MCP · Rules · Workflows · Knowledge**. Choose the tools for each
-  conversation; add, edit and delete skills, rules, workflows and knowledge in the page's tables; add or test MCP servers or
-  install the prepared ones (GitHub, Context7). Bundled skills for design, testing, debugging, documentation figures and draw.io
-  diagrams only need to be switched on.
-- **Live editor marks and POMP bookmarks** — turn on **Live** above the input box (`Alt+L`) and the editor follows the edits
-  the agent applies, marking changed lines with a light green line background and `+`/`−` marks (green `+` for added or changed, red `−` for
-  removed; each can be switched off in Options) and on the scroll bar. Clicking the `+`/`−` (after the line, or in a column left of the code: Options) opens the before/after comparison (stacked or side by side: Options; `Esc` closes it); **Revert** in it puts just that range back to how it was
-  before this conversation first changed it (ranges you changed since are not overwritten, and Visual Studio's Undo takes it
-  back). Turn on **Bookmarks** (`Alt+K`) and the Visual Studio Bookmarks window gets a `POMP · <conversation title>` folder per
-  conversation, with a bookmark on the first changed line of each file per request. POMP bookmarks are never removed on their
-  own; right-click in the editor › **POMP › Clean Up POMP Bookmarks** removes the ones left in this Visual Studio run (earlier runs' ones are deleted in the Bookmarks window). The checkable **Show Changes** in the same menu
-  hides the marks without losing them. Neither calls a model.
-- **draw.io diagrams linked to code** — switch on the `drawio` skill (off by default) to draw parts of the project (classes,
-  project dependencies, flows, states, data models) as `docs\diagrams\*.drawio`. Every shape carries its code location. Rename,
-  add or remove members and relations in draw.io (desktop app or app.diagrams.net), ask POMP to apply the edits, and it lists
-  the code changes, asks, changes the code once you agree and brings the diagram back in sync. Moves, resizes and colours alone
-  never change code.
-- **Several accounts, several models** — sign in with a subscription (OpenAI, Anthropic and others), add an API key, or add a
-  model server you run yourself (any OpenAI-compatible address). Pick any connected provider's model per chat and per agent;
-  side jobs such as completions, captions and composer predictions use the **Helper model**. Usage limits (5 hours, weekly) are
-  shown under the input box and refresh as soon as a window resets.
-- **A readable chat** — what the model says to you between tool calls (Claude Opus 5.5 and others) shows as answer text, not
-  folded into its thinking, also when an earlier conversation is reopened. Short notices, such as a failed model or permission
-  change or why a message was not sent, are not squeezed into the page: they show in the Visual Studio status bar as
-  `POMP: <notice>`.
-- **A `.pomp` folder in the project** — project-scoped agents, teams, rules, workflows, skills, hooks and permission policies live
-  in `.pomp\` and travel with the repository; POMP's own data such as conversations, knowledge and presets lives in `.pomp\local\`
-  (excluded from commits). Deleting the folder resets POMP for that project. When a `.pomp` copied from another project starts
-  for the first time, that project's conversations and work history go to the Recycle Bin and only the settings (agents, rules,
-  knowledge and so on) stay. Moving or renaming the project folder rewrites the recorded paths so everything carries on.
+| Feature | What it does |
+|---|---|
+| Right from the editor | Explain, review, fix or write tests for the selected code from the right-click **POMP** menu or a shortcut; **Ask POMP** asks in place. |
+| Only what you approve | Changes are shown as a diff; only what you allow goes into the editor buffer. Saving stays with you. |
+| Live marks | The editor follows the agent's edits and marks changed lines with `+`/`−`; click one for a before/after comparison and **Revert**. |
+| POMP bookmarks | Each request leaves the first changed line of each file in a per-conversation folder of the Bookmarks window. |
+| Context basket · knowledge | Put files, folders and symbols in the basket as the scope of a question; keep selected lines as knowledge to send along. |
+| Agents · teams · advisors | Hand work to role agents and teams; advisors watch the work and comment. |
+| Work and Tools tabs | Plan, change history and code check; permissions, skills, MCP, rules, workflows and knowledge. |
+| Accounts · models | Subscription sign-in, API keys or your own model server; pick a model per chat and agent and see usage. |
+| draw.io diagrams | Draw diagrams from the code, and apply edits made in the diagram back to the code. |
+| `.pomp` folder | Project agents, rules, skills and policies travel with the repository; conversations stay in `.pomp\local\` (not committed). |
+
+### New in 0.5.6
+
+- Engine updated to omp 18.12.1.
+- Live: choose where `+`/`−` marks go (after the line or in a left column) and how the comparison is laid out (stacked or side by side); `Esc` closes it.
+- Short notices show in the Visual Studio status bar instead of the page.
+- What the model says between tool calls (Claude Opus 5.5 and others) shows as answer text.
+- A message sent from an agent tab stays in that tab after Visual Studio restarts.
+- Live marks work in Visual Studio 2017, and shortcuts register correctly in non-English Visual Studio.
 
 ## Screenshots
 
