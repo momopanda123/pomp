@@ -38,8 +38,10 @@
     <PackageReference Include="Microsoft.VisualStudio.LanguageServices" Version="3.10.0" PrivateAssets="all" ExcludeAssets="runtime" />
     <PackageReference Include="NuGet.VisualStudio" Version="5.10.0" PrivateAssets="all" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="16.11.71" />
-    <!-- VS 2019 has no WebView2 of its own that we can rely on: this copy (and its x86 loader) is what runs. -->
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.1245.22" />
+    <!-- VS 2019 has no WebView2 of its own that we can rely on: this copy (and its x86 loader) is what runs.
+         1.0.1901.177 is the first whose CoreWebView2WebMessageReceivedEventArgs.AdditionalObjects returns CoreWebView2File objects
+         (files dropped on the page); 1.0.1774.30 to 1.0.1823.32 throw a RuntimeBinderException there. -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.1901.177" />
     <!-- Same version Pomp.Contracts uses; packaged explicitly (see PompShipNewtonsoftJson in the common targets). -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>

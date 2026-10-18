@@ -102,7 +102,7 @@
 
   <!-- ===================================================================================================== -->
   <!-- WebView2 native loader: keep only the architecture of the hosting devenv.exe.                          -->
-  <!-- Microsoft.Web.WebView2.Core (1.0.1245.22) loads <dir of Core.dll>\runtimes\win-<arch>\native\           -->
+  <!-- Microsoft.Web.WebView2.Core (1.0.1901.177 in VS 2017/2019) loads <dir of Core.dll>\runtimes\win-<arch>\native\ -->
   <!-- WebView2Loader.dll on .NET Framework, so that layout is what the VSIX carries. VS 2022+ redirect the    -->
   <!-- managed assemblies to their own copy (with their own loader next to it), which makes ours a fallback.  -->
   <!-- ===================================================================================================== -->

@@ -99,6 +99,7 @@ namespace Pomp.VisualStudio.ToolWindow
             channel = new WebViewUiChannel(joinableTaskFactory, logger, VirtualHost);
             channel.ToggleFocusRequested += OnToggleFocusRequested;
             channel.PasteFilesRequested += OnPasteFilesRequested;
+            channel.FilesDropped += OnFilesDropped;
             channel.PageReady += OnPageReady;
             channel.EditorFollowRequested += OnEditorFollowRequested;
             channel.StatusRequested += OnStatusRequested;
@@ -319,6 +320,7 @@ namespace Pomp.VisualStudio.ToolWindow
             occlusionClip.Dispose();
             channel.ToggleFocusRequested -= OnToggleFocusRequested;
             channel.PasteFilesRequested -= OnPasteFilesRequested;
+            channel.FilesDropped -= OnFilesDropped;
             channel.PageReady -= OnPageReady;
             channel.EditorFollowRequested -= OnEditorFollowRequested;
             channel.StatusRequested -= OnStatusRequested;
@@ -985,6 +987,21 @@ namespace Pomp.VisualStudio.ToolWindow
                 catch (Exception ex)
                 {
                     logger.Warn("Pasting files into the chat input failed.", ex);
+                }
+            });
+        }
+
+        private void OnFilesDropped(object? sender, IReadOnlyList<string> paths)
+        {
+            _ = joinableTaskFactory.RunAsync(async () =>
+            {
+                try
+                {
+                    await services.Commands.DropIntoBasketAsync(paths);
+                }
+                catch (Exception ex)
+                {
+                    logger.Warn("Adding the files dropped on the chat page failed.", ex);
                 }
             });
         }

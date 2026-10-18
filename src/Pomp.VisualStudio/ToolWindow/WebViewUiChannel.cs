@@ -49,6 +49,12 @@ namespace Pomp.VisualStudio.ToolWindow
         /// <summary>Host-chrome message the page sends when files or an image are pasted into the chat input (only VS can read their paths); never forwarded to the session.</summary>
         public const string PasteFilesMessageType = "ui/pasteFiles";
 
+        /// <summary>
+        /// Host-chrome message the page sends with the files dropped on it (<c>postMessageWithAdditionalObjects</c>; the paths come only
+        /// as the message's additional objects, never in its JSON); never forwarded to the session.
+        /// </summary>
+        public const string DropFilesMessageType = "ui/dropFiles";
+
         public const string EditorFollowMessageType = "ui/editorFollow";
 
         /// <summary>Host-chrome message: a short notice of the page (a failed control action, a warning) for the VS status bar; never forwarded to the session.</summary>
@@ -120,6 +126,9 @@ namespace Pomp.VisualStudio.ToolWindow
 
         /// <summary>Raised on the UI thread when files or an image were pasted into the chat input.</summary>
         public event EventHandler? PasteFilesRequested;
+
+        /// <summary>Raised on the UI thread with the full paths of the files dropped on the page.</summary>
+        public event EventHandler<IReadOnlyList<string>>? FilesDropped;
 
         public event EventHandler<UiMessage>? EditorFollowRequested;
 
@@ -311,7 +320,7 @@ namespace Pomp.VisualStudio.ToolWindow
                     return;
                 }
 
-                HandleMessage(json);
+                HandleMessage(json, e);
             }
             catch (Exception ex)
             {
@@ -323,7 +332,7 @@ namespace Pomp.VisualStudio.ToolWindow
         /// The checks and the dispatch of one message of the trusted page (UI thread), in the order the class remarks describe: size,
         /// then parse, then the type specific rules, then dispatch.
         /// </summary>
-        private void HandleMessage(string json)
+        private void HandleMessage(string json, CoreWebView2WebMessageReceivedEventArgs args)
         {
             // The size is checked before the text is handed to the JSON parser.
             if (json.Length > MaxInboundMessageChars)
@@ -360,6 +369,13 @@ namespace Pomp.VisualStudio.ToolWindow
                 return;
             }
 
+            if (message.Type == DropFilesMessageType)
+            {
+                var paths = DroppedPaths(args);
+                if (paths.Count > 0) FilesDropped?.Invoke(this, paths);
+                return;
+            }
+
             if (message.Type == EditorFollowMessageType)
             {
                 EditorFollowRequested?.Invoke(this, message);
@@ -383,6 +399,36 @@ namespace Pomp.VisualStudio.ToolWindow
             {
                 PageReady?.Invoke(this, EventArgs.Empty);
             }
+        }
+
+        /// <summary>
+        /// The full paths of the files a <c>ui/dropFiles</c> message carries as additional objects. Read through reflection: the x64
+        /// package compiles against an older WebView2 and VS 2022+ run their own copy, which may lack a working <c>AdditionalObjects</c>
+        /// (added in SDK 1.0.1774.30 but broken until 1.0.1901.177; runtime 113); such a copy or runtime yields no paths and a log line.
+        /// </summary>
+        private List<string> DroppedPaths(CoreWebView2WebMessageReceivedEventArgs args)
+        {
+            var paths = new List<string>();
+            try
+            {
+                if (args.GetType().GetProperty("AdditionalObjects")?.GetValue(args) is System.Collections.IEnumerable objects)
+                {
+                    foreach (var item in objects)
+                    {
+                        if (item?.GetType().GetProperty("Path")?.GetValue(item) is string path && path.Length > 0) paths.Add(path);
+                    }
+                }
+                else
+                {
+                    logger.Warn("Files were dropped on the chat page, but this WebView2 cannot pass their paths (needs SDK 1.0.1901.177 or newer).");
+                }
+            }
+            catch (Exception ex) when (ex is System.Reflection.TargetInvocationException || ex is NotImplementedException || ex is InvalidCastException || ex is System.Runtime.InteropServices.COMException)
+            {
+                logger.Warn("Reading the files dropped on the chat page failed (WebView2 SDK older than 1.0.1901.177 or Runtime older than 113): " + (ex.InnerException ?? ex).Message);
+            }
+
+            return paths;
         }
 
         private void HandleReady()

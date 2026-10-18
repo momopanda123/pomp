@@ -1308,6 +1308,8 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'ui/status': { text: string; level: 'error' | 'warning' | 'info' };
   /** Files or an image were pasted into the chat input: the host reads the clipboard and puts them into the context basket (composer/prefill). */
   'ui/pasteFiles': Record<string, never>;
+  /** Files dropped on the page: sent with `postMessageWithAdditionalObjects`, the files as additional objects (only VS reads their paths). */
+  'ui/dropFiles': Record<string, never>;
   'workspace/pickFiles': { requestId: string };
   'permission/respond': { requestId: string; decision: PermissionDecision; note?: string };
   /** The composer's permission-mode chip; answered by `permission/modeResult`, and a changed mode comes back in a new `host/hello` (omp restarts). */
@@ -1334,6 +1336,8 @@ export type UiMessageType = keyof UiToHost;
 
 interface WebViewHost {
   postMessage(message: unknown): void;
+  /** WebView2 Runtime 113+: hands DOM objects (a dropped `FileList`) to the host along with the message. */
+  postMessageWithAdditionalObjects?(message: unknown, additionalObjects: ArrayLike<unknown>): void;
   addEventListener(type: 'message', listener: (event: { data: unknown }) => void): void;
   removeEventListener(type: 'message', listener: (event: { data: unknown }) => void): void;
 }

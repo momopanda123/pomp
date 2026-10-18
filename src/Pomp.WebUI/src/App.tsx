@@ -22,7 +22,7 @@ import { newId } from './format';
 import { itemsForPartner } from './partnerView';
 import { useGoalCard } from './goalCard';
 import { useWorkState } from './work/store';
-import { useEscapeToComposer, useGlobalErrorLogging, useHostPump, useIgnoreFileDrops } from './hooks';
+import { useEscapeToComposer, useFileDrops, useGlobalErrorLogging, useHostPump } from './hooks';
 import { I18nContext, LocaleContext, makeTranslate } from './i18n';
 import { dialogResponseRejection, permissionResponseRejection, promptRejection, type SendResult } from './limits';
 import { send, MAIN_TARGET, type PermissionDecision, type SendTarget, type WorkspaceFile } from './protocol';
@@ -76,7 +76,7 @@ export function App() {
   /** Agents tab "Message" on a role or team and `/agent name`: open (or switch to) that partner tab in Chat. */
   const [partnerRequest, setPartnerRequest] = useState<{ key: string; seq: number }>();
   const translate = useMemo(() => makeTranslate(state.locale), [state.locale]);
-  useHostPump(dispatch); useEscapeToComposer(inputRef); useGlobalErrorLogging(); useIgnoreFileDrops();
+  useHostPump(dispatch); useEscapeToComposer(inputRef); useGlobalErrorLogging(); useFileDrops(() => translate('composer.dropUnsupported'));
   useEffect(() => { document.documentElement.lang = state.locale; }, [state.locale]);
 
   const connected = state.bridge.state === 'running';

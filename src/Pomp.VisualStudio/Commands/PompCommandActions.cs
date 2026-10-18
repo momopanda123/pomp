@@ -356,6 +356,12 @@ namespace Pomp.VisualStudio.Commands
             if ((paths.Count > 0 || png != null) && services.Session is PompSession session) await session.PasteIntoBasketAsync(paths, png, package.DisposalToken);
         }
 
+        /// <summary>Files dragged from Explorer onto the chat page: into the context basket, like pasted files.</summary>
+        public async Task DropIntoBasketAsync(IReadOnlyList<string> paths)
+        {
+            if (services.Session is PompSession session) await session.PasteIntoBasketAsync(paths, null, package.DisposalToken);
+        }
+
         /// <summary>The active document as a context-basket file (workspace-relative path with forward slashes when inside the workspace).</summary>
         private async Task<ComposerPrefillFile?> ActiveFileAsync()
         {

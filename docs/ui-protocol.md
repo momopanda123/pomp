@@ -96,6 +96,14 @@ The VS host handles these page messages in the WebView channel. They never reach
 - An image is first saved as `<root>/.pomp/local/clipboard/clipboard-<time>.png`.
 - Folders and missing files are left out.
 
+#### `ui/dropFiles`
+
+- The page sends it when files are dropped anywhere on it, with `chrome.webview.postMessageWithAdditionalObjects`: the payload is `{}` and the dropped `FileList` goes as the additional objects.
+- The VS host reads each `CoreWebView2File.Path` from `AdditionalObjects` and puts the files into the context basket as for `ui/pasteFiles`. Folders and missing files are left out.
+- `AdditionalObjects` needs WebView2 SDK 1.0.1901.177 (earlier SDKs have the property but throw) and Runtime 113. VS 2017/2019 ship that SDK. VS 2022+ use their own copy, read through reflection.
+- Where the runtime lacks the API, the page sends a `ui/status` warning instead. Where the host's WebView2 copy lacks it, the host logs a warning.
+- The page cancels every file drop, so the WebView never navigates to a dropped file. Text dragged from the editor still drops into the chat input.
+
 #### `ui/status`
 
 Payload: `{ text, level: "error"|"warning"|"info" }`.

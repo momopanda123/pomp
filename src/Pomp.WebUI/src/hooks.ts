@@ -56,19 +56,31 @@ export function useEscapeToComposer(input: RefObject<HTMLTextAreaElement | null>
 }
 
 /**
- * Files dropped on the page would navigate the WebView away from the chat UI (attachments use the host picker instead).
- * Only file drags are swallowed: cancelling every drop would also cancel dropping text (code dragged from the editor) into the composer.
+ * Files dropped anywhere on the page go into the context basket: the host reads their paths from the message's additional objects
+ * (`ui/dropFiles`). Without that API (WebView2 Runtime older than 113) the page says so. Either way the drop is cancelled, which keeps
+ * the WebView from navigating to the file. Only file drags are handled: text dragged from the editor still drops into the composer.
  */
-export function useIgnoreFileDrops(): void {
+export function useFileDrops(unsupported: () => string): void {
+  const message = useRef(unsupported); message.current = unsupported;
   useEffect(() => {
-    const swallow = (event: DragEvent): void => {
-      if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
+    const over = (event: DragEvent): void => {
+      if (!event.dataTransfer?.types.includes('Files')) return;
+      event.preventDefault(); event.dataTransfer.dropEffect = 'copy';
     };
-    window.addEventListener('dragover', swallow);
-    window.addEventListener('drop', swallow);
+    const drop = (event: DragEvent): void => {
+      if (!event.dataTransfer?.types.includes('Files')) return;
+      event.preventDefault();
+      const files = event.dataTransfer.files; const webview = window.chrome?.webview;
+      if (!files.length || !webview) return;
+      if (!webview.postMessageWithAdditionalObjects) { send('ui/status', { text: message.current(), level: 'warning' }); return; }
+      try { webview.postMessageWithAdditionalObjects({ type: 'ui/dropFiles', payload: {} }, files); }
+      catch (error) { console.error('[pomp] postMessageWithAdditionalObjects failed', error); }
+    };
+    window.addEventListener('dragover', over);
+    window.addEventListener('drop', drop);
     return () => {
-      window.removeEventListener('dragover', swallow);
-      window.removeEventListener('drop', swallow);
+      window.removeEventListener('dragover', over);
+      window.removeEventListener('drop', drop);
     };
   }, []);
 }
