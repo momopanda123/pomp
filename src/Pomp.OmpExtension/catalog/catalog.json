@@ -522,6 +522,25 @@
       "defaultEnabled": false
     },
     {
+      "id": "chat-style",
+      "kind": "skill",
+      "title": "Chat reply style",
+      "titleKo": "채팅 답변 서식",
+      "description": "Format replies in the POMP chat: conclusion first, emoji headings, status marks and dividers.",
+      "descriptionKo": "POMP 채팅 답변을 결론 먼저, 이모지 소제목, 상태 표시, 구분선으로 읽기 쉽게 쓴다.",
+      "category": "process",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": true
+    },
+    {
       "id": "github",
       "kind": "mcp",
       "title": "GitHub",

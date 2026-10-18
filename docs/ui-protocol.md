@@ -1228,6 +1228,7 @@ Writing:
 - At the end of every reply the host compares the `SKILL.md` files of both scopes (path, size, write time) with what the engine last saw.
   On a change it refreshes the list and reloads the engine. A skill the model wrote is usable right after its reply.
 - The model's system prompt names the two skill folders and the file format (`features-guidance`).
+- The built-in `chat-style` skill is on by default. While the engine lists it, the `reply-style` module appends its instructions to the main agent's system prompt, because the model does not pick a formatting skill by its description. A user's own `.pomp/skills/chat-style/SKILL.md` (project, then home) wins over the built-in file.
 
 **`create`, `delete`, `open`**
 

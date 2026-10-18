@@ -29,6 +29,7 @@
       "./extensions/time-context.ts",
       "./extensions/plan-guard.ts",
       "./extensions/features-guidance.ts",
+      "./extensions/reply-style.ts",
       "./extensions/local-models.ts"
     ]
   },
