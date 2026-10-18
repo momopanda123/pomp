@@ -3,7 +3,7 @@
 [한국어](README.md) | **English**
 
 **An AI coding partner inside Visual Studio.** In a window next to the editor, an AI agent reads and changes code, builds,
-runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+), 2022 and 2026.
+runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+), 2022 and 2026, in English and Korean.
 
 | Component | Version | What it does |
 |---|---|---|
@@ -14,8 +14,6 @@ runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+)
 
 <!-- howto-videos -->
 ## Feature videos
-
-The videos show the Korean UI. Shortcuts are left out because every key can be changed in Tools > Options > Pomp.
 
 **Explain code from the editor** — Select code, right-click › POMP › Explain. The answer appears in the chat.
 
@@ -102,9 +100,6 @@ The videos show the Korean UI. Shortcuts are left out because every key can be c
 </table>
 
 ![POMP in Visual Studio](docs/media/vs-overview.png)
-
-The screenshots show the Korean UI. The UI follows the Visual Studio display language; to force English, use
-**Tools > Options > Pomp > General > Chat > Language**.
 
 ## Install
 
