@@ -80,15 +80,6 @@ runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+)
 | draw.io diagrams | Draw diagrams from the code, and apply edits made in the diagram back to the code. |
 | `.pomp` folder | Project agents, rules, skills and policies travel with the repository; conversations stay in `.pomp\local\` (not committed). |
 
-### New in 0.5.6
-
-- Engine updated to omp 18.12.1.
-- Live: choose where `+`/`−` marks go (after the line or in a left column) and how the comparison is laid out (stacked or side by side); `Esc` closes it.
-- Short notices show in the Visual Studio status bar instead of the page.
-- What the model says between tool calls (Claude Opus 5.5 and others) shows as answer text.
-- A message sent from an agent tab stays in that tab after Visual Studio restarts.
-- Live marks work in Visual Studio 2017, and shortcuts register correctly in non-English Visual Studio.
-
 ## Screenshots
 
 <table>
