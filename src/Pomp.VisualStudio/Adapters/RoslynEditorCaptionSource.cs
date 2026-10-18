@@ -49,8 +49,12 @@ namespace Pomp.VisualStudio.Adapters
                 if (line < firstLine || line > lastLine || !lines.Add(line)) continue;
                 ISymbol? symbol = null;
                 if (semantic != null) try { symbol = semantic.GetDeclaredSymbol(node, token); } catch (ArgumentException) { }
-                var name = symbol?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat) ?? "Source declaration";
-                if (name.Length > 120) name = name.Substring(0, 120) + "…";
+                // Without a cached semantic model there is no symbol: the declaration's own first line past its attributes (its
+                // signature) names it instead.
+                var head = node.DescendantTokens().FirstOrDefault(t => t.Parent?.AncestorsAndSelf().Any(a => a.GetType().Name.EndsWith("AttributeListSyntax", StringComparison.Ordinal)) == false);
+                var name = symbol?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)
+                    ?? text.Lines.GetLineFromPosition(head.RawKind != 0 ? head.SpanStart : node.SpanStart).ToString().Trim();
+                if (name.Length > 120) name = name.Substring(0, 120);
                 targets.Add(new EditorCaptionTarget(name, line, node.SpanStart, node.Span.Length));
                 if (targets.Count == 12) break;
             }

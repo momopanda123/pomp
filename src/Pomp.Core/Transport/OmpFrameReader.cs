@@ -118,6 +118,6 @@ namespace Pomp.Transport
             }
         }
 
-        private static string Preview(string text) => text.Length <= 120 ? text : text.Substring(0, 120) + "...";
+        private static string Preview(string text) => text.Length <= 120 ? text : text.Substring(0, 120);
     }
 }

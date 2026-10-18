@@ -606,7 +606,7 @@ namespace Pomp.VisualStudio.Adapters
                 return string.Empty;
             }
 
-            return text!.Length <= maximum ? text : text.Substring(0, Math.Max(0, maximum - 3)) + "...";
+            return text!.Length <= maximum ? text : text.Substring(0, maximum);
         }
 
         public static string JoinError(string? error, string message) => Truncate(string.IsNullOrEmpty(error) ? message : error + "\n" + message, 8000);

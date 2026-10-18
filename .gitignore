@@ -37,3 +37,17 @@ src/Pomp.Vsix.*/omp/
 # OS
 Thumbs.db
 .DS_Store
+
+# Code signing: keys, certificates and their passwords never enter the repository; keep them outside the tree and pass passwords
+# through environment variables or CI secrets.
+*.pfx
+*.p12
+*.pvk
+*.snk
+*.pem
+*.key
+*.cer
+*.crt
+*.spc
+.env
+.env.*

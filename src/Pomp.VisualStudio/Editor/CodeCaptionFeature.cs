@@ -6,6 +6,8 @@ using System.Linq;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.VisualStudio.Shell;
@@ -53,6 +55,8 @@ namespace Pomp.VisualStudio.Editor
             private readonly Dictionary<int, string> summaries = new Dictionary<int, string>();
             private string status = "", currentFile = "";
             private bool closed, formatting;
+            private Style? buttonStyle;
+            private Brush? buttonForeground;
             private bool Enabled => PompServices.Current?.Settings.CodeCaptionsEnabled == true && PompServices.Current?.Settings.NativeCodeLensCaptionsEnabled != true;
             private bool Korean => Pomp.Hosting.PompLanguage.IsKorean;
             public Controller(IWpfTextView view, ITextDocumentFactoryService documents)
@@ -136,14 +140,14 @@ namespace Pomp.VisualStudio.Editor
                 foreach (var line in view.TextViewLines)
                 {
                     if (!line.IsLastTextViewLineForSnapshotLine || !targets.TryGetValue(line.Start.GetContainingLine().LineNumber + 1, out var target)) continue;
-                    var panel = new StackPanel { Orientation = Orientation.Horizontal, Height = Height, Background = Brushes.Transparent };
+                    // Arrow over the row (the editor's I-beam would say "type here"); the button itself shows a hand.
+                    var panel = new StackPanel { Orientation = Orientation.Horizontal, Height = Height, Background = Brushes.Transparent, Cursor = Cursors.Arrow };
                     var foreground = view.FormattedLineSource.DefaultTextProperties.ForegroundBrush;
-                    var summary = new Button { Content = Korean ? "AI 설명" : "AI summary", FontSize = 10, Padding = new Thickness(2, 0, 2, 0), Margin = new Thickness(0), BorderThickness = new Thickness(0), Foreground = foreground, Background = Brushes.Transparent, ToolTip = status.Length > 0 ? status : target.Name };
+                    if (buttonStyle == null || buttonForeground != foreground) { buttonForeground = foreground; buttonStyle = CaptionButtonStyle(foreground); }
+                    var summary = new Button { Content = Korean ? "AI 설명" : "AI summary", FontSize = 10, Style = buttonStyle, ToolTip = status.Length > 0 ? status : target.Name };
                     summary.IsEnabled = inference == null && PompServices.Current?.Session is IInlineAssistant;
                     summary.Click += (_, __) => Describe(target);
-                    var chat = new Button { Content = Korean ? "채팅" : "Chat", FontSize = 10, Padding = new Thickness(4, 0, 4, 0), BorderThickness = new Thickness(0), Foreground = foreground, Background = Brushes.Transparent };
-                    chat.Click += (_, __) => OpenChat(target);
-                    panel.Children.Add(summary); panel.Children.Add(chat);
+                    panel.Children.Add(summary);
                     if (summaries.TryGetValue(target.Start, out var text)) panel.Children.Add(new TextBlock { Text = "AI: " + text, Foreground = foreground, Opacity = .8, FontSize = 10, MaxWidth = Math.Max(80, view.ViewportWidth - 150), TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = text });
                     Canvas.SetLeft(panel, Math.Max(view.ViewportLeft + 4, line.TextLeft)); Canvas.SetTop(panel, line.TextBottom);
                     layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, new SnapshotSpan(line.Start, 0), target, panel, null);
@@ -179,12 +183,42 @@ namespace Pomp.VisualStudio.Editor
                     pending.Dispose();
                 });
             }
-            private void OpenChat(EditorCaptionTarget target)
+            /// <summary>
+            /// A flat caption button in the editor's own text color: no frame, a faint tint of that color under the pointer and a stronger one
+            /// while pressed, so the text stays readable in light and dark themes (the default WPF button turns light blue with light text).
+            /// </summary>
+            private static Style CaptionButtonStyle(Brush foreground)
             {
-                var services = PompServices.Current; if (closed || services == null || targetSnapshot != view.TextSnapshot) return;
-                view.Caret.MoveTo(new SnapshotPoint(view.TextSnapshot, target.Start));
-                view.Selection.Select(new SnapshotSpan(view.TextSnapshot, target.Start, Math.Min(target.Length, 24000)), false);
-                _ = services.JoinableTaskFactory.RunAsync(async () => { try { await services.Commands.ShowChatAsync(true); } catch (Exception ex) { services.Logger.Debug("Opening caption chat failed: " + ex.Message); } });
+                var color = (foreground as SolidColorBrush)?.Color ?? Colors.Gray;
+                Brush Tint(byte alpha) { var brush = new SolidColorBrush(Color.FromArgb(alpha, color.R, color.G, color.B)); brush.Freeze(); return brush; }
+                var border = new FrameworkElementFactory(typeof(Border), "border");
+                border.SetValue(Border.BackgroundProperty, Brushes.Transparent);
+                border.SetValue(Border.CornerRadiusProperty, new CornerRadius(2));
+                border.SetValue(Border.PaddingProperty, new Thickness(3, 0, 3, 0));
+                var content = new FrameworkElementFactory(typeof(ContentPresenter));
+                content.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+                border.AppendChild(content);
+                var template = new ControlTemplate(typeof(Button)) { VisualTree = border };
+                var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+                hover.Setters.Add(new Setter(Border.BackgroundProperty, Tint(0x30), "border"));
+                template.Triggers.Add(hover);
+                var pressed = new Trigger { Property = ButtonBase.IsPressedProperty, Value = true };
+                pressed.Setters.Add(new Setter(Border.BackgroundProperty, Tint(0x55), "border"));
+                template.Triggers.Add(pressed);
+                var disabled = new Trigger { Property = UIElement.IsEnabledProperty, Value = false };
+                disabled.Setters.Add(new Setter(UIElement.OpacityProperty, 0.45, "border"));
+                template.Triggers.Add(disabled);
+                var style = new Style(typeof(Button));
+                style.Setters.Add(new Setter(Control.ForegroundProperty, foreground));
+                style.Setters.Add(new Setter(Control.TemplateProperty, template));
+                style.Setters.Add(new Setter(FrameworkElement.CursorProperty, Cursors.Hand));
+                // A click must not take the keyboard from the editor, so there is no focus to show either.
+                style.Setters.Add(new Setter(UIElement.FocusableProperty, false));
+                // The status ("requesting summary", an error) is the tooltip of the disabled button while a summary is on its way.
+                style.Setters.Add(new Setter(ToolTipService.ShowOnDisabledProperty, true));
+                style.Setters.Add(new Setter(FrameworkElement.FocusVisualStyleProperty, null));
+                style.Seal();
+                return style;
             }
             private static void Cancel(ref CancellationTokenSource? source) { var current = source; source = null; try { current?.Cancel(); } catch (ObjectDisposedException) { } }
             private void OnClosed(object sender, EventArgs args)

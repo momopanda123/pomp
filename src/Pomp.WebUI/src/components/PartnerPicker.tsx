@@ -9,6 +9,7 @@ import { PickerPopover } from './ModelPickers';
 import { matches } from './ui';
 import { Icon } from './Icon';
 import { plainControls, revealControls } from './RevealControls';
+import { useStatusReport } from '../statusBar';
 
 /** "Default (POMP)" plus any number of agent/team tabs (the row scrolls). The remembered tabs of all conversations stay under this size. */
 const STORE_KEY = 'pomp.partnerTabs';
@@ -155,6 +156,10 @@ export function PartnerPicker({ state, agents, replies, sessionId, disabled, req
     event.preventDefault(); buttons[next]?.focus(); scrollTab(tabs[next]!);
   };
 
+  // Notices of the tab strip (a failed switch, a restarted agent instance) go to the VS status bar, not as text inside the tab row.
+  useStatusReport(error);
+  useStatusReport(notice, 'warning');
+  useStatusReport(scopedState?.message, 'info');
   return <div className="partner-picker" ref={root} data-testid="partner-tabs" onKeyDown={event => {
     if (!event.defaultPrevented && event.key === 'Escape' && open && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); event.stopPropagation(); setOpen(false); add.current?.focus(); }
   }}>
@@ -179,6 +184,5 @@ export function PartnerPicker({ state, agents, replies, sessionId, disabled, req
         if (!extras.includes(item.id)) save([...extras, item.id]);
         if (activate(item.id, true)) setOpen(false);
       }} />}
-    {(error || notice || scopedState?.message) && <span className="partner-message" role={error || notice ? 'alert' : 'status'} data-testid="partner-message">{revealControls(error || notice || scopedState?.message || '')}</span>}
   </div>;
 }

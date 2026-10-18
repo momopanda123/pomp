@@ -8,6 +8,9 @@ const PATHS = {
   tool: <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />,
   more: <><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>,
   context: <><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m13-5v3a2 2 0 0 1-2 2h-3" /><path d="m8 9-3 3 3 3m8-6 3 3-3 3" /></>,
+  live: <><circle cx="12" cy="12" r="3" /><path d="M6.34 6.34a8 8 0 0 0 0 11.32m11.32 0a8 8 0 0 0 0-11.32M3.51 3.51a12 12 0 0 0 0 16.98m16.98 0a12 12 0 0 0 0-16.98" /></>,
+  bookmark: <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />,
+  slash: <path d="M16 3 8 21" />,
   chevron: <polyline points="9 18 15 12 9 6" />,
   chevronDown: <polyline points="6 9 12 15 18 9" />,
   search: (

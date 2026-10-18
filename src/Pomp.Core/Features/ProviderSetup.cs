@@ -388,7 +388,7 @@ namespace Pomp.Features
         /// <c>get_login_providers</c> answers <c>authenticated</c> from the stored credential of the provider an entry stores as, and does not
         /// name that provider, so such an entry reads as signed in whenever the other one is and the page would list a second account for the
         /// same sign-in. The table is explicit because the RPC has no field to derive it from: check it whenever the bundled omp changes (every
-        /// auth rule of the engine with a <c>storeAs</c> belongs here; 18.8.6, 18.10.3 and 18.10.4 have exactly these two).
+        /// auth rule of the engine with a <c>storeAs</c> belongs here; 18.8.6, 18.10.3, 18.10.4 and 18.12.1 have exactly these two).
         /// </summary>
         private static readonly Dictionary<string, string> StoredUnder = new Dictionary<string, string>(StringComparer.Ordinal)
         {

@@ -5,6 +5,7 @@ import { useConversationCommands } from '../conversationCommands';
 import { useT } from '../i18n';
 import { engineAbortText } from '../engineAbortText';
 import { promptRejection } from '../limits';
+import { useStatusReport } from '../statusBar';
 import type { UserItem } from '../state';
 import { useRoleTitle, useTeamTitle } from '../teamsCache';
 import { AgentDialog } from './AgentDialog';
@@ -32,7 +33,9 @@ export function ChatQueue({ state, replies, sessionId, disabled, pendingSends, o
   const [query, setQuery] = useState('');
   const shown = state.items.map((item, index) => ({ item, index })).filter(({ item }) => matches(query, item.text, item.agent, item.team, item.agentInstance));
   const paged = usePaged(shown, (sessionId ?? '') + ':' + query, QUEUE_PAGE);
-  if (!state.items.length && !pendingSends.length && !error) return null;
+  // A failed queue action is reported in the VS status bar, not as a line inside the queue strip.
+  useStatusReport(error ? engineAbortText(error, t) : null);
+  if (!state.items.length && !pendingSends.length) return null;
   const blocked = disabled || pending;
   const editInvalid = !text.trim() || !!promptRejection(text, { type: 'chat/send', payload: { clientMessageId: 'queue-edit', text, includeEditorContext: editing?.includeEditorContext ?? false } }, editing?.attachments?.map(file => file.path));
   const capture = () => { opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; };
@@ -40,7 +43,6 @@ export function ChatQueue({ state, replies, sessionId, disabled, pendingSends, o
     <button type="button" className="conversation-strip-toggle" data-testid="queue-toggle" aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="chevronDown" size={12} /><strong>{t('queue.title', { count: state.items.length + pendingSends.length })}</strong>{state.paused && <span>{t('queue.paused')}</span>}</button>
     {state.paused && <p className="hint" role="status" data-testid="queue-reason">{revealControls(state.reason || t('queue.paused'))}</p>}
     {other && <p className="hint" role="status" data-testid="queue-other">{t('queue.other')}</p>}
-    {error && <p role="alert" className="conversation-error">{revealControls(engineAbortText(error, t))}</p>}
     {open && <div className="queue-expanded">
       <div className="conversation-actions">
         <button className="btn subtle small" type="button" data-testid="queue-pause" disabled={blocked || !state.items.length || (state.paused && other)} onClick={() => post('chat/queue', { action: state.paused ? 'resume' : 'pause' })}>{t(state.paused ? 'queue.resume' : 'queue.pause')}</button>

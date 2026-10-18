@@ -101,7 +101,8 @@ namespace Pomp.Protocol
 
     /// <summary>
     /// Shape of omp's tool-approval prompt: an extension UI "select" whose title starts with
-    /// "Allow tool: &lt;name&gt;" and whose options are exactly ["Approve", "Deny"]
+    /// "Allow tool: &lt;name&gt;" and whose options are ["Approve", "Deny"], or (omp 18.11.3 and later, for a prompt the approval
+    /// mode raised) ["Approve", "Approve &lt;subject&gt; for this session", "Deny"]
     /// (packages/coding-agent/src/extensibility/extensions/wrapper.ts, tools/approval.ts).
     /// </summary>
     public static class OmpApprovalPrompt
@@ -109,6 +110,13 @@ namespace Pomp.Protocol
         public const string TitlePrefix = "Allow tool: ";
         public const string Approve = "Approve";
         public const string Deny = "Deny";
+
+        /// <summary>
+        /// Start and end of the optional middle option. Choosing it makes omp skip every later prompt of that subject and tier for
+        /// the rest of the session, past the host's gate, so the host never answers with it.
+        /// </summary>
+        public const string SessionOptionPrefix = "Approve ";
+        public const string SessionOptionSuffix = " for this session";
 
         /// <summary>Line omp adds when the tool's own policy demands the prompt (e.g. a dangerous command).</summary>
         public const string ReasonPrefix = "Reason:";

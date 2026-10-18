@@ -13,6 +13,7 @@ using Pomp.VisualStudio.Commands;
 using Pomp.VisualStudio.Hosting;
 using Pomp.VisualStudio.Interop;
 using Pomp.VisualStudio.Logging;
+using Pomp.VisualStudio.Editor;
 using Pomp.VisualStudio.Options;
 using Task = System.Threading.Tasks.Task;
 
@@ -54,6 +55,7 @@ namespace Pomp.VisualStudio.Composition
             Environment = environment;
             Adapters = adapters;
             Commands = new PompCommandActions(package, this);
+            EditorFollow = new EditorFollowService(this);
         }
 
         public PompPackage Package { get; }
@@ -72,6 +74,20 @@ namespace Pomp.VisualStudio.Composition
 
         /// <summary>Command implementations shared by the menu commands and the chat page's shortcut.</summary>
         public PompCommandActions Commands { get; }
+
+        /// <summary>Host-only edit traces, navigation and owned bookmarks; never invokes the model.</summary>
+        public EditorFollowService EditorFollow { get; }
+
+        /// <summary>Reads the host's current epoch, not a potentially delayed WebView projection.</summary>
+        public void RefreshEditorSession()
+        {
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+            IEditorSessionContextSource? source;
+            lock (gate) source = session as IEditorSessionContextSource;
+            if (source == null) return;
+            var state = source.EditorSessionContext;
+            EditorFollow.SetSession(state.WorkspaceRoot, state.SessionId, state.IsStreaming, state.TaskId, state.SessionTitle);
+        }
 
         /// <summary>The chat session (created on first use, on the UI thread).</summary>
         public IPompSession Session
@@ -188,6 +204,20 @@ namespace Pomp.VisualStudio.Composition
 
             pendingRestart?.Cancel();
             pendingRestart?.Dispose();
+
+            // A failure here (a view redraw during shutdown) must not skip stopping omp below.
+            try
+            {
+                JoinableTaskFactory.Run(async () =>
+                {
+                    await JoinableTaskFactory.SwitchToMainThreadAsync();
+                    EditorFollow.Dispose();
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Disposing the Live editor features failed.", ex);
+            }
 
             try
             {

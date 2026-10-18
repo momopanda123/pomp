@@ -86,6 +86,6 @@ namespace Pomp.VisualStudio.Adapters
             return await editor.OpenDocumentAsync(new PathGuard(root).Resolve(path), Math.Max(1, line), token).ConfigureAwait(false);
         }
         private static string Severity(DiagnosticSeverity severity) => severity == DiagnosticSeverity.Error ? "error" : severity == DiagnosticSeverity.Warning ? "warning" : "suggestion";
-        private static string Bound(string text, int limit) => text.Length <= limit ? text : text.Substring(0, limit) + "…";
+        private static string Bound(string text, int limit) => text.Length <= limit ? text : text.Substring(0, limit);
     }
 }

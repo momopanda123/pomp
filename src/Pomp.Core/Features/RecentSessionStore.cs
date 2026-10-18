@@ -136,7 +136,7 @@ namespace Pomp.Features
                     if (row.GetString("type") != "title") throw new InvalidDataException();
                 }
                 if (header == null || header.GetString("id") != (string?)listed["sessionId"] ||
-                    (header.GetString("cwd") is string cwd && !string.Equals(Path.GetFullPath(cwd), root, Comparison)))
+                    (header.GetString("cwd") is string cwd && !WorkspaceOrigin.IsCurrentOrPrevious(root, cwd)))
                     throw new InvalidOperationException(PompLanguage.Pick("대화가 현재 작업 영역과 일치하지 않아요.", "The conversation does not match the current workspace."));
             }
             var artifacts = path.Substring(0, path.Length - ".jsonl".Length);
@@ -182,7 +182,7 @@ namespace Pomp.Features
                     if (role != "user" && role != "assistant") continue;
                     var content = message["content"];
                     var value = content?.Type == JTokenType.String ? (string?)content : string.Join("\n", (content as JArray ?? new JArray()).OfType<JObject>()
-                        .Where(block => block.GetString("type") == "text").Select(block => block.GetString("text") ?? ""));
+                        .Select(block => block.AnswerText()).Where(text => text != null));
                     if (role == "user") value = PromptDisplay.UserText(value);
                     if (string.IsNullOrEmpty(value)) continue;
                     if (messages.Count >= 20) { truncated = true; break; }

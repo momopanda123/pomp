@@ -89,12 +89,12 @@ namespace Pomp.Tools
 
             if (action == "list")
             {
-                ReportProgress(invocation, "Discovering tests...");
+                ReportProgress(invocation, "Discovering tests");
                 var listed = await Adapters.Tests.ListTestsAsync(project, cancellationToken).ConfigureAwait(false);
                 return listed == null ? Fail("the test adapter returned no list.") : FormatList(listed, filter);
             }
 
-            ReportProgress(invocation, "Running tests in " + (project == null ? "all test projects" : "project '" + DisplayText(project, 1000) + "'") + "...");
+            ReportProgress(invocation, "Running tests in " + (project == null ? "all test projects" : "project '" + DisplayText(project, 1000) + "'"));
             var runTask = Adapters.Tests.RunTestsAsync(new TestRunRequest
             {
                 ProjectName = project,
@@ -106,8 +106,8 @@ namespace Pomp.Tools
                 if (await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(5))).ConfigureAwait(false) != runTask)
                 {
                     ReportProgress(invocation, cancellationToken.IsCancellationRequested
-                        ? "Stopping the test runner and its child processes..."
-                        : "Tests are still running...");
+                        ? "Stopping the test runner and its child processes"
+                        : "Tests are still running");
                 }
             }
 
@@ -297,11 +297,7 @@ namespace Pomp.Tools
                     part = "\\u" + ((int)c).ToString("X4", CultureInfo.InvariantCulture);
                 }
 
-                if (builder.Length + part.Length > maximum)
-                {
-                    builder.Append("...");
-                    break;
-                }
+                if (builder.Length + part.Length > maximum) break;
 
                 builder.Append(part);
             }

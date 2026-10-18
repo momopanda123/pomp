@@ -32,7 +32,7 @@ const optional = (value: any, key: string, check: (v: any) => boolean): boolean 
 const budget = (value: any): number | undefined => typeof value === 'number' && Number.isFinite(value) && value >= 1 ? Math.trunc(value) : undefined;
 const strings = (value: any): boolean => Array.isArray(value) && value.every(v => typeof v === 'string');
 
-/** Only imports retained by the pinned engine's virtual-module registry (18.8.6, 18.10.3, 18.10.4) are used. */
+/** Only imports retained by the pinned engine's virtual-module registry (18.8.6, 18.10.3, 18.10.4, 18.12.1) are used. */
 export async function loadEngine(): Promise<Engine | null> {
   try {
     const registry: any = await import('@oh-my-pi/pi-coding-agent/registry/agent-registry');

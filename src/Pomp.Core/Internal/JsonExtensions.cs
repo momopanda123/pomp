@@ -49,6 +49,28 @@ namespace Pomp.Internal
         }
 
         /// <summary>
+        /// The answer text of one message content block: a <c>text</c> block's text, or a <c>thinking</c> block omp marks with
+        /// <c>narration: true</c> (omp 18.12+: prose the model addressed to the user that the provider returned as thinking, which
+        /// the RPC contract says to present as answer text). Null for every other block.
+        /// </summary>
+        public static string? AnswerText(this JToken? block)
+        {
+            if (!(block is JObject value)) return null;
+            switch (value.GetString("type"))
+            {
+                case "text":
+                    return value.GetString("text");
+                case "thinking":
+                    return value.IsNarration() ? value.GetString("thinking") ?? value.GetString("text") : null;
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>True for a <c>thinking</c> block omp marks as narration (see <see cref="AnswerText"/>).</summary>
+        public static bool IsNarration(this JToken? block) => block is JObject value && value.GetString("type") == "thinking" && value.GetBool("narration") == true;
+
+        /// <summary>
         /// Concatenates the text of an omp <c>AgentToolResult</c> (<c>{ content: [{ type: "text", text }...] }</c>); a plain string
         /// is returned as is. Returns an empty string when there is no text.
         /// </summary>
@@ -97,7 +119,7 @@ namespace Pomp.Internal
                     var copy = new JObject();
                     foreach (var property in ((JObject)token).Properties())
                     {
-                        copy[property.Name] = depth >= 16 ? JValue.CreateString("...") : CompactToken(property.Value, maxStringLength, depth + 1);
+                        copy[property.Name] = depth >= 16 ? JValue.CreateString("[too deep]") : CompactToken(property.Value, maxStringLength, depth + 1);
                     }
 
                     return copy;
@@ -105,7 +127,7 @@ namespace Pomp.Internal
                     var array = new JArray();
                     foreach (var item in (JArray)token)
                     {
-                        array.Add(depth >= 16 ? JValue.CreateString("...") : CompactToken(item, maxStringLength, depth + 1));
+                        array.Add(depth >= 16 ? JValue.CreateString("[too deep]") : CompactToken(item, maxStringLength, depth + 1));
                     }
 
                     return array;
@@ -113,7 +135,7 @@ namespace Pomp.Internal
                     var text = (string?)token ?? string.Empty;
                     return text.Length <= maxStringLength
                         ? new JValue(text)
-                        : new JValue(text.Substring(0, maxStringLength) + "... [+" + (text.Length - maxStringLength) + " chars]");
+                        : new JValue(text.Substring(0, maxStringLength) + " [+" + (text.Length - maxStringLength) + " chars]");
                 default:
                     return token.DeepClone();
             }

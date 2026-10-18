@@ -1,10 +1,12 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { useUsageNow } from '../hooks';
+import { focusControlOrInput } from '../composerControls';
 import { useT } from '../i18n';
 import type { SessionInfoPayload } from '../protocol';
 import { filterModels, groupModels, modelKey, parseModelKey, hostProviderName, localizedProviderName, thinkingLabel, type SetupReply, type SetupState } from '../setup';
 import { useSetupCommands } from '../setupCommands';
 import { claimUsageRequest, USAGE_REPLY_TIMEOUT_MS, usageSummary } from '../usage';
+import { reportStatus } from '../statusBar';
 import { ClampedText } from './ClampedText';
 import { FastToggle } from './ComposerMeters';
 import { Icon, type IconName } from './Icon';
@@ -34,6 +36,10 @@ interface PickerItem {
   group?: string;
   /** Replaces the generic option test id (a few fixed lists name their rows). */
   testId?: string;
+  /** A picture before the label (the send-target list's role and team pictures). */
+  icon?: ReactNode;
+  /** The row of where the user already is (the send-target list's own conversation): tinted; choosing it means "stay here". */
+  own?: boolean;
 }
 
 interface PopoverProps {
@@ -53,6 +59,8 @@ interface PopoverProps {
   onChoose: (item: PickerItem) => void;
   /** Closes this innermost popup before an enclosing editor handles Escape. */
   onEscape?: () => void;
+  /** How the current item shows: a check in a leading column (default), or a tinted row with no check column (the send-target list). */
+  markCurrent?: 'check' | 'background';
 }
 
 const optionId = (id: string, index: number): string => `${id}-o${index}`;
@@ -61,7 +69,7 @@ const optionId = (id: string, index: number): string => `${id}-o${index}`;
  * A listbox with an optional search box: arrow keys move, Enter chooses (never while an IME composes), the mouse highlights what it
  * moves over. Escape and clicks outside are handled by the owner. Focus starts in the search box (or on the list).
  */
-export function PickerPopover({ placement, anchorRef, id, testId, label, items, search, header, status, footer, onChoose, onEscape }: PopoverProps) {
+export function PickerPopover({ placement, anchorRef, id, testId, label, items, search, header, status, footer, onChoose, onEscape, markCurrent = 'check' }: PopoverProps) {
   const popRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -70,7 +78,9 @@ export function PickerPopover({ placement, anchorRef, id, testId, label, items, 
   const [picked, setPicked] = useState<number | null>(null);
 
   const count = items.length;
-  const defaultIndex = search?.value ? 0 : Math.max(0, items.findIndex((item) => item.current));
+  const ownIndex = items.findIndex((item) => item.own);
+  const currentIndex = items.findIndex((item) => item.current);
+  const defaultIndex = search?.value ? 0 : Math.max(0, currentIndex >= 0 ? currentIndex : ownIndex);
   const activeIndex = count === 0 ? -1 : Math.min(picked ?? defaultIndex, count - 1);
   const activeId = activeIndex >= 0 ? optionId(id, activeIndex) : undefined;
 
@@ -217,7 +227,7 @@ export function PickerPopover({ placement, anchorRef, id, testId, label, items, 
               tabIndex={-1}
               key={item.id}
               id={optionId(id, index)}
-              className={`picker-option${index === activeIndex ? ' active' : ''}${item.disabled ? ' disabled' : ''}`}
+              className={`picker-option${index === activeIndex ? ' active' : ''}${item.disabled ? ' disabled' : ''}${item.own ? ' own' : ''}${markCurrent === 'background' && item.current ? ' current' : ''}`}
               aria-selected={item.current === true}
               aria-disabled={item.disabled || undefined}
               data-testid={item.testId ?? 'picker-option'}
@@ -225,18 +235,21 @@ export function PickerPopover({ placement, anchorRef, id, testId, label, items, 
               title={plainControls(item.title ?? item.label)}
               onMouseDown={(event) => event.preventDefault()} // keep the focus in the search box
               onMouseMove={(event) => {
-                // Real pointer movement only: a list scrolling under a still pointer must not steal the keyboard's row.
+                // Real pointer movement only: the synthetic move of a list scrolling under a still pointer (no movement, same point)
+                // must not steal the keyboard's row. A real first move counts, so the row under the pointer lights up at once.
                 const last = pointer.current;
                 pointer.current = { x: event.clientX, y: event.clientY };
-                if (last && (last.x !== event.clientX || last.y !== event.clientY) && index !== activeIndex) setPicked(index);
+                const moved = event.movementX !== 0 || event.movementY !== 0 || (last !== null && (last.x !== event.clientX || last.y !== event.clientY));
+                if (moved && index !== activeIndex) setPicked(index);
               }}
               onClick={() => {
                 if (!item.disabled) onChoose(item);
               }}
             >
-              <span className="picker-check" aria-hidden="true">
+              {markCurrent === 'check' && <span className="picker-check" aria-hidden="true">
                 {item.current && <Icon name="check" size={12} />}
-              </span>
+              </span>}
+              {item.icon && <span className="picker-icon" aria-hidden="true">{item.icon}</span>}
               <span className="picker-label">{revealControls(item.label)}</span>
               {item.hint && <span className="picker-hint">{revealControls(item.hint)}</span>}
             </button>
@@ -414,7 +427,7 @@ function ModelPickersView({ session, setup, replies, connected, locale, variant,
     event.stopPropagation(); // Escape closes the popover only; it must not also move the focus away (see useEscapeToComposer)
     const chip = open === 'model' ? modelChip : thinkingChip;
     setOpen(null);
-    chip.current?.focus();
+    focusControlOrInput(chip.current, rootRef.current?.closest('.composer')?.querySelector<HTMLElement>('[data-pomp-composer]'));
   };
 
   // ---- commands ----
@@ -680,7 +693,20 @@ function ModelPickersView({ session, setup, replies, connected, locale, variant,
     />
   );
 
-  const notes = (
+  // Above the input a failed change goes to the VS status bar (and the POMP log) and is cleared at once, so the chip row stays as it is;
+  // in the account panel it stays as a note under its field.
+  const composerNotes = variant === 'composer';
+  useEffect(() => {
+    if (!composerNotes || !modelAnswer.error) return;
+    reportStatus(`${t('picker.modelFailed')} — ${modelAnswer.error}`);
+    clear('setModel');
+  }, [composerNotes, modelAnswer.error]);
+  useEffect(() => {
+    if (!composerNotes || !levelAnswer.error) return;
+    reportStatus(`${t('picker.thinkingFailed')} — ${levelAnswer.error}`);
+    clear('setThinking');
+  }, [composerNotes, levelAnswer.error]);
+  const notes = composerNotes ? null : (
     <>
       {modelAnswer.error && (
         <Note tone="error" text={t('picker.modelFailed')} detail={modelAnswer.error} onDismiss={() => clear('setModel')} />
@@ -721,7 +747,7 @@ function ModelPickersView({ session, setup, replies, connected, locale, variant,
           {levelPopover}
         </>
       )}
-      {(modelAnswer.error || levelAnswer.error) && <div className="picker-notes">{notes}</div>}
+      {notes && (modelAnswer.error || levelAnswer.error) && <div className="picker-notes">{notes}</div>}
     </div>
   );
 }

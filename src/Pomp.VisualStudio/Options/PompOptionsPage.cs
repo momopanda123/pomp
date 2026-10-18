@@ -13,6 +13,15 @@ using Pomp.Ui;
 
 namespace Pomp.VisualStudio.Options
 {
+    /// <summary>How long Live change marks stay before they are dropped (the editor menu's Clear Changes drops them at any time).</summary>
+    public enum LiveChangeRetention { LastRequest, UntilSaved, Conversation }
+
+    /// <summary>Where the Live +/− marks go: after the end of the code line, or in a column left of the code.</summary>
+    public enum LiveChangeMarkPosition { Right, Left }
+
+    /// <summary>How the Live comparison shows before and after: one above the other, or side by side.</summary>
+    public enum LiveCompareLayout { Vertical, Horizontal }
+
     internal sealed class PompDisplayNameAttribute : DisplayNameAttribute
     {
         private readonly string korean, english;
@@ -64,7 +73,7 @@ namespace Pomp.VisualStudio.Options
     /// </summary>
     [Guid(PompGuids.OptionsPageGuidString)]
     [ComVisible(true)]
-    public class PompOptionsPage : DialogPage, IPompSettings, IInlineModelSettings, IInlineModelSettingsWriter, IApprovalModeWriter, IUiShortcutSettings, IEditorShortcutSettings, ILocalEmbeddingSettings, IIsolatedExecutionSettings, IInteractiveTerminalSettings, IComputerUseSettings, IKnowledgeSettings
+    public class PompOptionsPage : DialogPage, IPompSettings, IInlineModelSettings, IInlineModelSettingsWriter, IApprovalModeWriter, IUiShortcutSettings, IEditorShortcutSettings, ILocalEmbeddingSettings, IIsolatedExecutionSettings, IInteractiveTerminalSettings, IComputerUseSettings, IKnowledgeSettings, IEditorContextSettings
     {
         static PompOptionsPage() => TypeDescriptor.AddProvider(new PompOptionsDescriptionProvider(TypeDescriptor.GetProvider(typeof(PompOptionsPage))), typeof(PompOptionsPage));
 
@@ -146,6 +155,89 @@ namespace Pomp.VisualStudio.Options
 
         [Browsable(false)]
         public bool InlineCompletionsEnabled => Applied.EnableInlineCompletions;
+
+        [PompCategory("편집기", "Editor")]
+        [PompDisplayName("Live 수정 따라가기", "Follow Live edits")]
+        [Description("")]
+        public bool LiveFollowEnabled { get; set; } = false;
+
+        [PompCategory("편집기", "Editor")]
+        [PompDisplayName("Live 변경 북마크", "Bookmark Live edits")]
+        [Description("")]
+        public bool LiveBookmarksEnabled { get; set; } = false;
+
+        // How a Live change is drawn: each part on its own; the editor menu's Show Changes (LiveChangesVisible) shows or hides them all.
+        [PompCategory("편집기", "Editor")]
+        [PompDisplayName("Live 변경 줄 배경색", "Live change line background")]
+        [Description("")]
+        public bool LiveChangeBackground { get; set; } = true;
+
+        [PompCategory("편집기", "Editor")]
+        [PompDisplayName("Live 변경 +/− 표시", "Live change +/− marks")]
+        [Description("")]
+        public bool LiveChangeSymbols { get; set; } = true;
+
+        [PompCategory("편집기", "Editor")]
+        [PompDisplayName("Live 변경 +/− 표시 위치", "Live change +/− mark position")]
+        [Description("")]
+        [TypeConverter(typeof(LiveChangeMarkPositionConverter))]
+        public LiveChangeMarkPosition LiveChangeMarkPosition { get; set; } = LiveChangeMarkPosition.Right;
+
+        [PompCategory("편집기", "Editor")]
+        [PompDisplayName("Live 변경 비교 창 배치", "Live comparison layout")]
+        [Description("")]
+        [TypeConverter(typeof(LiveCompareLayoutConverter))]
+        public LiveCompareLayout LiveCompareLayout { get; set; } = LiveCompareLayout.Vertical;
+
+        [PompCategory("편집기", "Editor")]
+        [PompDisplayName("Live 변경 내용 표시", "Show Live changes")]
+        [Description("")]
+        public bool LiveChangesVisible { get; set; } = true;
+
+        [PompCategory("편집기", "Editor")]
+        [PompDisplayName("Live 변경 내용 유지", "Keep Live changes")]
+        [Description("")]
+        [TypeConverter(typeof(LiveChangeRetentionConverter))]
+        public LiveChangeRetention LiveChangeRetention { get; set; } = LiveChangeRetention.LastRequest;
+
+        /// <summary>Allowed range of <see cref="LiveHistoryLimit"/>; values outside it are clamped when applied.</summary>
+        internal const int MinLiveHistoryLimit = 10, MaxLiveHistoryLimit = 100000;
+
+        [PompCategory("편집기", "Editor")]
+        [PompDisplayName("Live 변경 기록 수(파일당)", "Live change history per file")]
+        [Description("")]
+        public int LiveHistoryLimit { get; set; } = 1000;
+
+        [Browsable(false)]
+        public bool AppliedLiveFollowEnabled => Applied.LiveFollowEnabled;
+        [Browsable(false)]
+        public bool AppliedLiveBookmarksEnabled => Applied.LiveBookmarksEnabled;
+        [Browsable(false)]
+        public bool AppliedLiveChangeBackground => Applied.LiveChangeBackground;
+        [Browsable(false)]
+        public bool AppliedLiveChangeSymbols => Applied.LiveChangeSymbols;
+        [Browsable(false)]
+        public LiveChangeMarkPosition AppliedLiveChangeMarkPosition => Applied.LiveChangeMarkPosition;
+        [Browsable(false)]
+        public LiveCompareLayout AppliedLiveCompareLayout => Applied.LiveCompareLayout;
+        [Browsable(false)]
+        public bool AppliedLiveChangesVisible => Applied.LiveChangesVisible;
+        [Browsable(false)]
+        public LiveChangeRetention AppliedLiveChangeRetention => Applied.LiveChangeRetention;
+        [Browsable(false)]
+        public int AppliedLiveHistoryLimit => Applied.LiveHistoryLimit;
+
+        public void SetLiveEditorFeatures(bool? live = null, bool? bookmarks = null, bool? changesVisible = null)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (live is bool follow)
+                ApplyOneSetting(nameof(LiveFollowEnabled), () => LiveFollowEnabled = follow, current => current.WithLive(follow: follow));
+            if (bookmarks is bool marks)
+                ApplyOneSetting(nameof(LiveBookmarksEnabled), () => LiveBookmarksEnabled = marks, current => current.WithLive(bookmarks: marks));
+            if (changesVisible is bool visible)
+                ApplyOneSetting(nameof(LiveChangesVisible), () => LiveChangesVisible = visible, current => current.WithLive(changesVisible: visible));
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
 
         [PompCategory("편집기", "Editor")]
         [PompDisplayName("보조 모델", "Helper model")]
@@ -317,6 +409,50 @@ namespace Pomp.VisualStudio.Options
         [Description("")]
         public bool IncludeEditorContextByDefault { get; set; } = true;
 
+        // What the editor context carries (EditorContextLimits clamps every value to its range when the options are applied).
+
+        [PompCategory("채팅", "Chat")]
+        [PompDisplayName("편집기 문맥 커서 위아래 줄 수", "Editor context lines around caret")]
+        [Description("")]
+        public int EditorContextLines { get; set; } = 30;
+
+        [PompCategory("채팅", "Chat")]
+        [PompDisplayName("편집기 문맥 큰 파일 기준 줄 수", "Editor context large file (lines)")]
+        [Description("")]
+        public int EditorContextLargeFileThreshold { get; set; } = 10000;
+
+        [PompCategory("채팅", "Chat")]
+        [PompDisplayName("편집기 문맥 큰 파일 커서 위아래 줄 수", "Editor context lines around caret in a large file")]
+        [Description("")]
+        public int EditorContextLargeFileLines { get; set; } = 100;
+
+        [PompCategory("채팅", "Chat")]
+        [PompDisplayName("편집기 문맥 선택 글 최대 글자 수", "Editor context selected text max characters")]
+        [Description("")]
+        public int EditorContextSelectedChars { get; set; } = 2000;
+
+        [PompCategory("채팅", "Chat")]
+        [PompDisplayName("편집기 문맥 한 줄 최대 글자 수", "Editor context line max characters")]
+        [Description("")]
+        public int EditorContextLineChars { get; set; } = 300;
+
+        [PompCategory("채팅", "Chat")]
+        [PompDisplayName("편집기 문맥 주변 코드 최대 글자 수", "Editor context code max characters")]
+        [Description("")]
+        public int EditorContextWindowChars { get; set; } = 8000;
+
+        [PompCategory("채팅", "Chat")]
+        [PompDisplayName("편집기 문맥 오류 최대 개수", "Editor context max errors")]
+        [Description("")]
+        public int EditorContextErrors { get; set; } = 10;
+
+        [PompCategory("채팅", "Chat")]
+        [PompDisplayName("편집기 문맥 VS 응답 대기(초)", "Editor context VS wait (seconds)")]
+        [Description("")]
+        public int EditorContextTimeoutSeconds { get; set; } = 2;
+
+        EditorContextLimits IEditorContextSettings.EditorContextLimits => Applied.EditorContextLimits;
+
         [PompCategory("채팅", "Chat")]
         [PompDisplayName("입력 예측 문장", "Composer predictions")]
         [Description("")]
@@ -355,6 +491,16 @@ namespace Pomp.VisualStudio.Options
         [PompDisplayName("편집기 컨텍스트 포함", "Include editor context")]
         [Description("")]
         public string ShortcutEditorContext { get; set; } = "Alt+'";
+
+        [PompCategory("단축키", "Shortcuts")]
+        [PompDisplayName("Live 변경 따라가기 전환", "Toggle Live edit following")]
+        [Description("")]
+        public string ShortcutLiveFollow { get; set; } = "Alt+L";
+
+        [PompCategory("단축키", "Shortcuts")]
+        [PompDisplayName("POMP 북마크 전환", "Toggle POMP bookmarks")]
+        [Description("")]
+        public string ShortcutLiveBookmarks { get; set; } = "Alt+K";
 
         [PompCategory("단축키", "Shortcuts")]
         [PompDisplayName("권한 모드", "Permission mode")]
@@ -415,7 +561,7 @@ namespace Pomp.VisualStudio.Options
         public string ShortcutWriteTests { get; set; } = "Shift+Alt+U";
 
         [PompCategory("단축키", "Shortcuts")]
-        [PompDisplayName("파일을 채팅 컨텍스트에 추가", "Add file to chat context")]
+        [PompDisplayName("컨텍스트 바구니에 추가", "Add to context basket")]
         [Description("")]
         public string ShortcutAddFileToContext { get; set; } = "Shift+Alt+I";
 
@@ -441,7 +587,7 @@ namespace Pomp.VisualStudio.Options
             {
                 var values = Applied;
                 return UiShortcutChords.NormalizePayload(values.ShortcutSend, values.ShortcutSendTargetPicker, values.ShortcutPermissionMode, values.ShortcutAllow, values.ShortcutDeny, values.ShortcutPermissionsView, values.ShortcutToggleFocus,
-                    values.ShortcutPreviousTarget, values.ShortcutNextTarget, values.ShortcutContextBasket, values.ShortcutEditorContext);
+                    values.ShortcutPreviousTarget, values.ShortcutNextTarget, values.ShortcutContextBasket, values.ShortcutEditorContext, values.ShortcutLiveFollow, values.ShortcutLiveBookmarks);
             }
         }
 
@@ -451,7 +597,7 @@ namespace Pomp.VisualStudio.Options
             {
                 var values = Applied;
                 return UiShortcutChords.NormalizeEditorPayload(values.ShortcutOpenPomp, values.ShortcutNewConversation, values.ShortcutExplainCode, values.ShortcutReviewCode, values.ShortcutFixCode,
-                    values.ShortcutWriteTests, values.ShortcutAddFileToContext, values.ShortcutInlinePrompt, values.ShortcutToggleFocus, values.ShortcutKnowledgeTag);
+                    values.ShortcutWriteTests, values.ShortcutAddFileToContext, values.ShortcutInlinePrompt, values.ShortcutToggleFocus, values.ShortcutKnowledgeTag, values.ShortcutLiveFollow, values.ShortcutLiveBookmarks);
             }
         }
 
@@ -763,6 +909,104 @@ namespace Pomp.VisualStudio.Options
                 new StandardValuesCollection(new[] { OmpApprovalMode.AlwaysAsk, OmpApprovalMode.Write, OmpApprovalMode.Yolo });
         }
 
+        /// <summary>Shows the comparison layouts in the POMP language; the stored value stays the member name.</summary>
+        public sealed class LiveCompareLayoutConverter : EnumConverter
+        {
+            public LiveCompareLayoutConverter() : base(typeof(LiveCompareLayout)) { }
+
+            public override object? ConvertTo(ITypeDescriptorContext? context, CultureInfo? culture, object? value, Type destinationType)
+            {
+                if (destinationType == typeof(string) && value is LiveCompareLayout layout)
+                {
+                    if (culture == null || culture.Equals(CultureInfo.InvariantCulture)) return layout == LiveCompareLayout.Horizontal ? "Horizontal" : "Vertical";
+                    return layout == LiveCompareLayout.Horizontal ? PompLanguage.Pick("가로 (좌우로 나란히)", "Side by side") : PompLanguage.Pick("세로 (위아래로)", "Stacked");
+                }
+                return base.ConvertTo(context, culture, value, destinationType);
+            }
+
+            public override object ConvertFrom(ITypeDescriptorContext? context, CultureInfo? culture, object value)
+            {
+                if (value is string text)
+                {
+                    text = text.Trim();
+                    if (text == "가로 (좌우로 나란히)" || string.Equals(text, "Side by side", StringComparison.OrdinalIgnoreCase) || string.Equals(text, "Horizontal", StringComparison.OrdinalIgnoreCase)) return LiveCompareLayout.Horizontal;
+                }
+                return LiveCompareLayout.Vertical;
+            }
+
+            public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context) =>
+                new StandardValuesCollection(new[] { LiveCompareLayout.Vertical, LiveCompareLayout.Horizontal });
+        }
+
+        /// <summary>Shows the Live mark positions in the POMP language; the stored value stays the member name.</summary>
+        public sealed class LiveChangeMarkPositionConverter : EnumConverter
+        {
+            public LiveChangeMarkPositionConverter() : base(typeof(LiveChangeMarkPosition)) { }
+
+            public override object? ConvertTo(ITypeDescriptorContext? context, CultureInfo? culture, object? value, Type destinationType)
+            {
+                if (destinationType == typeof(string) && value is LiveChangeMarkPosition position)
+                {
+                    if (culture == null || culture.Equals(CultureInfo.InvariantCulture)) return position == LiveChangeMarkPosition.Left ? "Left" : "Right";
+                    return position == LiveChangeMarkPosition.Left ? PompLanguage.Pick("코드 왼쪽", "Left of the code") : PompLanguage.Pick("코드 오른쪽", "Right of the code");
+                }
+                return base.ConvertTo(context, culture, value, destinationType);
+            }
+
+            public override object ConvertFrom(ITypeDescriptorContext? context, CultureInfo? culture, object value)
+            {
+                if (value is string text)
+                {
+                    text = text.Trim();
+                    if (text == "코드 왼쪽" || string.Equals(text, "Left of the code", StringComparison.OrdinalIgnoreCase) || string.Equals(text, "Left", StringComparison.OrdinalIgnoreCase)) return LiveChangeMarkPosition.Left;
+                }
+                return LiveChangeMarkPosition.Right;
+            }
+
+            public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context) =>
+                new StandardValuesCollection(new[] { LiveChangeMarkPosition.Right, LiveChangeMarkPosition.Left });
+        }
+
+        /// <summary>Shows the Live change retention choices in the POMP language; the stored value stays the member name.</summary>
+        public sealed class LiveChangeRetentionConverter : EnumConverter
+        {
+            private static readonly (LiveChangeRetention Value, string Korean, string English)[] Labels =
+            {
+                (LiveChangeRetention.LastRequest, "마지막 수정 요청만", "Last editing request only"),
+                (LiveChangeRetention.UntilSaved, "파일을 저장할 때까지", "Until the file is saved"),
+                (LiveChangeRetention.Conversation, "대화 동안 모두", "Whole conversation"),
+            };
+
+            public LiveChangeRetentionConverter() : base(typeof(LiveChangeRetention)) { }
+
+            public override object? ConvertTo(ITypeDescriptorContext? context, CultureInfo? culture, object? value, Type destinationType)
+            {
+                if (destinationType == typeof(string) && value is LiveChangeRetention retention)
+                {
+                    if (!Enum.IsDefined(typeof(LiveChangeRetention), retention)) retention = LiveChangeRetention.LastRequest;
+                    if (culture == null || culture.Equals(CultureInfo.InvariantCulture)) return retention.ToString();
+                    foreach (var entry in Labels)
+                        if (entry.Value == retention) return PompLanguage.Pick(entry.Korean, entry.English);
+                }
+                return base.ConvertTo(context, culture, value, destinationType);
+            }
+
+            public override object ConvertFrom(ITypeDescriptorContext? context, CultureInfo? culture, object value)
+            {
+                if (value is string text)
+                {
+                    text = text.Trim();
+                    foreach (var entry in Labels)
+                        if (string.Equals(text, entry.Value.ToString(), StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(text, entry.English, StringComparison.OrdinalIgnoreCase) || text == entry.Korean) return entry.Value;
+                }
+                return LiveChangeRetention.LastRequest;
+            }
+
+            public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context) =>
+                new StandardValuesCollection(new[] { LiveChangeRetention.LastRequest, LiveChangeRetention.UntilSaved, LiveChangeRetention.Conversation });
+        }
+
         /// <summary>The settings in effect. Immutable; replaced as a whole.</summary>
         public sealed class ComputerUsePolicyConverter : EnumConverter
         {
@@ -802,6 +1046,8 @@ namespace Pomp.VisualStudio.Options
                 ShortcutNextTarget = page.ShortcutNextTarget;
                 ShortcutContextBasket = page.ShortcutContextBasket;
                 ShortcutEditorContext = page.ShortcutEditorContext;
+                ShortcutLiveFollow = page.ShortcutLiveFollow;
+                ShortcutLiveBookmarks = page.ShortcutLiveBookmarks;
                 ShortcutPermissionMode = page.ShortcutPermissionMode;
                 ShortcutAllow = page.ShortcutAllow;
                 ShortcutDeny = page.ShortcutDeny;
@@ -826,8 +1072,19 @@ namespace Pomp.VisualStudio.Options
                 VerifyAfterEdits = page.VerifyAfterEdits;
                 Language = page.Language;
                 IncludeEditorContextByDefault = page.IncludeEditorContextByDefault;
+                EditorContextLimits = new EditorContextLimits(page.EditorContextLines, page.EditorContextLargeFileLines, page.EditorContextLargeFileThreshold,
+                    page.EditorContextSelectedChars, page.EditorContextLineChars, page.EditorContextWindowChars, page.EditorContextErrors, page.EditorContextTimeoutSeconds);
                 ComposerPredictions = page.ComposerPredictions;
                 EnableCodeCaptions = page.EnableCodeCaptions;
+                LiveFollowEnabled = page.LiveFollowEnabled;
+                LiveBookmarksEnabled = page.LiveBookmarksEnabled;
+                LiveChangeBackground = page.LiveChangeBackground;
+                LiveChangeSymbols = page.LiveChangeSymbols;
+                LiveChangeMarkPosition = page.LiveChangeMarkPosition == LiveChangeMarkPosition.Left ? LiveChangeMarkPosition.Left : LiveChangeMarkPosition.Right;
+                LiveCompareLayout = page.LiveCompareLayout == LiveCompareLayout.Horizontal ? LiveCompareLayout.Horizontal : LiveCompareLayout.Vertical;
+                LiveChangeRetention = Enum.IsDefined(typeof(LiveChangeRetention), page.LiveChangeRetention) ? page.LiveChangeRetention : LiveChangeRetention.LastRequest;
+                LiveChangesVisible = page.LiveChangesVisible;
+                LiveHistoryLimit = Math.Max(MinLiveHistoryLimit, Math.Min(MaxLiveHistoryLimit, page.LiveHistoryLimit));
                 UseNativeCodeLensCaptions = page.UseNativeCodeLensCaptions;
                 EnableExperimentalIsolation = page.EnableExperimentalIsolation;
                 EnableInteractiveTerminal = page.EnableInteractiveTerminal;
@@ -855,6 +1112,8 @@ namespace Pomp.VisualStudio.Options
                 ShortcutNextTarget = source.ShortcutNextTarget;
                 ShortcutContextBasket = source.ShortcutContextBasket;
                 ShortcutEditorContext = source.ShortcutEditorContext;
+                ShortcutLiveFollow = source.ShortcutLiveFollow;
+                ShortcutLiveBookmarks = source.ShortcutLiveBookmarks;
                 ShortcutPermissionMode = source.ShortcutPermissionMode;
                 ShortcutAllow = source.ShortcutAllow;
                 ShortcutDeny = source.ShortcutDeny;
@@ -879,8 +1138,18 @@ namespace Pomp.VisualStudio.Options
                 VerifyAfterEdits = source.VerifyAfterEdits;
                 Language = source.Language;
                 IncludeEditorContextByDefault = source.IncludeEditorContextByDefault;
+                EditorContextLimits = source.EditorContextLimits;
                 ComposerPredictions = source.ComposerPredictions;
                 EnableCodeCaptions = source.EnableCodeCaptions;
+                LiveFollowEnabled = source.LiveFollowEnabled;
+                LiveBookmarksEnabled = source.LiveBookmarksEnabled;
+                LiveChangeBackground = source.LiveChangeBackground;
+                LiveChangeSymbols = source.LiveChangeSymbols;
+                LiveChangeMarkPosition = source.LiveChangeMarkPosition;
+                LiveCompareLayout = source.LiveCompareLayout;
+                LiveChangeRetention = source.LiveChangeRetention;
+                LiveChangesVisible = source.LiveChangesVisible;
+                LiveHistoryLimit = source.LiveHistoryLimit;
                 UseNativeCodeLensCaptions = source.UseNativeCodeLensCaptions;
                 EnableExperimentalIsolation = source.EnableExperimentalIsolation;
                 EnableInteractiveTerminal = source.EnableInteractiveTerminal;
@@ -909,6 +1178,8 @@ namespace Pomp.VisualStudio.Options
             public string? ShortcutNextTarget { get; }
             public string? ShortcutContextBasket { get; }
             public string? ShortcutEditorContext { get; }
+            public string? ShortcutLiveFollow { get; }
+            public string? ShortcutLiveBookmarks { get; }
             public string? ShortcutPermissionMode { get; }
             public string? ShortcutAllow { get; }
             public string? ShortcutDeny { get; }
@@ -944,9 +1215,20 @@ namespace Pomp.VisualStudio.Options
 
             public bool IncludeEditorContextByDefault { get; }
 
+            public EditorContextLimits EditorContextLimits { get; }
+
             public bool ComposerPredictions { get; }
 
             public bool EnableCodeCaptions { get; private set; }
+            public bool LiveFollowEnabled { get; private set; }
+            public bool LiveBookmarksEnabled { get; private set; }
+            public bool LiveChangeBackground { get; }
+            public bool LiveChangeSymbols { get; }
+            public LiveChangeMarkPosition LiveChangeMarkPosition { get; }
+            public LiveCompareLayout LiveCompareLayout { get; }
+            public LiveChangeRetention LiveChangeRetention { get; }
+            public bool LiveChangesVisible { get; private set; }
+            public int LiveHistoryLimit { get; }
             public bool UseNativeCodeLensCaptions { get; }
             public bool EnableExperimentalIsolation { get; }
             public bool EnableInteractiveTerminal { get; }
@@ -977,6 +1259,15 @@ namespace Pomp.VisualStudio.Options
             {
                 var copy = (AppliedSettings)MemberwiseClone();
                 copy.ApprovalMode = mode;
+                return copy;
+            }
+
+            public AppliedSettings WithLive(bool? follow = null, bool? bookmarks = null, bool? changesVisible = null)
+            {
+                var copy = (AppliedSettings)MemberwiseClone();
+                if (follow.HasValue) copy.LiveFollowEnabled = follow.Value;
+                if (bookmarks.HasValue) copy.LiveBookmarksEnabled = bookmarks.Value;
+                if (changesVisible.HasValue) copy.LiveChangesVisible = changesVisible.Value;
                 return copy;
             }
 

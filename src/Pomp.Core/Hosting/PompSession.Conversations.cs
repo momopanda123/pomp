@@ -30,7 +30,10 @@ namespace Pomp.Hosting
         private bool _queuePaused, _queueDispatchScheduled;
         private static ConversationPartnerPayload CopyPartner(ConversationPartnerPayload value) => new ConversationPartnerPayload { Kind = value.Kind, Id = value.Id };
         private static string? Target(string? value) => string.IsNullOrWhiteSpace(value) ? null : value!.Trim();
-        private static ChatSendPayload CopySend(ChatSendPayload value) => new ChatSendPayload { ClientMessageId = value.ClientMessageId, Text = value.Text ?? "", IncludeEditorContext = value.IncludeEditorContext, Team = Target(value.Team), Agent = Target(value.Agent), AgentInstance = Target(value.AgentInstance), Main = value.Main == true ? true : null, Attachments = value.Attachments?.Where(a => a != null).Select(a => new ChatAttachment { Path = a.Path }).ToList() };
+        private static ChatSendPayload CopySend(ChatSendPayload value) => new ChatSendPayload { ClientMessageId = value.ClientMessageId, Text = value.Text ?? "", IncludeEditorContext = value.IncludeEditorContext, Team = Target(value.Team), Agent = Target(value.Agent), AgentInstance = Target(value.AgentInstance), Main = value.Main == true ? true : null, From = ValidOrigin(value.From), Attachments = value.Attachments?.Where(a => a != null).Select(a => new ChatAttachment { Path = a.Path }).ToList() };
+        // chat/send.from is view only (it never routes the message), so an invalid one is dropped rather than refusing the message.
+        private static ConversationPartnerPayload? ValidOrigin(ConversationPartnerPayload? value) =>
+            value != null && (value.Kind == "agent" || value.Kind == "team") && value.Id != null && AgentRoster.IsValidName(value.Id) ? CopyPartner(value) : null;
         private ConversationPartnerPayload ValidatePartner(ConversationPartnerPayload value)
         {
             if (value.Kind == "main") return new ConversationPartnerPayload();

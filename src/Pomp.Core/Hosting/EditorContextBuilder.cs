@@ -14,34 +14,21 @@ namespace Pomp.Hosting
     /// <summary>
     /// Builds the compact <c>&lt;vs_context&gt;</c> block that is placed before the user's message (design: addAdditionalContext):
     /// solution, active file with language/dirty flag, caret and selection, the lines around the caret (never the whole file), and
-    /// up to ten Error List errors. Every adapter call is guarded by a short timeout, so gathering context can never fail or stall a prompt.
+    /// Error List errors, each sized by <see cref="EditorContextLimits"/> (Tools > Options > Pomp > Chat). Every adapter call is guarded
+    /// by a short timeout, so gathering context can never fail or stall a prompt.
     /// </summary>
     internal sealed class EditorContextBuilder
     {
-        /// <summary>Lines shown on each side of the caret.</summary>
-        public const int WindowLines = 30;
-
-        /// <summary>Lines on each side of the caret for very large files.</summary>
-        public const int LargeFileWindowLines = 100;
-
-        /// <summary>Files with at least this many lines use <see cref="LargeFileWindowLines"/>.</summary>
-        public const int LargeFileThreshold = 10000;
-
-        public const int MaxErrors = 10;
-        public const int MaxSelectedChars = 2000;
-        public const int MaxLineChars = 300;
-        public const int MaxWindowChars = 8000;
-        public const int MaxErrorMessageChars = 300;
-
         private readonly IVsAdapterFactory _adapters;
         private readonly IPompLogger _logger;
-        private readonly TimeSpan _adapterTimeout;
+        private readonly Func<EditorContextLimits> _limits;
 
-        public EditorContextBuilder(IVsAdapterFactory adapters, IPompLogger logger, TimeSpan? adapterTimeout = null)
+        /// <param name="limits">Read at each build, so applied options take effect with the next message.</param>
+        public EditorContextBuilder(IVsAdapterFactory adapters, IPompLogger logger, Func<EditorContextLimits> limits)
         {
             _adapters = adapters;
             _logger = logger;
-            _adapterTimeout = adapterTimeout ?? TimeSpan.FromSeconds(2);
+            _limits = limits;
         }
 
         /// <summary>Returns the context block and its editor reference, or null when Visual Studio has nothing to report.</summary>
@@ -52,14 +39,16 @@ namespace Pomp.Hosting
                 return null;
             }
 
-            var documentTask = AdapterGuard.RunAsync(_adapters.Editor.GetActiveDocumentAsync, _adapterTimeout, _logger, "context: active document", cancellationToken);
+            var limits = _limits();
+            var timeout = limits.Timeout;
+            var documentTask = AdapterGuard.RunAsync(_adapters.Editor.GetActiveDocumentAsync, timeout, _logger, "context: active document", cancellationToken);
             // Only name/path/root are shown: the cheap location query, not the project enumeration.
-            var solutionTask = AdapterGuard.RunAsync(_adapters.Solution.GetSolutionLocationAsync, _adapterTimeout, _logger, "context: solution", cancellationToken);
-            var errorsTask = AdapterGuard.RunAsync(
+            var solutionTask = AdapterGuard.RunAsync(_adapters.Solution.GetSolutionLocationAsync, timeout, _logger, "context: solution", cancellationToken);
+            var errorsTask = limits.Errors == 0 ? Task.FromResult<IReadOnlyList<ErrorListItem>>(Array.Empty<ErrorListItem>()) : AdapterGuard.RunAsync(
                 token => _adapters.ErrorList.ReadAsync(
-                    new ErrorListFilter { Severities = new List<ErrorSeverity> { ErrorSeverity.Error }, MaxItems = MaxErrors },
+                    new ErrorListFilter { Severities = new List<ErrorSeverity> { ErrorSeverity.Error }, MaxItems = limits.Errors },
                     token),
-                _adapterTimeout,
+                timeout,
                 _logger,
                 "context: error list",
                 cancellationToken);
@@ -74,15 +63,15 @@ namespace Pomp.Hosting
             }
 
             BufferSnapshot? snapshot = null;
-            if (document != null && !string.IsNullOrEmpty(document.Path))
+            if (document != null && !string.IsNullOrEmpty(document.Path) && limits.WindowChars > 0)
             {
                 var path = document.Path;
-                snapshot = await AdapterGuard.RunAsync(token => _adapters.TextBuffers.ReadAsync(path, token), _adapterTimeout, _logger, "context: buffer", cancellationToken).ConfigureAwait(false);
+                snapshot = await AdapterGuard.RunAsync(token => _adapters.TextBuffers.ReadAsync(path, token), timeout, _logger, "context: buffer", cancellationToken).ConfigureAwait(false);
             }
 
             try
             {
-                var text = Format(solution, document, snapshot, errors);
+                var text = Format(solution, document, snapshot, errors, limits);
                 return text == null ? null : new EditorContextResult(text, Reference(document, solution?.RootDirectory));
             }
             catch (Exception ex)
@@ -115,12 +104,15 @@ namespace Pomp.Hosting
             return reference;
         }
 
+        /// <summary>Characters of one Error List description (not an option: one line of an error says enough).</summary>
+        private const int MaxErrorMessageChars = 300;
+
         /// <summary>Pure formatting step (unit tested).</summary>
-        internal static string? Format(SolutionInfo? solution, ActiveDocumentInfo? document, BufferSnapshot? snapshot, IReadOnlyList<ErrorListItem>? errors)
+        internal static string? Format(SolutionInfo? solution, ActiveDocumentInfo? document, BufferSnapshot? snapshot, IReadOnlyList<ErrorListItem>? errors, EditorContextLimits limits)
         {
             var hasSolution = solution != null && (!string.IsNullOrEmpty(solution.Name) || !string.IsNullOrEmpty(solution.RootDirectory));
             var hasDocument = document != null && !string.IsNullOrEmpty(document.Path);
-            var hasErrors = errors != null && errors.Count > 0;
+            var hasErrors = errors != null && errors.Count > 0 && limits.Errors > 0;
             if (!hasSolution && !hasDocument && !hasErrors)
             {
                 return null;
@@ -147,7 +139,7 @@ namespace Pomp.Hosting
 
             if (hasDocument)
             {
-                AppendDocument(text, document!, snapshot);
+                AppendDocument(text, document!, snapshot, limits);
             }
             else
             {
@@ -156,13 +148,13 @@ namespace Pomp.Hosting
 
             if (hasErrors)
             {
-                AppendErrors(text, errors!, solution?.RootDirectory);
+                AppendErrors(text, errors!, solution?.RootDirectory, limits.Errors);
             }
 
             return "<vs_context>\n" + Neutralize(text.ToString()) + "</vs_context>";
         }
 
-        private static void AppendDocument(StringBuilder text, ActiveDocumentInfo document, BufferSnapshot? snapshot)
+        private static void AppendDocument(StringBuilder text, ActiveDocumentInfo document, BufferSnapshot? snapshot, EditorContextLimits limits)
         {
             text.Append("active_file: ").Append(document.Path);
             var details = new List<string>();
@@ -203,22 +195,22 @@ namespace Pomp.Hosting
                     .Append('\n');
             }
 
-            if (!string.IsNullOrEmpty(document.SelectedText))
+            if (!string.IsNullOrEmpty(document.SelectedText) && limits.SelectedChars > 0)
             {
                 text.Append("selected_text:\n```\n")
-                    .Append(Neutralize(TextUtil.Truncate(document.SelectedText, MaxSelectedChars)))
+                    .Append(Neutralize(TextUtil.Truncate(document.SelectedText, limits.SelectedChars)))
                     .Append("\n```\n");
             }
 
-            if (snapshot != null && !string.IsNullOrEmpty(snapshot.Text))
+            if (snapshot != null && !string.IsNullOrEmpty(snapshot.Text) && limits.WindowChars > 0)
             {
-                AppendWindow(text, document, snapshot.Text, caretLine);
+                AppendWindow(text, document, snapshot.Text, caretLine, limits);
             }
         }
 
-        private static void AppendWindow(StringBuilder text, ActiveDocumentInfo document, string content, int caretLine)
+        private static void AppendWindow(StringBuilder text, ActiveDocumentInfo document, string content, int caretLine, EditorContextLimits limits)
         {
-            var radius = document.LineCount >= LargeFileThreshold ? LargeFileWindowLines : WindowLines;
+            var radius = document.LineCount >= limits.LargeFileThreshold ? limits.LargeFileWindowLines : limits.WindowLines;
             var first = Math.Max(1, caretLine - radius);
             var last = caretLine + radius;
             if (document.LineCount > 0)
@@ -234,10 +226,10 @@ namespace Pomp.Hosting
 
             text.Append("lines ").Append(lines[0].Key).Append('-').Append(lines[lines.Count - 1].Key)
                 .Append(" around the caret (line: text):\n");
-            var budget = MaxWindowChars;
+            var budget = limits.WindowChars;
             foreach (var line in lines)
             {
-                var shown = line.Value.Length > MaxLineChars ? line.Value.Substring(0, MaxLineChars) + "..." : line.Value;
+                var shown = line.Value.Length > limits.LineChars ? line.Value.Substring(0, limits.LineChars) + "..." : line.Value;
                 var row = line.Key + ": " + Neutralize(shown) + "\n";
                 if (budget - row.Length < 0)
                 {
@@ -250,9 +242,9 @@ namespace Pomp.Hosting
             }
         }
 
-        private static void AppendErrors(StringBuilder text, IReadOnlyList<ErrorListItem> errors, string? root)
+        private static void AppendErrors(StringBuilder text, IReadOnlyList<ErrorListItem> errors, string? root, int maxErrors)
         {
-            var count = Math.Min(errors.Count, MaxErrors);
+            var count = Math.Min(errors.Count, maxErrors);
             text.Append("errors (").Append(count).Append(errors.Count > count ? "+" : string.Empty).Append("):\n");
             for (var i = 0; i < count; i++)
             {

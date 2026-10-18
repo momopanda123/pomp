@@ -93,6 +93,8 @@
     <Compile Include="..\Pomp.VisualStudio\**\*.cs" Exclude="..\Pomp.VisualStudio\**\obj\**;..\Pomp.VisualStudio\**\bin\**" Link="Shared\%(RecursiveDir)%(Filename)%(Extension)" />
     <EmbeddedResource Include="$(PompSharedDir)VSPackage.resx" LogicalName="$(RootNamespace).VSPackage.resources" />
     <EmbeddedResource Include="$(PompSharedDir)VSPackage.ko.resx" LogicalName="$(RootNamespace).VSPackage.resources" />
+    <!-- The menu icon as a WPF component resource for Resources\Pomp.imagemanifest (pack URI /Pomp.VisualStudio;component/...). -->
+    <EmbeddedResource Include="$(PompSharedDir)PompImages.resx" LogicalName="$(AssemblyName).g.resources" />
     <VSCTCompile Include="..\\Pomp.VisualStudio\\Pomp.vsct" Link="Shared\\Pomp.vsct">
       <ResourceName>Menus.ctmenu</ResourceName>
     </VSCTCompile>
@@ -129,6 +131,8 @@
   <ItemGroup>
     <Content Include="..\Pomp.VisualStudio\Resources\PompIcon.png" Link="Resources\PompIcon.png" IncludeInVSIX="true" />
     <Content Include="..\Pomp.VisualStudio\Resources\PompPreview.png" Link="Resources\PompPreview.png" IncludeInVSIX="true" />
+    <!-- Registered as a Microsoft.VisualStudio.ImageManifest asset in each source.extension.vsixmanifest. -->
+    <Content Include="..\Pomp.VisualStudio\Resources\Pomp.imagemanifest" Link="Resources\Pomp.imagemanifest" IncludeInVSIX="true" />
     <!-- Referenced by <License> in source.extension.vsixmanifest (shown by the VSIX installer and the Marketplace). -->
     <Content Include="$(PompSrcDir)..\LICENSE.txt" Link="LICENSE.txt" IncludeInVSIX="true" />
   </ItemGroup>
@@ -150,11 +154,15 @@
     <Content Include="$(PompSharedDir)Resources\WebUIPlaceholder\index.html" Link="WebUI\index.html" IncludeInVSIX="true" />
   </ItemGroup>
 
-  <!-- omp-extension\ : omp-side extension / hook / skill sources, plus the catalog skills' kits (css, tsx, js); no node_modules, no build output. -->
+  <!-- omp-extension\ : omp-side extension / hook / skill sources, plus the catalog skills' kits (css, tsx, js) and helper scripts (ps1); no node_modules, no build output. -->
   <ItemGroup Condition="Exists('$(PompOmpExtensionDir)')">
     <Content Include="$(PompOmpExtensionDir)**\*.mjs;$(PompOmpExtensionDir)**\*.ts;$(PompOmpExtensionDir)**\*.tsx;$(PompOmpExtensionDir)**\*.js;$(PompOmpExtensionDir)**\*.css;$(PompOmpExtensionDir)**\*.md;$(PompOmpExtensionDir)**\*.yml;$(PompOmpExtensionDir)**\*.json"
              Exclude="$(PompOmpExtensionDir)**\node_modules\**;$(PompOmpExtensionDir)dist\**;$(PompOmpExtensionDir)bin\**;$(PompOmpExtensionDir)obj\**;$(PompOmpExtensionDir)**\package-lock.json"
              Link="omp-extension\%(RecursiveDir)%(Filename)%(Extension)"
+             IncludeInVSIX="true" />
+    <!-- %(RecursiveDir) starts after the wildcard, so the catalog prefix is spelled out in the link. -->
+    <Content Include="$(PompOmpExtensionDir)catalog\skills\**\*.ps1"
+             Link="omp-extension\catalog\skills\%(RecursiveDir)%(Filename)%(Extension)"
              IncludeInVSIX="true" />
   </ItemGroup>
 

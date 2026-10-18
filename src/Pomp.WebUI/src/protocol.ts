@@ -75,6 +75,9 @@ export interface PageShortcuts {
   contextBasket: string;
   /** Turns "include editor context" on or off. */
   editorContext: string;
+  /** Host-only toggles; neither submits a prompt. */
+  liveFollow: string;
+  liveBookmarks: string;
   /** Opens the composer's permission-mode picker. */
   permissionMode: string;
   /** Answers the pending request card: allow once / confirm. */
@@ -86,7 +89,7 @@ export interface PageShortcuts {
   /** Moves the focus back to the editor; the page sends `ui/toggleFocus` itself (keys inside the WebView never reach Visual Studio). */
   toggleFocus: string;
 }
-export const DEFAULT_SHORTCUTS: PageShortcuts = { send: 'Enter', sendTargetPicker: 'Ctrl+Alt+T', previousTarget: 'Alt+,', nextTarget: 'Alt+.', contextBasket: 'Alt+;', editorContext: "Alt+'", permissionMode: 'Alt+Q', allow: 'Alt+A', deny: 'Alt+D', permissionsView: 'Ctrl+Alt+P', toggleFocus: 'Alt+J' };
+export const DEFAULT_SHORTCUTS: PageShortcuts = { send: 'Enter', sendTargetPicker: 'Ctrl+Alt+T', previousTarget: 'Alt+,', nextTarget: 'Alt+.', contextBasket: 'Alt+;', editorContext: "Alt+'", liveFollow: 'Alt+L', liveBookmarks: 'Alt+K', permissionMode: 'Alt+Q', allow: 'Alt+A', deny: 'Alt+D', permissionsView: 'Ctrl+Alt+P', toggleFocus: 'Alt+J' };
 
 /** `bridge/state.reason` of a failed bridge whose cause is a missing model provider: the page shows the engine setup panel. */
 export const SETUP_REQUIRED = 'setupRequired';
@@ -419,6 +422,14 @@ export type AgentPlanEdit = { requestId: string; sessionId: string; revision: st
 /** Answer to workspace/review editorChanges (the candidate files) and fromEditor (staging). */
 export interface EditorChangesReply { requestId: string; action: 'editorChanges' | 'fromEditor'; ok: boolean; error?: string; files?: { path: string; unsaved: boolean }[] }
 
+/** Host-only editor settings; receiving this payload advertises support (independent of engine readiness). */
+export interface EditorFollowState {
+  live: boolean;
+  bookmarks: boolean;
+  requestId?: string;
+  error?: string;
+}
+
 export interface SessionInfoPayload {
   recoveryStatus?: 'ready' | 'restoring' | 'failed';
   recoveryMessage?: string;
@@ -504,6 +515,8 @@ export interface TurnStartedPayload {
   agentInstance?: string | null;
   /** POMP itself answered: a retry keeps that destination after a partner change. */
   main?: boolean | null;
+  /** The agent/team tab a message to another target was sent from (also restored from the engine's transcript): keeps it in that tab. */
+  from?: { kind: string; id?: string | null } | null;
 }
 
 export interface WorkspaceFile {
@@ -530,6 +543,12 @@ export interface AssistantDeltaPayload {
   messageId: string;
   kind: 'text' | 'thinking';
   delta: string;
+}
+
+/** The thinking just streamed for `messageId` was narration (prose addressed to the user, omp 18.12+): `text`, the end of that thinking, moves to the answer text. */
+export interface AssistantNarrationPayload {
+  messageId: string;
+  text: string;
 }
 
 export interface AssistantEndPayload {
@@ -1165,6 +1184,7 @@ export interface HostToUi extends ConversationHostToUi, ToolsHostToUi {
   'workspace/codeReviewState': CodeReviewState;
   'workspace/contextPresetsState': { requestId?: string; root?: string; error?: string; presets?: { id: string; name: string; includeEditorContext: boolean; files: WorkspaceFile[] }[] };
   'host/hello': HostHelloPayload;
+  'host/editorFollow': EditorFollowState;
   'bridge/state': BridgeStatePayload;
   'setup/state': SetupStatePayload;
   'theme/changed': ThemePayload;
@@ -1183,6 +1203,7 @@ export interface HostToUi extends ConversationHostToUi, ToolsHostToUi {
   'chat/turnStarted': TurnStartedPayload;
   'chat/assistantStart': AssistantStartPayload;
   'chat/assistantDelta': AssistantDeltaPayload;
+  'chat/assistantNarration': AssistantNarrationPayload;
   'chat/assistantEnd': AssistantEndPayload;
   'chat/toolStart': ToolStartPayload;
   'chat/toolUpdate': ToolUpdatePayload;
@@ -1252,6 +1273,7 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'workspace/review': { action: 'refresh' | 'select' | 'amend' | 'nativeDiff' | 'validate' | 'apply' | 'discard' | 'editorChanges' | 'fromEditor'; requestId?: string; paths?: string[]; hunkId?: number; after?: string; allowSourceGenerators?: boolean; id?: string; revision?: number; path?: string; selected?: number[] };
   'workspace/isolation': { action: 'refresh' | 'apply' | 'discard' | 'openPatch'; requestId: string; root?: string; id?: string };
   'ui/ready': Empty;
+  'ui/editorFollow': { requestId: string; action: 'set'; live?: boolean; bookmarks?: boolean };
   'ui/log': { level: LogLevel; message: string };
   'agents/command': AgentsCommand;
   'advisors/command': AdvisorsCommand;
@@ -1266,6 +1288,8 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
     agentInstance?: string;
     /** POMP itself answers, whatever the conversation partner is; never combined with the targets above. */
     main?: true;
+    /** The agent/team tab it is sent from, only when it goes to a different target: that tab keeps it after a restore. View only. */
+    from?: { kind: 'agent' | 'team'; id: string };
   };
   'chat/stop': Empty;
   /** start: begin a new run from a saved workflow's task/steps (no active run; unpaused; sends no model request — the page sends the chat message). */
@@ -1282,6 +1306,8 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'workspace/countBasketTokens': { requestId: string; root: string; sessionId?: string; includeEditorContext: boolean; attachments?: { path: string }[] };
   /** Host-chrome: move the focus from the page to the editor (the VS host handles it; never reaches the session). */
   'ui/toggleFocus': Record<string, never>;
+  /** Host-chrome: a short notice (a control action that failed, a draft warning) shown in the VS status bar, not inside the page. */
+  'ui/status': { text: string; level: 'error' | 'warning' | 'info' };
   /** Files or an image were pasted into the chat input: the host reads the clipboard and puts them into the context basket (composer/prefill). */
   'ui/pasteFiles': Record<string, never>;
   'workspace/pickFiles': { requestId: string };
@@ -1358,6 +1384,7 @@ const HOST_TYPES: Record<HostMessageType, true> = {
   'workspace/codeReviewState': true,
   'workspace/contextPresetsState': true,
   'host/hello': true,
+  'host/editorFollow': true,
   'bridge/state': true,
   'setup/state': true,
   'theme/changed': true,
@@ -1375,6 +1402,7 @@ const HOST_TYPES: Record<HostMessageType, true> = {
   'chat/turnStarted': true,
   'chat/assistantStart': true,
   'chat/assistantDelta': true,
+  'chat/assistantNarration': true,
   'chat/assistantEnd': true,
   'chat/toolStart': true,
   'chat/toolUpdate': true,
@@ -1464,5 +1492,5 @@ export function send<K extends UiMessageType>(type: K, payload?: UiToHost[K]): b
 
 /** Page-side diagnostics into the host log (`ui/log`). */
 export function logToHost(level: UiToHost['ui/log']['level'], message: string): void {
-  send('ui/log', { level, message: message.length > 4000 ? `${message.slice(0, 4000)}…` : message });
+  send('ui/log', { level, message: message.length > 4000 ? message.slice(0, 4000) : message });
 }

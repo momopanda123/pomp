@@ -49,6 +49,11 @@ namespace Pomp.VisualStudio.ToolWindow
         /// <summary>Host-chrome message the page sends when files or an image are pasted into the chat input (only VS can read their paths); never forwarded to the session.</summary>
         public const string PasteFilesMessageType = "ui/pasteFiles";
 
+        public const string EditorFollowMessageType = "ui/editorFollow";
+
+        /// <summary>Host-chrome message: a short notice of the page (a failed control action, a warning) for the VS status bar; never forwarded to the session.</summary>
+        public const string StatusMessageType = "ui/status";
+
         /// <summary>
         /// Largest page to host message accepted (characters of the JSON text, checked before it is parsed): 4 MiB. A larger one is
         /// dropped and the page is told (<see cref="MessageTooLargeCode"/>).
@@ -90,6 +95,8 @@ namespace Pomp.VisualStudio.ToolWindow
         private bool pumping;
         private bool disposed;
         private bool overflowLogged;
+        // The Live failure last logged and shown; UI thread only. The same failure on every following message is not repeated.
+        private string? lastLiveFailure;
         private DateTime lastRejectLogUtc = DateTime.MinValue;
         private int suppressedRejects;
         private double rateTokens = MaxMessageBurst;
@@ -113,6 +120,17 @@ namespace Pomp.VisualStudio.ToolWindow
 
         /// <summary>Raised on the UI thread when files or an image were pasted into the chat input.</summary>
         public event EventHandler? PasteFilesRequested;
+
+        public event EventHandler<UiMessage>? EditorFollowRequested;
+
+        /// <summary>Raised on the UI thread when the page reports a notice for the VS status bar.</summary>
+        public event EventHandler<UiMessage>? StatusRequested;
+
+        /// <summary>Raised on the UI thread when updating the Live editor display for a session message failed.</summary>
+        public event EventHandler<Exception>? LiveFailed;
+
+        /// <summary>Observes authoritative session state on the UI thread before the page sees it.</summary>
+        public Action<UiMessage>? ObserveSession { get; set; }
 
         /// <inheritdoc />
         public bool IsReady
@@ -147,7 +165,7 @@ namespace Pomp.VisualStudio.ToolWindow
                 }
 
                 isReady = ready;
-                pendingMessage = new PendingMessage(json, cancellationToken);
+                pendingMessage = new PendingMessage(json, cancellationToken, message.Type == UiMessageTypes.SessionInfo ? message : null);
                 if (queue.Count >= MaxQueuedMessages)
                 {
                     var dropped = queue.Dequeue();
@@ -339,6 +357,18 @@ namespace Pomp.VisualStudio.ToolWindow
             if (message.Type == PasteFilesMessageType)
             {
                 PasteFilesRequested?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+
+            if (message.Type == EditorFollowMessageType)
+            {
+                EditorFollowRequested?.Invoke(this, message);
+                return;
+            }
+
+            if (message.Type == StatusMessageType)
+            {
+                StatusRequested?.Invoke(this, message);
                 return;
             }
 
@@ -542,7 +572,7 @@ namespace Pomp.VisualStudio.ToolWindow
             }
 
             const int Limit = 120;
-            return text!.Length <= Limit ? text : text.Substring(0, Limit) + "...";
+            return text!.Length <= Limit ? text : text.Substring(0, Limit);
         }
 
         private void RaiseMessageReceived(UiMessage message)
@@ -648,6 +678,28 @@ namespace Pomp.VisualStudio.ToolWindow
                     continue;
                 }
 
+                if (item.SessionMessage != null && ObserveSession != null)
+                {
+                    try
+                    {
+                        ObserveSession(item.SessionMessage);
+                        lastLiveFailure = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Live is a display: its failure is reported in the VS status bar and the log, never as a chat `error` (the
+                        // page would take that for a failed send or session switch). A failure that persists (every streamed message
+                        // would hit it) is logged and shown once, until an observation succeeds again.
+                        var failure = ex.GetType().FullName + ": " + ex.Message;
+                        if (failure != lastLiveFailure)
+                        {
+                            lastLiveFailure = failure;
+                            logger.Error("Observing Live editor session state failed.", ex);
+                            LiveFailed?.Invoke(this, ex);
+                        }
+                    }
+                }
+
                 try
                 {
                     target.PostWebMessageAsJson(item.Json);
@@ -663,13 +715,16 @@ namespace Pomp.VisualStudio.ToolWindow
 
         private sealed class PendingMessage
         {
-            public PendingMessage(string json, CancellationToken cancellationToken)
+            public PendingMessage(string json, CancellationToken cancellationToken, UiMessage? sessionMessage)
             {
                 Json = json;
                 CancellationToken = cancellationToken;
+                SessionMessage = sessionMessage;
             }
 
             public string Json { get; }
+
+            public UiMessage? SessionMessage { get; }
 
             public CancellationToken CancellationToken { get; }
 

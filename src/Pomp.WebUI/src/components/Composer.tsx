@@ -1,5 +1,7 @@
+import { useStatusReport } from '../statusBar';
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent, type RefObject } from 'react';
 import { mentionSelectionToken, MENTION_LIMIT, type ComposerState } from '../composerState';
+import { COMPOSER_CONTROLS, focusControlOrInput, setComposerControlHidden, showAllComposerControls, useHiddenComposerControls } from '../composerControls';
 import { newId } from '../format';
 import { roleTitle } from '../bundledDescriptions';
 import { useT, type MessageKey, type Translate } from '../i18n';
@@ -7,6 +9,7 @@ import { usableKnowledge } from '../knowledge';
 import { useKnowledge } from '../knowledgeState';
 import { promptRejection, type SendFailure, type SendResult } from '../limits';
 import { send, APPROVAL_MODES, DEFAULT_SHORTCUTS, MAIN_TARGET, type AgentsStatePayload, type CommandInfo, type ComposerPrefill, type ApprovalMode, type PageShortcuts, type PermissionModeResult, type BackgroundAgentJob, type BackgroundAgentState, type BasketTokens, type ModelInfo, type SendTarget, type SessionInfoPayload, type WorkspaceFile } from '../protocol';
+import type { EditorFollowState, UiToHost } from '../protocol';
 import { matchesShortcut } from '../shortcuts';
 import { useComposerPrediction } from '../useComposerPrediction';
 import { ComposerGhost } from './ComposerGhost';
@@ -16,9 +19,11 @@ import type { Action } from '../state';
 import { effectiveRoles, isRunnableTeam, targetKey, targetPayload } from '../teamsCache';
 import { useWorkState } from '../work/store';
 import { ConfirmPopover } from './ConfirmPopover';
+import { markMenuHandled, useContextMenu, type ContextMenuItem } from './ContextMenu';
 import { PickerPopover } from './ModelPickers';
 import { plainControls, revealControls } from './RevealControls';
 import { ContextBasket } from './ContextBasket';
+import { DestinationAvatar } from './AgentsTables';
 import { Icon } from './Icon';
 import { ModelPickers } from './ModelPickers';
 import { ContextMeter, FAST_REPLY_TIMEOUT_MS, QuotaMeter } from './ComposerMeters';
@@ -27,6 +32,8 @@ import { promptHistory } from '../promptHistory';
 
 const MAX_HEIGHT_PX = 200;
 const STOP_FEEDBACK_MS = 4000;
+// Popups inside the composer keep their own right-click and keyboard menus; the composer's control menu skips them.
+const COMPOSER_POPUPS = '.context-popover, .context-breakdown, .picker-pop, .mention-popup, .quota-popover, .confirm-popover, .context-menu';
 const MENTION_DEBOUNCE_MS = 150;
 
 interface ComposerProps {
@@ -56,7 +63,9 @@ interface ComposerProps {
   onIncludeEditorContextChange: (value: boolean) => void;
   draft: ComposerState;
   dispatch: Dispatch<Action>;
-  onSend: (text: string, attachments: WorkspaceFile[], clearDraft?: boolean, target?: SendTarget, preserveDraftTarget?: boolean, includeEditorContext?: boolean) => SendResult;
+  /** `target` undefined: the chosen one-message target (else the partner); null: the tab's partner, whatever is chosen. `toMain`: an editor
+   *  request of the main conversation (the view moves to Default (POMP) once it is accepted). */
+  onSend: (text: string, attachments: WorkspaceFile[], clearDraft?: boolean, target?: SendTarget | null, preserveDraftTarget?: boolean, includeEditorContext?: boolean, toMain?: boolean) => SendResult;
   onStop: () => void;
   commands: CommandInfo[];
   /** Commands the host left out because the list passed its message size. */
@@ -75,14 +84,15 @@ interface ComposerProps {
   approvalMode?: ApprovalMode;
   /** The latest permission/modeResult. */
   permissionModeReply?: PermissionModeResult | null;
+  editorFollow?: EditorFollowState | null;
   selectedTarget?: SendTarget;
   onSelectTarget: (target?: SendTarget) => void;
   /** The active partner tab's name (undefined = Default (POMP)): where a message without a one-message target goes. */
   partnerName?: string;
+  /** The active partner tab's agent or team (undefined = Default (POMP)), for its picture on the send-target chip. */
+  partner?: { kind: 'main' | 'agent' | 'team'; id?: string };
   /** `/agent name` and `/team id` without a message open that partner tab instead of a one-message target. */
   onOpenPartner?: (target: SendTarget) => void;
-  /** False in an agent/team partner tab: messages there go only to that partner (no chip choice, no @agent, no `/agent name msg`). */
-  allowTargetOverride?: boolean;
 }
 
 function failureText(t: Translate, failure: SendFailure): string | null {
@@ -105,7 +115,60 @@ function FilePath({ path }: { path: string }) {
   return <><span className="file-directory">{revealControls(path.slice(0, split))}</span><strong>{revealControls(path.slice(split))}</strong></>;
 }
 
-export function Composer({ locale, workspaceKey, sessionId, model, session, setup, setupReplies, onManageAccounts, inputRef, connected, composerPredictions = false, busy, queueBlocked = false, insertSkill, insertText, basketRequest = 0, basketTokens, requestPending, newSessionPending, includeEditorContext, onIncludeEditorContextChange, draft, dispatch, onSend, onStop, commands, commandsHidden, onCommand, onGoal, skillsOff, prefill, agents, shortcuts = DEFAULT_SHORTCUTS, approvalMode, permissionModeReply, selectedTarget, onSelectTarget, partnerName, onOpenPartner, allowTargetOverride = true }: ComposerProps) {
+function LiveEditorControls({ state, disabled, shortcuts, inputRef, t }: { state?: EditorFollowState | null; disabled: boolean; shortcuts: PageShortcuts; inputRef: RefObject<HTMLTextAreaElement | null>; t: Translate }) {
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (pending && state?.requestId === pending) {
+      setPending(null);
+      setError(state.error || null);
+    }
+  }, [state, pending]);
+  useEffect(() => {
+    if (!pending) return;
+    const timer = window.setTimeout(() => { setPending(null); setError(t('setup.noReply')); }, FAST_REPLY_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [pending, t]);
+  const unavailable = !state || disabled || pending !== null;
+  const request = useCallback((action: Omit<UiToHost['ui/editorFollow'], 'requestId'>) => {
+    if (unavailable) return;
+    inputRef.current?.focus({ preventScroll: true });
+    const requestId = newId();
+    setError(null); setPending(requestId);
+    if (!send('ui/editorFollow', { ...action, requestId })) {
+      setPending(null); setError(t('error.hostUnavailable'));
+    }
+  }, [unavailable, inputRef, t]);
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (unavailable || event.defaultPrevented || document.querySelector('.overlay .dialog')) return;
+      const input = inputRef.current;
+      if (!input || input.closest('[hidden], [inert]')) return;
+      // Other explicit inputs (search, rename, settings, terminal) retain their own keyboard and focus.
+      const target = event.target;
+      if (target instanceof Element && target !== input && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], .xterm')) return;
+      const live = matchesShortcut(event, shortcuts.liveFollow);
+      if (!live && !matchesShortcut(event, shortcuts.liveBookmarks)) return;
+      event.preventDefault(); event.stopPropagation();
+      request(live ? { action: 'set', live: !state?.live } : { action: 'set', bookmarks: !state?.bookmarks });
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [unavailable, inputRef, shortcuts.liveFollow, shortcuts.liveBookmarks, state?.live, state?.bookmarks, request]);
+  // Named like the other composer buttons; the shortcut is in aria-keyshortcuts (and in the screen guide).
+  const liveLabel = t('composer.live');
+  const bookmarksLabel = t('composer.bookmarks');
+  // A failed Live/bookmark change is reported in the VS status bar, not between the buttons.
+  useStatusReport(error);
+  return <span className="live-editor-controls" role="group" aria-label={t('composer.liveControls')}>
+    <button type="button" className="icon-btn live-editor-toggle" data-testid="live-bookmarks" aria-pressed={state?.bookmarks === true} aria-label={bookmarksLabel} aria-keyshortcuts={shortcuts.liveBookmarks.replace(/^Ctrl\+/, 'Control+').replace(/\bEsc$/, 'Escape') || undefined} disabled={unavailable}
+      title={bookmarksLabel} onMouseDown={event => event.preventDefault()} onClick={() => request({ action: 'set', bookmarks: !state?.bookmarks })}><Icon name="bookmark" size={14} /></button>
+    <button type="button" className="icon-btn live-editor-toggle" data-testid="live-follow" aria-pressed={state?.live === true} aria-label={liveLabel} aria-keyshortcuts={shortcuts.liveFollow.replace(/^Ctrl\+/, 'Control+').replace(/\bEsc$/, 'Escape') || undefined} disabled={unavailable}
+      title={liveLabel} onMouseDown={event => event.preventDefault()} onClick={() => request({ action: 'set', live: !state?.live })}><Icon name="live" size={14} /></button>
+  </span>;
+}
+
+export function Composer({ locale, workspaceKey, sessionId, model, session, setup, setupReplies, onManageAccounts, inputRef, connected, composerPredictions = false, busy, queueBlocked = false, insertSkill, insertText, basketRequest = 0, basketTokens, requestPending, newSessionPending, includeEditorContext, onIncludeEditorContextChange, draft, dispatch, onSend, onStop, commands, commandsHidden, onCommand, onGoal, skillsOff, prefill, agents, shortcuts = DEFAULT_SHORTCUTS, approvalMode, permissionModeReply, editorFollow, selectedTarget, onSelectTarget, partnerName, partner, onOpenPartner }: ComposerProps) {
   const t = useT();
   const focusInput = useCallback(() => inputRef.current?.focus(), [inputRef]);
   const [failure, setFailure] = useState<SendFailure | null>(null);
@@ -113,8 +176,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   const latest = useRef(draft);
   latest.current = draft;
   const popupId = useId();
-  const errorId = useId();
   const slashId = useId();
+  const noticeId = useId();
   const [inputFocused, setInputFocused] = useState(false);
   const [caret, setCaret] = useState({ start: draft.text.length, end: draft.text.length });
   const [slashDismissed, setSlashDismissed] = useState<string | null>(null);
@@ -169,19 +232,39 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     else if (background?.state === 'archived' || knownInstances.current.scope !== scope) knownInstances.current = { scope, jobs: [] };
     return knownInstances.current.jobs;
   }, [background, sessionId, workspaceKey]);
-  const destinations = useMemo<{ target: SendTarget; name: string; label: string; chip?: string; title: string; groupKey: string; group: string }[]>(() => [
-    ...[...runnableTeams].sort((a, b) => byName(a.title || a.id, b.title || b.id)).map(team => ({ target: { kind: 'team', id: team.id } as SendTarget, name: team.title || team.id, label: team.title || team.id, title: team.id, groupKey: 'teams', group: t('composer.targetTeams') })),
-    ...[...runnableRoles].sort((a, b) => byName(roleTitle(a, t), roleTitle(b, t))).map(role => ({ target: { kind: 'agent', id: role.name } as SendTarget, name: roleTitle(role, t), label: roleTitle(role, t), title: role.name, groupKey: 'agents', group: t('composer.targetAgents') })),
+  const destinations = useMemo<{ target: SendTarget; name: string; label: string; chip?: string; title: string; groupKey?: string; group?: string; avatar: { kind: 'main' | 'agent' | 'team'; id?: string } }[]>(() => [
+    ...[...runnableTeams].sort((a, b) => byName(a.title || a.id, b.title || b.id)).map(team => ({ target: { kind: 'team', id: team.id } as SendTarget, name: team.title || team.id, label: team.title || team.id, title: team.id, groupKey: 'teams', group: t('composer.targetTeams'), avatar: { kind: 'team' as const, id: team.id } })),
+    ...[...runnableRoles].sort((a, b) => byName(roleTitle(a, t), roleTitle(b, t))).map(role => ({ target: { kind: 'agent', id: role.name } as SendTarget, name: roleTitle(role, t), label: roleTitle(role, t), title: role.name, groupKey: 'agents', group: t('composer.targetAgents'), avatar: { kind: 'agent' as const, id: role.name } })),
     ...instances.map(job => {
       const title = roleTitle(runnableRoles.find(role => role.name === job.agent), t, job.agent);
       const name = `${title} #${job.id.slice(-8)}`;
       const status = t(`agents.status.${['pending', 'running', 'completed', 'failed', 'error', 'aborted'].includes(job.status) ? job.status : 'unknown'}` as MessageKey);
-      return { target: { kind: 'instance', id: job.id } as SendTarget, name, label: `${name} · ${status}`, chip: name, title: `${job.agent} · ${job.id}`, groupKey: 'instances', group: t('composer.targetInstances') };
+      return { target: { kind: 'instance', id: job.id } as SendTarget, name, label: `${name} · ${status}`, chip: name, title: `${job.agent} · ${job.id}`, groupKey: 'instances', group: t('composer.targetInstances'), avatar: { kind: 'agent' as const, id: job.agent } };
     }),
   ], [runnableTeams, runnableRoles, instances, t]);
-  const hasTargets = (agents?.roles.length ?? 0) > 0 || (agents?.teams.length ?? 0) > 0 || instances.length > 0;
-  const selectedDestination = allowTargetOverride ? destinations.find(item => targetKey(item.target) === targetKey(selectedTarget)) : undefined;
-  // Without a one-message target the message goes to the active partner tab, so the chip names that partner, never a vague "this chat".
+  // The list: teams, agents, then this conversation's running members; each group by name, except that the row of the conversation the
+  // user is in (POMP in its own tab, the agent or team of an agent/team tab) heads its group, tinted: choosing it clears the one-message
+  // target, so the next message continues this conversation (never a subagent run of itself). POMP heads the agents in its own tab and
+  // in a team tab, and comes right under the agent in that agent's tab. Running members of the tab's own role are left out.
+  const partnerTab = partner?.id && partner.kind !== 'main' ? { kind: partner.kind, id: partner.id } : undefined;
+  const listed = useMemo(() => {
+    const own = (item: (typeof destinations)[number]) => !partnerTab ? item.target.kind === 'main'
+      : partnerTab.kind === 'team' ? item.target.kind === 'team' && item.target.id.toLowerCase() === partnerTab.id.toLowerCase()
+      : item.target.kind === 'agent' && item.target.id === partnerTab.id;
+    const main: (typeof destinations)[number] = { target: MAIN_TARGET, name: t('partner.main'), label: t('partner.main'), chip: 'POMP', title: 'POMP', groupKey: 'agents', group: t('composer.targetAgents'), avatar: { kind: 'main' } };
+    const ownFirst = (items: (typeof destinations)[number][]) => [...items.filter(own), ...items.filter(item => !own(item))];
+    const agents = ownFirst(destinations.filter(item => item.target.kind === 'agent'));
+    const ownAgent = agents.length > 0 && own(agents[0]!);
+    return [
+      ...ownFirst(destinations.filter(item => item.target.kind === 'team')),
+      ...(ownAgent ? [agents[0]!, main, ...agents.slice(1)] : [main, ...agents]),
+      ...destinations.filter(item => item.target.kind === 'instance' && !(partnerTab?.kind === 'agent' && item.avatar.id === partnerTab.id)),
+    ].map(item => ({ ...item, own: own(item) }));
+  }, [destinations, partnerTab?.kind, partnerTab?.id, t]);
+  const choices = useMemo(() => listed.filter(item => !item.own), [listed]);
+  const hasTargets = choices.length > 0;
+  const selectedDestination = choices.find(item => targetKey(item.target) === targetKey(selectedTarget));
+  // Where a message without a one-message target goes: the active partner tab (named when a lost target is reported).
   const partnerLabel = partnerName || t('partner.main');
   // An editor menu request that could not go out at once (a reply was running, or a draft was there) still belongs to POMP
   // when the user sends it later, whatever partner tab is active then.
@@ -189,9 +272,12 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   useEffect(() => { deferredMain.current = null; }, [sessionId]);
   // A one-message target the user picks afterwards wins: the chip and the send must agree.
   const mainPending = !selectedDestination && deferredMain.current !== null && draft.text.includes(deferredMain.current);
-  // The chip is narrow: the Default tab is named by its short name, the tooltip keeps the full tab name.
-  const targetLabel = selectedDestination ? (selectedDestination.chip ?? selectedDestination.label) : t('composer.targetPartner', { name: mainPending ? 'POMP' : partnerName || 'POMP' });
-  const targetTitle = t('composer.targetPartnerTitle', { name: mainPending ? t('partner.main') : selectedDestination ? selectedDestination.label : partnerLabel });
+  // The chip names only a target other than the conversation the user is in; without one it is just the send-target button (a picked POMP
+  // in its own tab, or this tab's own partner, would read as a message to itself). A deferred editor request is POMP's: a target only in an
+  // agent/team tab.
+  const chosen = selectedDestination ?? (mainPending && partnerTab ? choices.find(item => item.target.kind === 'main') : undefined);
+  const targetLabel = chosen ? (chosen.chip ?? chosen.label) : t('composer.sendTarget');
+  const targetTitle = chosen ? t('composer.targetPartnerTitle', { name: chosen.label }) : t('composer.sendTarget');
   // What the chosen target is called, to name it if it disappears later.
   const selectedName = useRef<{ key: string; name: string }>(undefined);
   if (selectedDestination) selectedName.current = { key: targetKey(selectedTarget), name: selectedDestination.name };
@@ -200,16 +286,19 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   useEffect(() => { if (selectedDestination) setTargetLost(null); }, [selectedTarget]);
   useEffect(() => { setTargetLost(null); }, [partnerName, sessionId]); // it names where the next message goes: another partner tab or conversation makes it stale
   useEffect(() => {
-    if (!allowTargetOverride || !selectedTarget || selectedDestination) return;
+    if (!selectedTarget || selectedDestination) return;
     onSelectTarget(undefined);
+    // POMP in its own tab, the tab's own partner, or a running member of the tab's own role (left out of an agent tab's list on purpose)
+    // is where the message goes anyway: nothing to tell.
+    if (selectedTarget.kind === 'main' || (partnerTab && selectedTarget.kind === partnerTab.kind && selectedTarget.id.toLowerCase() === partnerTab.id.toLowerCase())) return;
+    if (partnerTab?.kind === 'agent' && selectedTarget.kind === 'instance' && destinations.some(item => item.target.kind === 'instance' && item.target.id === selectedTarget.id && item.avatar.id === partnerTab.id)) return;
     // Cleared without a word, the next message would go to a partner the user did not pick: name the target that went and where the message goes now.
-    if (selectedTarget.kind === 'main') return;
     const remembered = selectedName.current?.key === targetKey(selectedTarget) ? selectedName.current.name : undefined;
     const name = remembered ?? (selectedTarget.kind === 'team' ? agents?.teams.find(team => team.id === selectedTarget.id)?.title || selectedTarget.id
       : selectedTarget.kind === 'agent' ? roleTitle(agents?.roles.find(role => role.name === selectedTarget.id), t, selectedTarget.id) : `#${selectedTarget.id.slice(-8)}`);
     lostAtText.current = draft.text;
     setTargetLost(t('composer.targetLost', { name, partner: partnerLabel }));
-  }, [allowTargetOverride, selectedTarget, selectedDestination, onSelectTarget]);
+  }, [selectedTarget, selectedDestination, onSelectTarget]);
   useEffect(() => { if (!connected || requestPending) setTargetOpen(false); }, [connected, requestPending]);
 
   useEffect(() => {
@@ -252,7 +341,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
       permissionPendingRef.current = null; setPermissionPending(null); setPermissionError(t('error.hostUnavailable'));
     }
   };
-  const closePermission = (): void => { setPermissionOpen(false); setPermissionConfirm(false); permissionButton.current?.focus({ preventScroll: true }); };
+  const closePermission = (): void => { setPermissionOpen(false); setPermissionConfirm(false); focusControlOrInput(permissionButton.current, inputRef.current, { preventScroll: true }); };
   const closePermissionPopups = (): void => { setPermissionOpen(false); setPermissionConfirm(false); };
   const choosePermission = (mode: ApprovalMode): void => {
     if (mode === permissionMode) { closePermission(); return; }
@@ -324,6 +413,12 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   }, sendPaths), [text, draft.text, sendPaths, includeEditorContext, selectedTarget]);
   const canSend = connected && !queueBlocked && !requestPending && !newSessionPending && !draft.composing && (text.length > 0 || draft.attachments.some(file => !file.excluded));
   const failureMessage = failure ? failureText(t, failure) : rejection ? failureText(t, rejection) : null;
+  // The composer's notices go to the VS status bar (with errors in the POMP log), not as text between its controls.
+  useStatusReport(failureMessage);
+  useStatusReport(draft.fileError, 'warning');
+  useStatusReport(targetLost, 'warning');
+  useStatusReport(targetError);
+  useStatusReport(permissionError);
   const mention = connected && !draft.composing ? draft.mention : null;
   const { prediction, discard: discardPrediction } = useComposerPrediction({
     inputRef, enabled: composerPredictions, sessionId, text: draft.text, caret, focused: inputFocused,
@@ -332,9 +427,9 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   const mentionTargets = useMemo(() => {
     if (!mention) return [];
     const query = mention.query.toLocaleLowerCase();
-    if (!allowTargetOverride) return [];
-    return destinations.filter(item => item.target.kind !== 'instance' && `${item.target.id} ${item.label}`.toLocaleLowerCase().includes(query)).slice(0, 8);
-  }, [mention?.query, destinations, allowTargetOverride]);
+    // Agents and teams by name (not POMP, not running members, not the tab's own partner).
+    return choices.filter(item => item.target.kind !== 'instance' && item.target.kind !== 'main' && `${item.target.id} ${item.label}`.toLocaleLowerCase().includes(query)).slice(0, 8);
+  }, [mention?.query, choices]);
   const mentionCount = mentionTargets.length + (mention?.files.length ?? 0);
   const mentionIndex = mentionCount ? Math.min(mention?.selected ?? 0, mentionCount - 1) : 0;
 
@@ -364,8 +459,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   // (default Alt+') switches "include editor context". Inert while composing text, while a mention/slash popup owns the keyboard, while a
   // modal owns it, or while the control cannot open.
   useEffect(() => {
-    const targetChord = hasTargets && allowTargetOverride ? shortcuts.sendTargetPicker : '';
-    const stepChords = destinations.length > 0 && allowTargetOverride ? [shortcuts.previousTarget, shortcuts.nextTarget] : ['', ''];
+    const targetChord = hasTargets ? shortcuts.sendTargetPicker : '';
+    const stepChords = choices.length > 0 ? [shortcuts.previousTarget, shortcuts.nextTarget] : ['', ''];
     const permissionChord = shortcuts.permissionMode;
     const basketChord = shortcuts.contextBasket, contextChord = shortcuts.editorContext;
     if (!targetChord && !permissionChord && !stepChords[0] && !stepChords[1] && !basketChord && !contextChord) return;
@@ -387,13 +482,13 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
         onIncludeEditorContextChange(!includeEditorContext);
       } else if (step) {
         // -1 is the chat's partner (no one-message target).
-        const index = destinations.findIndex(item => targetKey(item.target) === targetKey(selectedTarget));
-        const next = index < 0 ? (step > 0 ? 0 : destinations.length - 1) : index + step;
-        onSelectTarget(next < 0 || next >= destinations.length ? undefined : destinations[next]!.target);
+        const index = choices.findIndex(item => targetKey(item.target) === targetKey(selectedTarget));
+        const next = index < 0 ? (step > 0 ? 0 : choices.length - 1) : index + step;
+        onSelectTarget(next < 0 || next >= choices.length ? undefined : choices[next]!.target);
         setTargetOpen(false);
       } else if (forTarget) {
         setTargetOpen(previous => {
-          if (previous) targetButton.current?.focus();
+          if (previous) focusControlOrInput(targetButton.current, inputRef.current);
           return !previous;
         });
       } else if (!permissionDisabled) {
@@ -403,7 +498,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [hasTargets, allowTargetOverride, shortcuts.sendTargetPicker, shortcuts.previousTarget, shortcuts.nextTarget, shortcuts.permissionMode, shortcuts.contextBasket, shortcuts.editorContext, connected, draft.composing, requestPending, mention, slash, permissionDisabled, permissionOpen, permissionConfirm, destinations, selectedTarget, onSelectTarget, basketOpen, includeEditorContext, onIncludeEditorContextChange]);
+  }, [hasTargets, shortcuts.sendTargetPicker, shortcuts.previousTarget, shortcuts.nextTarget, shortcuts.permissionMode, shortcuts.contextBasket, shortcuts.editorContext, connected, draft.composing, requestPending, mention, slash, permissionDisabled, permissionOpen, permissionConfirm, choices, selectedTarget, onSelectTarget, basketOpen, includeEditorContext, onIncludeEditorContextChange]);
 
   const [stopping, setStopping] = useState(false);
   useEffect(() => {
@@ -482,7 +577,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     autoSend.current = null;
     if (payload.text && payload.send && connected && !newSessionPending) {
       const files = [...draft.attachments, ...(payload.files ?? [])].filter((file, index, all) => !file.excluded && all.findIndex(other => other.fullPath === file.fullPath) === index);
-      const result = onSend(payload.text, files, false, MAIN_TARGET, true, payload.includeEditorContext || includeEditorContext);
+      const result = onSend(payload.text, files, false, MAIN_TARGET, true, payload.includeEditorContext || includeEditorContext, true);
       if (result.ok) return;
     }
     if (payload.includeEditorContext && !includeEditorContext) onIncludeEditorContextChange(true);
@@ -509,21 +604,6 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     if (!canSend || composing.current) return;
     setTargetLost(null);
     if (rejection) { setFailure(rejection); inputRef.current?.focus(); return; }
-    if (!allowTargetOverride) {
-      // A known @agent/@team token is a one-message destination, not plain text for a partner.
-      // Keep file mentions and email addresses usable; only exact known names at mention boundaries count.
-      const names = new Set([
-        ...(agents?.roles.flatMap(role => [role.name, role.title ?? '']) ?? []),
-        ...(agents?.teams.flatMap(team => [team.id, team.title ?? '']) ?? []),
-      ].filter(Boolean).map(name => name.toLocaleLowerCase()));
-      // Naming the tab's own partner is not another destination.
-      if (partnerName) names.delete(partnerName.toLocaleLowerCase());
-      const hasTargetMention = [...text.matchAll(/(?:^|[\s([{])@([^\s@"\]]+)/gu)]
-        .some(match => names.has(match[1]!.replace(/[),.!?;:}]+$/u, '').toLocaleLowerCase()));
-      if (hasTargetMention) {
-        setTargetError(t('composer.targetOtherTab')); inputRef.current?.focus(); return;
-      }
-    }
     const command = /^\/([^\s]+)(?:\s+([\s\S]*))?$/u.exec(text);
     // An old command name whose job a built-in does now runs that built-in (/pomp-compact → /compact).
     const typed = command ? LEGACY_COMMANDS.get(command[1]!) ?? command[1]! : undefined;
@@ -544,7 +624,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
         const goalText = command[2]?.trim() ?? '';
         if (!goalText) { setTargetError(t('goal.empty')); inputRef.current?.focus(); return; }
         // A goal runs in the main conversation: an agent or team tab has no workflow of its own.
-        if (!allowTargetOverride) { setTargetError(t('composer.targetOtherTab')); inputRef.current?.focus(); return; }
+        if (partnerTab) { setTargetError(t('composer.goalPartnerTab')); inputRef.current?.focus(); return; }
         setTargetError(null); onGoal?.(goalText); result = { ok: true };
       }
       else if (name === 'agent' || name === 'team') {
@@ -557,7 +637,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
         setTargetError(null);
         // A name alone switches the conversation partner (a tab); with a message it is a one-message target.
         if (!args?.[2]?.trim() && onOpenPartner && target.kind !== 'instance') { onOpenPartner(target); result = { ok: true }; }
-        else if (!allowTargetOverride) { setTargetError(t('composer.targetOtherTab')); inputRef.current?.focus(); return; }
+        // The tab's own partner is this conversation already: the message goes to it as usual, not to a second run of it.
+        else if (partnerTab && args?.[2]?.trim() && target.kind === partnerTab.kind && target.id.toLowerCase() === partnerTab.id.toLowerCase()) result = onSend(args[2].trim(), draft.attachments.filter(file => !file.excluded), true, null);
         else { onSelectTarget(target); result = args?.[2]?.trim() ? onSend(args[2].trim(), draft.attachments.filter(file => !file.excluded), true, target) : { ok: true }; }
       }
       else result = onCommand(name, command[2]?.trim() ?? '');
@@ -567,7 +648,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     } else {
       // A slash command takes the basket's checked files when it hands its text to the model; any other command leaves the basket for the next message.
       const keepBasket = command !== null && !slashTakesReferences(text, commands);
-      const result = onSend(text, keepBasket ? [] : draft.attachments.filter(file => !file.excluded), !keepBasket, override ?? (mainPending ? MAIN_TARGET : undefined));
+      const destination = override ?? (mainPending ? MAIN_TARGET : undefined);
+      const result = onSend(text, keepBasket ? [] : draft.attachments.filter(file => !file.excluded), !keepBasket, destination, false, undefined, destination?.kind === 'main');
       setFailure(result.ok ? null : result);
       if (result.ok) recalled.current = null;
       if (result.ok) deferredMain.current = null;
@@ -730,8 +812,28 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   const attachmentPaths = useMemo(() => draft.attachments.filter(file => !file.excluded).map(file => file.path), [draft.attachments]);
   const placeholder = !connected ? t('composer.placeholderOffline') : newSessionPending ? t('composer.placeholderNewSession') : requestPending ? t('composer.placeholderPending') : busy ? t('composer.placeholderBusy') : t('composer.placeholder');
 
+  // Right-click on the composer background: which controls it shows (checked = shown). Text fields keep their edit menu.
+  const hiddenControls = useHiddenComposerControls();
+  const { menuProps: controlsMenuProps, renderMenu: renderControlsMenu } = useContextMenu();
+  const controlsMenu = controlsMenuProps((): ContextMenuItem[] => [
+    ...COMPOSER_CONTROLS.map(control => ({
+      id: control, label: t(`composerControl.${control}` as MessageKey), checked: !hiddenControls.includes(control), testId: `composer-control-${control}`,
+      onSelect: () => setComposerControlHidden(control, !hiddenControls.includes(control)),
+    })),
+    ...(hiddenControls.length > 0 ? [{ id: 'show-all', label: t('composerControl.showAll'), testId: 'composer-control-show-all', onSelect: showAllComposerControls }] : []),
+  ]);
+
   return (
-    <div className="composer"
+    <div className="composer" data-hide={hiddenControls.join(' ') || undefined}
+      onContextMenu={event => {
+        if (event.target instanceof Element && event.target.closest(COMPOSER_POPUPS)) return;
+        controlsMenu.onContextMenu(event);
+        if (event.defaultPrevented) markMenuHandled(event.nativeEvent);
+      }}
+      onKeyDown={event => {
+        if (event.target instanceof Element && event.target.closest(`${COMPOSER_POPUPS}, input, textarea`)) return;
+        controlsMenu.onKeyDown(event);
+      }}
       onCompositionStartCapture={() => { basketComposing.current = true; }}
       onCompositionEndCapture={() => { basketComposing.current = false; }}
       onKeyDownCapture={event => {
@@ -746,14 +848,14 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
       <div className="context-row" role="group" aria-label={t('meter.context')} data-testid="context-row">
         <span className="context-tools">
           <button type="button" className="icon-btn" data-testid="mention" disabled={!connected || draft.composing} title={t('composer.mention')} aria-label={t('composer.mention')} onMouseDown={(event) => event.preventDefault()} onClick={insertMention}><Icon name="at" size={14} /></button>
-          <button type="button" className="icon-btn" data-testid="attach" disabled={!connected || draft.composing || !!draft.pickerRequestId} title={t('composer.attach')} aria-label={t('composer.attach')} onClick={pickFiles}><Icon name="paperclip" size={14} /></button>
           <button type="button" className="icon-btn" data-testid="slash" disabled={!connected || draft.composing} title={t('slash.title')} aria-label={t('slash.title')}
             aria-haspopup="listbox" aria-expanded={slash !== null} onMouseDown={event => event.preventDefault()} onClick={() => {
               // A toggle: a second click (or a click while the typed "/…" list is open) closes the command list.
               if (slash) { setHelpOpen(false); setSlashDismissed(draft.text); }
               else { setHelpOpen(true); setSlashDismissed(null); }
               inputRef.current?.focus();
-            }}>/</button>
+            }}><Icon name="slash" size={14} /></button>
+          <button type="button" className="icon-btn" data-testid="attach" disabled={!connected || draft.composing || !!draft.pickerRequestId} title={t('composer.attach')} aria-label={t('composer.attach')} onClick={pickFiles}><Icon name="paperclip" size={14} /></button>
           <div className="basket-anchor" ref={basketRef}>
             <button ref={basketButton} type="button" className={basketCount > 0 ? 'context-count filled' : 'context-count'} data-testid="context-chip" disabled={requestPending} title={t('composer.basket', { count: basketCount })}
               aria-label={t('composer.basket', { count: basketCount })} aria-expanded={basketOpen} onClick={event => {
@@ -764,16 +866,15 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
               <ContextBasket visible={basketOpen} files={draft.attachments} text={draft.text} includeEditorContext={includeEditorContext} onIncludeEditorContextChange={onIncludeEditorContextChange} dispatch={dispatch} locale={locale} workspaceKey={workspaceKey} sessionId={sessionId} model={model} connected={connected} disabled={requestPending || newSessionPending || draft.composing} />
             </div>
           </div>
-          <button type="button" className="icon-btn" data-testid="editor-context" aria-pressed={includeEditorContext} title={t('composer.includeContext')} aria-label={t('composer.includeContext')} onClick={() => onIncludeEditorContextChange(!includeEditorContext)}><Icon name="context" size={13} /></button>
+          <LiveEditorControls state={editorFollow} disabled={requestPending || newSessionPending || draft.composing} shortcuts={shortcuts} inputRef={inputRef} t={t} />
+          <button type="button" className="icon-btn" data-testid="editor-context" aria-pressed={includeEditorContext} title={t('composer.includeContext')} aria-label={t('composer.includeContext')} onClick={() => onIncludeEditorContextChange(!includeEditorContext)}><Icon name="context" size={14} /></button>
         </span>
         <ContextMeter session={session} basketTokens={basketTokens} workspaceKey={workspaceKey} sessionId={sessionId} includeEditorContext={includeEditorContext} attachmentPaths={attachmentPaths} connected={connected} />
       </div>
-      {draft.fileError && (
-        <div className="composer-warning" role="alert" data-testid="attachment-warning">
-          <Icon name="warning" size={12} />
-          <span>{draft.fileError}</span>
-        </div>
-      )}
+      {/* The notices are shown in the VS status bar; screen readers get them here (not drawn), and the input refers to the reason. */}
+      <div className="sr-only" id={noticeId} role="alert" data-testid="composer-notice">
+        {[failureMessage, draft.fileError, targetLost, targetError, permissionError].filter(Boolean).join(' ')}
+      </div>
       <div className="composer-field">
         {slash && <div className="mention-popup slash-popup" data-testid="slash-popup">
           <div className="mention-head">{t('slash.title')}</div>
@@ -796,7 +897,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
               {mentionTargets.length > 0 && <div className="mention-group" data-testid="mention-targets-group">{t('composer.mentionTargets')}</div>}
               {mentionTargets.map((item, index) => <button type="button" role="option" tabIndex={-1} id={`${popupId}-${index}`} key={targetKey(item.target)} data-testid={`mention-target-${item.target.kind}-${item.target.id}`}
                 aria-selected={index === mentionIndex} className={index === mentionIndex ? 'mention-option selected' : 'mention-option'} title={item.title}
-                onMouseDown={event => event.preventDefault()} onClick={() => chooseTargetMention(item.target)}><Icon name="users" size={12} /><strong>{revealControls(item.label)}</strong><span className="hint">{revealControls(item.target.id)}</span></button>)}
+                onMouseDown={event => event.preventDefault()} onClick={() => chooseTargetMention(item.target)}><span className="mention-avatar" aria-hidden="true"><DestinationAvatar kind={item.avatar.kind} id={item.avatar.id} size={14} /></span><strong>{revealControls(item.label)}</strong><span className="hint">{revealControls(item.target.id)}</span></button>)}
               {mentionTargets.length > 0 && mention.files.length > 0 && <div className="mention-group">{t('composer.mentionFiles')}</div>}
               {mention.files.map((file, index) => (
                 <button type="button" role="option" tabIndex={-1} id={`${popupId}-${index + mentionTargets.length}`} key={`${file.fullPath}:${index}`} aria-selected={index + mentionTargets.length === mentionIndex}
@@ -815,7 +916,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
         <div className="composer-input-shell">
         <textarea ref={inputRef} className="composer-input" data-testid="composer-input" data-pomp-composer="" rows={1} spellCheck={false} autoComplete="off"
           value={draft.text} disabled={!connected} placeholder={placeholder} aria-label={t('composer.input')} aria-invalid={failureMessage !== null}
-          aria-describedby={failureMessage !== null ? errorId : undefined}
+          aria-describedby={failureMessage !== null ? noticeId : undefined}
           role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded={slash !== null || mention !== null} aria-controls={slash ? slashId : mention ? popupId : undefined}
           aria-activedescendant={slash?.length ? `${slashId}-${slashIndex}` : mentionCount > 0 ? `${popupId}-${mentionIndex}` : undefined}
           onFocus={() => setInputFocused(true)} onPointerDown={discardPrediction}
@@ -861,10 +962,6 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
           <button type="button" className="btn primary composer-send-btn" data-testid="send" disabled={!canSend} title={t(busy ? 'queue.send' : 'composer.send')} aria-label={t(busy ? 'queue.send' : 'composer.send')} onClick={() => submit()}><Icon name="arrowUp" size={14} /><span className="sr-only">{t(busy ? 'queue.send' : 'composer.send')}</span></button>
         </div>
       </div>
-      {targetLost && <div className="composer-warning" role="alert" data-testid="target-lost-notice"><Icon name="warning" size={12} /><span>{revealControls(targetLost)}</span></div>}
-      {targetError && <div className="composer-error" role="alert" data-testid="target-command-error">{revealControls(targetError)}</div>}
-      {permissionError && <div className="composer-error" role="alert" data-testid="permission-mode-error">{revealControls(permissionError)}</div>}
-      {failureMessage !== null && <div className="composer-error" id={errorId} role="alert" data-testid="composer-error"><Icon name="error" size={12} /><span>{failureMessage}</span></div>}
       <div className="composer-bar">
         <div className="permission-mode-anchor" ref={permissionRef} onKeyDown={event => {
           if (event.key === 'Escape' && permissionOpen && !event.nativeEvent.isComposing && event.keyCode !== 229) {
@@ -888,7 +985,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
         {hasTargets && (
           <div className="send-target-anchor" ref={targetRef} onKeyDown={event => {
             if (event.key === 'Escape' && targetOpen && !event.nativeEvent.isComposing && event.keyCode !== 229) {
-              event.preventDefault(); event.stopPropagation(); setTargetOpen(false); targetButton.current?.focus();
+              event.preventDefault(); event.stopPropagation(); setTargetOpen(false); focusControlOrInput(targetButton.current, inputRef.current);
             }
           }}>
             <button
@@ -896,21 +993,23 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
               type="button"
               className={`chip send-target-chip${selectedTarget ? ' highlighted active' : ''}`}
               data-testid="send-target-chip"
-              disabled={!connected || draft.composing || !allowTargetOverride}
+              disabled={!connected || draft.composing}
               title={plainControls(targetTitle)}
               aria-label={plainControls(targetTitle)}
               aria-haspopup="listbox"
               aria-expanded={targetOpen}
               onClick={() => setTargetOpen(!targetOpen)}
             >
-              <Icon name="users" size={12} />
+              {chosen ? <DestinationAvatar kind={chosen.avatar.kind} id={chosen.avatar.id} size={14} /> : <Icon name="users" size={12} />}
               <span className="chip-text">{revealControls(targetLabel)}</span>
               <Icon name="chevronDown" size={11} className="chip-caret" />
             </button>
             {targetOpen && <PickerPopover placement="up" anchorRef={targetRef} id={`${popupId}-target`} testId="send-target-popover" label={t('composer.sendTargetThisChat')}
-              items={[...(matchesQuery(targetQuery, t('composer.targetPartnerOption', { name: partnerLabel })) ? [{ id: '', label: t('composer.targetPartnerOption', { name: partnerLabel }), current: !selectedTarget }] : []), ...destinations.filter(item => matchesQuery(targetQuery, item.label)).map(item => ({ ...item, id: targetKey(item.target), current: targetKey(selectedTarget) === targetKey(item.target) }))]}
-              search={destinations.length > 10 ? { value: targetQuery, onChange: setTargetQuery, placeholder: t('ui.search'), label: t('ui.search') } : undefined}
-              onChoose={item => { onSelectTarget(destinations.find(destination => targetKey(destination.target) === item.id)?.target); setTargetLost(null); setTargetOpen(false); targetButton.current?.focus(); }} />}
+              markCurrent="background"
+              items={listed.filter(item => matchesQuery(targetQuery, item.label)).map(item => ({ ...item, id: targetKey(item.target), current: item.own ? !selectedDestination : item.target === selectedDestination?.target, icon: <DestinationAvatar kind={item.avatar.kind} id={item.avatar.id} /> }))}
+              search={listed.length > 10 ? { value: targetQuery, onChange: setTargetQuery, placeholder: t('ui.search'), label: t('ui.search') } : undefined}
+              // The own row clears the one-message target: the next message continues this conversation, never a subagent run of it.
+              onChoose={item => { onSelectTarget(choices.find(entry => targetKey(entry.target) === item.id)?.target); setTargetLost(null); setTargetOpen(false); focusControlOrInput(targetButton.current, inputRef.current); }} />}
           </div>
         )}
         <ModelPickers
@@ -927,6 +1026,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
         />
       </div>
       <QuotaMeter session={session} setup={setup} replies={setupReplies} connected={connected} busy={busy} locale={locale} onManage={onManageAccounts} />
+      {renderControlsMenu()}
     </div>
   );
 }

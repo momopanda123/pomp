@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  POMP's menu icon (View > Other Windows > POMP, the editor menu's Open POMP) for the VS image service. AllowColorInversion="false":
+  the neon strokes keep their colours in a dark theme (a plain VSCT bitmap gets its luminosity inverted there, which dims them).
+  The guid and id match guidPompImages / pompIcon in Pomp.vsct; the PNG is embedded by PompImages.resx.
+-->
+<ImageManifest xmlns="http://schemas.microsoft.com/VisualStudio/ImageManifestSchema/2014">
+  <Symbols>
+    <String Name="Resources" Value="/Pomp.VisualStudio;component/Resources" />
+    <Guid Name="PompImages" Value="{6d3a9f0e-4c1b-4e8a-9b7d-2f5c8e1a0b34}" />
+    <ID Name="PompIcon" Value="1" />
+  </Symbols>
+  <Images>
+    <Image Guid="$(PompImages)" ID="$(PompIcon)" AllowColorInversion="false">
+      <Source Uri="$(Resources)/PompCommand.png">
+        <Size Value="16" />
+      </Source>
+    </Image>
+  </Images>
+  <ImageLists />
+</ImageManifest>

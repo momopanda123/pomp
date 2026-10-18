@@ -134,7 +134,7 @@ namespace Pomp.VisualStudio.Editor
                         if (closed || view.TextSnapshot != snapshot || services != PompServices.Current || !services.Settings.NativeCodeLensCaptionsEnabled || !string.Equals(root, currentRoot, StringComparison.OrdinalIgnoreCase)) return;
                         result.Text = string.IsNullOrWhiteSpace(text)
                             ? (Korean ? "요약을 받지 못했어요" : "No summary returned.")
-                            : (Korean ? "AI 요약: " : "AI summary: ") + (text.Length <= 500 ? text : text.Substring(0, 500) + "…");
+                            : (Korean ? "AI 요약: " : "AI summary: ") + (text.Length <= 500 ? text : text.Substring(0, 500));
                     }
                     catch (OperationCanceledException) { await services.JoinableTaskFactory.SwitchToMainThreadAsync(); if (!closed) result.Text = Korean ? "요약 요청이 취소되었거나 시간이 초과됐어요" : "Summary request cancelled or timed out."; }
                     catch (Exception ex) { await services.JoinableTaskFactory.SwitchToMainThreadAsync(); if (!closed) result.Text = ex.Message.Length <= 500 ? ex.Message : ex.Message.Substring(0, 500); }

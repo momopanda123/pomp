@@ -72,7 +72,7 @@ repository yet, so repository/MoreInfo URLs are omitted.
 
 ## Getting started
 
-1. Open **View > Other Windows > POMP** (also **Tools > POMP > Open POMP**, or Shift+Alt+Q).
+1. Open **View > Other Windows > POMP** (or Shift+Alt+Q).
 2. The Accounts tab opens the first time: sign in with a subscription (OpenAI, Anthropic, Muse Code,
    Google Antigravity or any other listed provider; a browser opens) or add an API key. Once connected, the dot at the top right turns green.
    **Helper model** offers Fast model / Same as the chat model / Choose a specific model for completions, ask edits, captions,
@@ -84,7 +84,7 @@ Alt+J moves focus between chat and editor; Alt+M opens Ask POMP, which asks abou
 Every key is set in Tools > Options > Pomp > General > Shortcuts.
 
 The editor's right-click menu shows **Ask POMP**, then **POMP**. The submenu groups
-code actions (Explain This Code, Review This Code, Fix This Code, Write Tests), context (Add File to Chat Context), sending to
+code actions (Explain This Code, Review This Code, Fix This Code, Write Tests), context (Add to Context Basket), sending to
 an agent or team, chat (Open POMP, New Conversation, Toggle Editor ↔ Chat Focus), then toggles (Inline Completions, Code Captions).
-Ask POMP is not repeated inside it. Shift+Alt+E/R/F/U/I run the code and context actions in a text editor. **Tools > POMP** groups chat,
-then Ask POMP, then toggles. The **View > Other Windows > POMP** entry is unchanged.
+Ask POMP is not repeated inside it. Shift+Alt+E/R/F/U/I run the code and context actions in a text editor. There is no **Tools > POMP**
+menu (everything in it was already in the editor menu or the chat window); **View > Other Windows > POMP** opens the chat window.

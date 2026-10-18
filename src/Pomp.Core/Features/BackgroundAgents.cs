@@ -299,7 +299,7 @@ namespace Pomp.Features
                         agent = (string?)job["agent"] ?? id;
                     }
                     else if (job?["control"] == null || (string?)job["control"]?["generation"] != identity) throw new InvalidOperationException(PompLanguage.Pick("작업 세대가 바뀌었어요.", "Task generation changed."));
-                    controlPending = true; controlMessage = stop ? PompLanguage.Pick("구성원 " + agent + "을(를) 멈추고 있어요…", "Stopping member " + agent + "…") : PompLanguage.Pick(action + " 요청을 보내고 있어요…", "Sending " + action + "…");
+                    controlPending = true; controlMessage = stop ? PompLanguage.Pick("구성원 " + agent + "을(를) 멈추고 있어요", "Stopping member " + agent) : PompLanguage.Pick(action + " 요청을 보내고 있어요", "Sending " + action);
                 }
                 Publish();
                 if (stop)

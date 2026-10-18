@@ -11,13 +11,14 @@ using Microsoft.VisualStudio.Utilities;
 namespace Pomp.VisualStudio.Editor
 {
     /// <summary>
-    /// The accept keys of the inline completion (Tab: all, Ctrl+Right: next word, Escape: dismiss). Visual Studio turns these keys into
-    /// editor commands (Edit.InsertTab, Edit.WordNext, Edit.SelectionCancel) before WPF key events reach the text view — in VS 2019 Tab
-    /// inserted an indent next to a visible suggestion — so they are taken from the view's command chain. A filter added here runs
-    /// before the editor's own handlers (and Roslyn's); every other command, and these when no suggestion shows, pass on unchanged.
+    /// The accept keys of the inline completion (Tab: all, Ctrl+Right: next word, Escape: dismiss), and Escape for an open Live
+    /// comparison. Visual Studio turns these keys into editor commands (Edit.InsertTab, Edit.WordNext, Edit.SelectionCancel) before WPF
+    /// key events reach the text view — in VS 2019 Tab inserted an indent next to a visible suggestion — so they are taken from the
+    /// view's command chain. A filter added here runs before the editor's own handlers (and Roslyn's); every other command, and these
+    /// when nothing of POMP shows, pass on unchanged. All text views: Live marks are shown in any text file.
     /// </summary>
     [Export(typeof(IVsTextViewCreationListener))]
-    [ContentType("code")]
+    [ContentType("text")]
     [TextViewRole(PredefinedTextViewRoles.Editable)]
     internal sealed class InlineCompletionKeys : IVsTextViewCreationListener
     {
@@ -43,6 +44,7 @@ namespace Pomp.VisualStudio.Editor
             public int Exec(ref Guid pguidCmdGroup, uint nCmdID, uint nCmdexecopt, IntPtr pvaIn, IntPtr pvaOut)
             {
                 ThreadHelper.ThrowIfNotOnUIThread();
+                if (pguidCmdGroup == VSConstants.VSStd2K && (VSConstants.VSStd2KCmdID)nCmdID == VSConstants.VSStd2KCmdID.CANCEL && LiveEditFeature.CloseComparison(view)) return VSConstants.S_OK;
                 if (pguidCmdGroup == VSConstants.VSStd2K && InlineEditorFeature.HandleEditorCommand(view, (VSConstants.VSStd2KCmdID)nCmdID)) return VSConstants.S_OK;
                 return Next?.Exec(ref pguidCmdGroup, nCmdID, nCmdexecopt, pvaIn, pvaOut) ?? (int)Constants.OLECMDERR_E_NOTSUPPORTED;
             }

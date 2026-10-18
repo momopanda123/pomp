@@ -1,7 +1,6 @@
 <Project>
   <!--
     VSIX for Visual Studio 2017 (15.9): 32-bit devenv.exe.
-    Not installable in this development environment (no VS 2017); build-verified only.
 
     All Visual Studio specific source lives in ..\Pomp.VisualStudio and is shared with the other VSIX flavours; everything
     that is identical between them is in ..\Pomp.VisualStudio\Pomp.Vsix.Common.targets. This flavour compiles against the
@@ -33,6 +32,11 @@
   <ItemGroup>
     <!-- Compile-time only: the Visual Studio SDK assemblies are provided by the IDE and must not be packaged. -->
     <PackageReference Include="Microsoft.VisualStudio.SDK" Version="15.9.3" ExcludeAssets="runtime">
+      <IncludeAssets>compile; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- Microsoft.VisualStudio.SDK 15.9.3 depends on CoreUtility 16.0.112, but VS 2017 only redirects CoreUtility up to 15.0.0.0:
+         compiled against 16.0, every PropertyCollection or [ContentType]/[Name] use fails to load in VS 2017. Pin the 15.x API. -->
+    <PackageReference Include="Microsoft.VisualStudio.CoreUtility" Version="15.8.525" ExcludeAssets="runtime" NoWarn="NU1605">
       <IncludeAssets>compile; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <!-- NuGet interfaces are supplied by Visual Studio; never ship a second runtime copy. -->

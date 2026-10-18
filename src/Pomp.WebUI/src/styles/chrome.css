@@ -240,14 +240,16 @@
 .composer-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   margin-top: 5px;
 }
 
-/* Keep the destination readable; the model controls wrap instead of reducing it to an icon. */
-.composer .composer-bar { flex-wrap: wrap; }
-.composer .composer-bar .pickers-composer { flex: 1 1 150px; min-width: min(100%, 150px); }
+/* From 300px up the bar is one row that fills the composer's width with no slack: permission from the left edge, fast at the right edge
+   (lined up with Send above and the usage refresh below), and the room left over shared by the four chips, which grow with the pane.
+   Permission, destination and thinking keep their text (a long partner name ends in an ellipsis); when room runs short only the model
+   name gives way. A pane under 300px wraps (shell.css). */
+.composer .composer-bar .pickers-composer { flex: 2 1 auto; min-width: 0; }
 
 /* Host-backed mentions and attachment drafts. */
 /* The input and its Send (and Stop while a reply runs) share one row; the buttons stay at the bottom as the input grows. */

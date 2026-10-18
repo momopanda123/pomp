@@ -76,7 +76,7 @@ namespace Pomp.Permissions
         }
 
         // The project policy, the project roles omp runs (.pomp/agents, copied into its plugin folder) and POMP's own data (.pomp/local), and what omp
-        // (18.4.3 through 18.10.4) reads from a workspace as settings, MCP servers, tools, hooks, plugins, LSP servers (also the tool folders it takes
+        // (18.4.3 through 18.12.1) reads from a workspace as settings, MCP servers, tools, hooks, plugins, LSP servers (also the tool folders it takes
         // language server programs from) and context files (whose @path includes reach outside the workspace).
         private static readonly System.Text.RegularExpressions.Regex ProtectedConfig = new System.Text.RegularExpressions.Regex(
             @"\.pomp/(?:permissions\.json|agents/|local/)|\.omp/|\.claude/(?:settings|tools/|hooks/|commands/)|\.cursor/settings|\.gemini/(?:settings|commands/)|\.codex/|\.windsurf/|\.opencode/|opencode\.jsonc?|mcp\.json|lsp\.(?:json|ya?ml)" +

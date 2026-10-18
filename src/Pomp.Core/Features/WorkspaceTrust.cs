@@ -15,7 +15,7 @@ using Pomp.Ui;
 namespace Pomp.Features
 {
     /// <summary>
-    /// Workspace trust (docs/architecture.md "작업 영역 신뢰"). omp (18.4.3 through 18.10.4) applies no project trust: from the workspace it reads settings
+    /// Workspace trust (docs/architecture.md "작업 영역 신뢰"). omp (18.4.3 through 18.12.1) applies no project trust: from the workspace it reads settings
     /// that can auto-approve tools or redirect endpoints, starts MCP servers (with the engine's environment, API keys included), imports
     /// tool code, and inlines whatever its context files include with <c>@path</c>, inside the workspace or not. POMP starts omp in a
     /// workspace that has any of these only after the user trusted exactly that set for that folder; a changed set asks again.
@@ -48,7 +48,7 @@ namespace Pomp.Features
         private static readonly string[] ExtensionFolders = { ".omp/extensions", ".omp/hooks", ".claude/hooks", ".codex/hooks", ".omp/commands", ".claude/commands", ".codex/commands", ".gemini/commands" };
 
         // Language servers omp starts on first use (editing a matching file, the lsp tool): before PATH, it takes a default server's command
-        // from the workspace's own tool folders when their marker files are in the root (omp 18.4.3, 18.8.6, 18.10.3 and 18.10.4 lsp/config.ts and lsp/defaults.json;
+        // from the workspace's own tool folders when their marker files are in the root (omp 18.4.3, 18.8.6, 18.10.3, 18.10.4 and 18.12.1 lsp/config.ts and lsp/defaults.json;
         // both tables follow the bundled engine).
         private static readonly string[] PythonMarkers = { "pyproject.toml", "ty.toml", "requirements.txt", "setup.py", "setup.cfg", "Pipfile", "pyrightconfig.json", "ruff.toml", ".ruff.toml" };
         private static readonly (string[] Markers, string Folder)[] LocalToolFolders =
@@ -126,8 +126,9 @@ namespace Pomp.Features
             ".omp/SYSTEM.md", ".omp/SYSTEM_TEMPLATE.md", ".claude/SYSTEM.md", ".codex/SYSTEM.md", ".gemini/system.md", ".agent/SYSTEM.md", ".agents/SYSTEM.md",
         };
 
-        // omp's own include syntax (discovery/at-imports.ts): "@path" at a line start or after a blank, outside code spans and fences.
-        private static readonly Regex Include = new Regex(@"(^|[ \t])@([./~A-Za-z0-9_-][^\s]*)", RegexOptions.CultureInvariant);
+        // omp's own include syntax (discovery/at-imports.ts, 18.12.1): "@path" at a line start or after a blank, outside code spans and fences;
+        // "\ " inside the path is a literal space, other whitespace ends it.
+        private static readonly Regex Include = new Regex(@"(^|[ \t])@([./~A-Za-z0-9_-](?:\\ |[^\s])*)", RegexOptions.CultureInvariant);
         private static readonly Regex TrailingPunctuation = new Regex(@"[.,;:!?)\]}""']+$", RegexOptions.CultureInvariant);
         private static readonly Regex Script = new Regex(@"\.(?:ts|js|mjs|cjs)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
@@ -432,7 +433,7 @@ namespace Pomp.Features
                 {
                     var at = match.Index + match.Groups[1].Length;
                     if (line.Take(at).Count(c => c == '`') % 2 == 1) continue; // inside an inline code span (close enough to omp's toggle)
-                    var path = TrailingPunctuation.Replace(match.Groups[2].Value, "");
+                    var path = TrailingPunctuation.Replace(match.Groups[2].Value, "").Replace("\\ ", " ");
                     if (path.Length == 0) continue;
                     string resolved;
                     try

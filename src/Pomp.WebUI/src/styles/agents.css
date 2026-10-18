@@ -94,7 +94,7 @@
   align-items: center;
   gap: 5px;
   font-size: .85rem;
-  color: var(--pomp-accent);
+  color: var(--pomp-fg);
   margin-bottom: 4px;
 }
 .run-group-id {
@@ -217,6 +217,11 @@
 .agents-avatar.missing { box-sizing: border-box; border: 1px dashed var(--pomp-warning); background: transparent; color: var(--pomp-warning); }
 .agents-avatar-stack { display: inline-flex; align-items: center; padding-left: 4px; }
 .agents-avatar-stack > .agents-avatar { margin-left: -4px; box-shadow: 0 0 0 2px var(--pomp-bg); font-size: 10px; }
+/* A destination's picture in the composer (chip, target list, @ list): small, a team's members overlapped against the surface they sit on. */
+.destination-avatar-stack > .agents-avatar { box-shadow: 0 0 0 1px var(--pomp-panel-bg); }
+.send-target-chip .destination-avatar-stack > .agents-avatar { box-shadow: 0 0 0 1px var(--pomp-bg); }
+.send-target-chip.highlighted .destination-avatar-stack > .agents-avatar { box-shadow: 0 0 0 1px var(--pomp-active-bg); }
+.mention-avatar { display: inline-flex; vertical-align: -3px; margin-right: 5px; }
 .agents-role-row.is-shadowed .agents-name-line, .agents-team-row.is-shadowed .agents-name-line, .agents-role-row.is-shadowed .agents-avatar { opacity: .65; }
 
 /* Modals & Dialogs */
@@ -472,9 +477,7 @@
 .send-target-anchor {
   position: relative;
   display: flex;
-  flex: 0 1 132px;
-  min-width: 120px;
-  max-width: 160px;
+  flex: 1 0 auto;
 }
 .send-target-chip {
   width: 100%;
@@ -577,7 +580,7 @@
   padding: 4px 6px;
   background: transparent;
   border: 0;
-  color: var(--pomp-accent);
+  color: var(--pomp-fg);
   font-size: .84rem;
   text-align: left;
   cursor: pointer;
@@ -612,7 +615,7 @@
 }
 .irc-agents {
   font-weight: 600;
-  color: var(--pomp-accent);
+  color: var(--pomp-fg);
 }
 .irc-body {
   color: var(--pomp-fg);
@@ -637,30 +640,28 @@
 .selected-member-row { flex-wrap: wrap; }
 .member-slug { min-width: 0; overflow-wrap: anywhere; }
 .transcript-limit { padding: 0 10px; }
-.composer-bar .send-target-anchor .picker-pop.up { left: 0; right: auto; width: min(240px, calc(100vw - 24px)); bottom: calc(100% + 4px); }
-.composer-bar .send-target-anchor .chip-text { min-width: 0; }
-.permission-mode-anchor { position: relative; display: flex; flex: 0 1 auto; min-width: 0; max-width: 112px; }
+.composer-bar .send-target-anchor .picker-pop.up { left: 0; right: auto; width: max-content; min-width: 120px; max-width: min(240px, calc(100vw - 24px)); bottom: calc(100% + 4px); }
+.composer-bar .send-target-anchor .chip-text { min-width: 0; max-width: 8em; }
+.permission-mode-anchor { position: relative; display: flex; flex: 1 0 auto; min-width: 0; }
 .permission-mode-chip { width: 100%; min-height: var(--pomp-bar-height); padding: 1px 4px; gap: 3px; font-size: .82em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .permission-mode-chip .icon { flex: none; width: 12px; height: 12px; }
 .permission-mode-chip .chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .permission-mode-chip.highlighted { border-color: var(--pomp-focus-border); color: var(--pomp-fg); background: var(--pomp-active-bg); }
 .permission-mode-anchor .picker-pop.up { left: 0; right: auto; width: min(200px, calc(100vw - 24px)); bottom: calc(100% + 4px); }
 .permission-mode-anchor .confirm-popover { left: 0; right: auto; width: min(260px, calc(100vw - 24px)); }
-/* The destination chip stays next to the tools. When the model controls wrap to their own row, space-between would push the chip to the far end
-   of the first row and its left-aligned list would run out of the pane. */
-.composer-bar .send-target-anchor { margin-right: auto; }
 @media (max-width: 299px) {
   .send-target-anchor { flex-basis: 100%; max-width: 100%; }
   .composer-bar .send-target-chip { width: auto; max-width: 100%; }
   .selected-member-row .member-slug { display: none; }
   .member-controls { margin-left: auto; }
 }
-@media (min-width: 300px) and (max-width: 420px) {
-  .send-target-anchor { flex-shrink: 0; }
-  .composer-bar .picker-thinking { min-width: 24px; }
+@media (min-width: 300px) and (max-width: 359px) {
+  .composer-bar .send-target-anchor .chip-text { max-width: 4.5em; }
 }
 
-.message-target-badge { font-size: .78rem; color: var(--pomp-accent); overflow-wrap: anywhere; margin-bottom: 3px; }
+/* Who a message went to: picture and name in the text colour (the accent comes from the selected document tab and can all but vanish). */
+.message-target-badge { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: .78rem; font-weight: 600; color: var(--pomp-fg); overflow-wrap: anywhere; margin-bottom: 4px; }
+.message-target-name { min-width: 0; }
 .mention-group { padding: 4px 6px; font-size: .78rem; color: var(--pomp-muted-fg); border-top: 1px solid var(--pomp-border); overflow-wrap: anywhere; }
 .team-brief-toggle { min-width: 0; overflow-wrap: anywhere; }
 .team-brief-toggle strong { min-width: 0; }
@@ -668,7 +669,7 @@
 /* Background panel compact progress */
 .job-team-badge {
   font-size: .78rem;
-  color: var(--pomp-accent);
+  color: var(--pomp-fg);
   margin-top: 2px;
 }
 .job-progress-compact {

@@ -13,10 +13,12 @@ using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Threading;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
+using Newtonsoft.Json.Linq;
 using Pomp.Diagnostics;
 using Pomp.Ui;
 using Pomp.VisualStudio.Composition;
 using Pomp.VisualStudio.Interop;
+using Pomp.VisualStudio.Options;
 using Task = System.Threading.Tasks.Task;
 
 namespace Pomp.VisualStudio.ToolWindow
@@ -98,6 +100,11 @@ namespace Pomp.VisualStudio.ToolWindow
             channel.ToggleFocusRequested += OnToggleFocusRequested;
             channel.PasteFilesRequested += OnPasteFilesRequested;
             channel.PageReady += OnPageReady;
+            channel.EditorFollowRequested += OnEditorFollowRequested;
+            channel.StatusRequested += OnStatusRequested;
+            channel.LiveFailed += OnLiveFailed;
+            channel.ObserveSession = ObserveEditorSession;
+            services.Settings.Changed += OnEditorFollowSettingsChanged;
 
             services.Session.AttachUi(channel);
             Loaded += OnLoaded;
@@ -134,6 +141,17 @@ namespace Pomp.VisualStudio.ToolWindow
 
         /// <summary>Asks the session for a fresh conversation, exactly as the page's "new session" action does.</summary>
         public void RequestNewSession() => channel.InjectFromHost(new UiMessage(UiMessageTypes.SessionNew));
+
+        /// <summary>Synchronous WPF/native focus ownership for editor operations, without a renderer round trip.</summary>
+        internal bool HasKeyboardFocus
+        {
+            get
+            {
+                ThreadHelper.ThrowIfNotOnUIThread();
+                return !disposed && IsVisible && (IsKeyboardFocusWithin || (webView != null
+                    && (webView.IsKeyboardFocusWithin || webView.IsFocused || NativeMethods.IsFocusWithin(webView.Handle))));
+            }
+        }
 
         /// <summary>True when keyboard focus is inside the chat (the WebView or the fallback panel).</summary>
         public async Task<bool> IsChatFocusedAsync()
@@ -222,11 +240,69 @@ namespace Pomp.VisualStudio.ToolWindow
 
             CancelReadyWatchdog();
             pageReadyUtc = DateTime.UtcNow;
+            PublishEditorFollowAsync().Forget(logger, "Publishing Live editor settings");
 
             if (focusWhenReady)
             {
                 focusWhenReady = false;
                 FocusChat();
+            }
+        }
+
+        private void ObserveEditorSession(UiMessage message)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            services.RefreshEditorSession();
+        }
+
+        private void OnEditorFollowSettingsChanged(object? sender, EventArgs e)
+        {
+            if (!disposed) PublishEditorFollowAsync().Forget(logger, "Publishing Live editor settings");
+        }
+
+        private Task PublishEditorFollowAsync(string? requestId = null, string? error = null)
+        {
+            var settings = services.Settings;
+            return channel.PostAsync(new UiMessage("host/editorFollow", new
+            {
+                live = settings.AppliedLiveFollowEnabled,
+                bookmarks = settings.AppliedLiveBookmarksEnabled,
+                requestId,
+                error,
+            }));
+        }
+
+        private void OnEditorFollowRequested(object? sender, UiMessage message) =>
+            services.JoinableTaskFactory.RunAsync(() => HandleEditorFollowAsync(message)).Task.Forget(logger, "Handling Live editor settings");
+
+        private async Task HandleEditorFollowAsync(UiMessage message)
+        {
+            var payload = message.Payload;
+            string? requestId = null;
+            try
+            {
+                await services.JoinableTaskFactory.SwitchToMainThreadAsync();
+                requestId = payload?["requestId"]?.Type == JTokenType.String ? (string?)payload["requestId"] : null;
+                if (payload == null || string.IsNullOrWhiteSpace(requestId))
+                    throw new ArgumentException("A Live editor request needs a requestId.");
+                var action = (string?)payload["action"];
+                if (action == "set")
+                {
+                    if (payload["live"] != null && payload["live"]!.Type != JTokenType.Boolean
+                        || payload["bookmarks"] != null && payload["bookmarks"]!.Type != JTokenType.Boolean)
+                        throw new ArgumentException("Live and bookmarks must be booleans.");
+                    if (payload["live"] == null && payload["bookmarks"] == null)
+                        throw new ArgumentException("A Live editor setting is required.");
+                    services.Settings.SetLiveEditorFeatures((bool?)payload["live"], (bool?)payload["bookmarks"]);
+                }
+                else throw new ArgumentException("Unknown Live editor action.");
+                await PublishEditorFollowAsync(requestId);
+            }
+            catch (Exception ex)
+            {
+                logger.Error("Changing Live editor settings failed.", ex);
+                try { await PublishEditorFollowAsync(requestId, ex.Message); }
+                catch (Exception postError) { logger.Error("Reporting the Live editor error failed.", postError); }
             }
         }
 
@@ -244,6 +320,11 @@ namespace Pomp.VisualStudio.ToolWindow
             channel.ToggleFocusRequested -= OnToggleFocusRequested;
             channel.PasteFilesRequested -= OnPasteFilesRequested;
             channel.PageReady -= OnPageReady;
+            channel.EditorFollowRequested -= OnEditorFollowRequested;
+            channel.StatusRequested -= OnStatusRequested;
+            channel.LiveFailed -= OnLiveFailed;
+            channel.ObserveSession = null;
+            services.Settings.Changed -= OnEditorFollowSettingsChanged;
             CancelReadyWatchdog();
 
             try
@@ -906,6 +987,60 @@ namespace Pomp.VisualStudio.ToolWindow
                     logger.Warn("Pasting files into the chat input failed.", ex);
                 }
             });
+        }
+
+        /// <summary>Longest page notice shown in the status bar (one line; the log keeps the same text).</summary>
+        private const int MaxStatusChars = 300;
+        private string? lastStatus;
+
+        /// <summary>
+        /// A notice of the page (a control action that failed, a warning about the draft) goes to the VS status bar, where VS shows its
+        /// own messages, instead of text squeezed between the chat's controls. Errors and warnings also go to the POMP log.
+        /// </summary>
+        private void OnStatusRequested(object? sender, UiMessage message)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            var payload = message.Payload;
+            if (payload?["text"]?.Type != JTokenType.String) return;
+            var level = payload["level"]?.Type == JTokenType.String ? (string?)payload["level"] : null;
+            ShowStatus((string)payload["text"]!, level);
+        }
+
+        private void OnLiveFailed(object? sender, Exception ex)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            ShowStatus(Pomp.Hosting.PompLanguage.Pick("Live 변경 표시를 갱신하지 못했어요: ", "Could not update the Live change display: ") + ex.Message, null);
+        }
+
+        /// <summary>One line, no control characters, at most <see cref="MaxStatusChars"/>; the log gets an error or warning only when it changed.</summary>
+        private void ShowStatus(string raw, string? level)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            var chars = raw.ToCharArray();
+            for (var i = 0; i < chars.Length; i++) if (char.IsControl(chars[i]) || chars[i] == '\u2028' || chars[i] == '\u2029') chars[i] = ' ';
+            var text = string.Join(" ", new string(chars).Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries));
+            if (text.Length == 0) return;
+            if (text.Length > MaxStatusChars)
+            {
+                var cut = MaxStatusChars;
+                if (char.IsHighSurrogate(text[cut - 1])) cut--;
+                text = text.Substring(0, cut);
+            }
+            if (text != lastStatus)
+            {
+                lastStatus = text;
+                if (level == "error") logger.Warn("Chat page: " + text);
+                else if (level == "warning") logger.Info("Chat page: " + text);
+            }
+            try
+            {
+                if (Package.GetGlobalService(typeof(Microsoft.VisualStudio.Shell.Interop.SVsStatusbar)) is Microsoft.VisualStudio.Shell.Interop.IVsStatusbar statusbar)
+                    statusbar.SetText("POMP: " + text);
+            }
+            catch (Exception ex)
+            {
+                logger.Warn("Showing a chat page notice in the status bar failed.", ex);
+            }
         }
 
         // ---- fallback panel --------------------------------------------------------------------------

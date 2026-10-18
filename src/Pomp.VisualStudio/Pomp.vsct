@@ -11,12 +11,6 @@
 
   <Commands package="guidPompPackage">
     <Menus>
-      <!-- Tools > POMP: chat, code prompts, then feature toggles. -->
-      <Menu guid="guidPompCmdSet" id="PompToolsMenu" priority="0x0100" type="Menu">
-        <Parent guid="guidPompCmdSet" id="PompToolsGroup" />
-        <Strings><ButtonText>POMP</ButtonText><CommandName>POMP</CommandName></Strings>
-      </Menu>
-
       <!-- Code editor context menu: Ask first, then POMP (actions, context, knowledge, agents, chat, toggles). -->
       <Menu guid="guidPompCmdSet" id="PompEditorMenu" priority="0x0300" type="Menu">
         <Parent guid="guidPompCmdSet" id="PompEditorContextGroup" />
@@ -36,21 +30,9 @@
     <Groups>
       <!--
         A group must be parented to a MENU (IDM_*). The View > Other Windows entry below is a button placed straight into the existing
-        group IDG_VS_WNDO_OTRWNDWS1 (that id is itself a group, so it cannot be the parent of a group of ours).
+        group IDG_VS_WNDO_OTRWNDWS1 (that id is itself a group, so it cannot be the parent of a group of ours). There is no Tools > POMP
+        menu: every POMP command is in the editor's right-click menu, in the chat window or (Live, bookmarks) above the chat input.
       -->
-      <Group guid="guidPompCmdSet" id="PompToolsGroup" priority="0x0700">
-        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS" />
-      </Group>
-      <Group guid="guidPompCmdSet" id="PompToolsMenuGroup" priority="0x0100">
-        <Parent guid="guidPompCmdSet" id="PompToolsMenu" />
-      </Group>
-      <Group guid="guidPompCmdSet" id="PompToolsCodeGroup" priority="0x0200">
-        <Parent guid="guidPompCmdSet" id="PompToolsMenu" />
-      </Group>
-      <Group guid="guidPompCmdSet" id="PompToolsToggleGroup" priority="0x0300">
-        <Parent guid="guidPompCmdSet" id="PompToolsMenu" />
-      </Group>
-
       <Group guid="guidPompCmdSet" id="PompEditorContextGroup" priority="0x0100">
         <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN" />
       </Group>
@@ -79,6 +61,7 @@
       <Button guid="guidPompCmdSet" id="cmdidShowChatView" priority="0x0100" type="Button">
         <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1" />
         <Icon guid="guidPompImages" id="pompIcon" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
         <Strings>
           <ButtonText>POMP</ButtonText>
           <CommandName>Pomp.ShowChatWindow</CommandName>
@@ -87,9 +70,10 @@
         </Strings>
       </Button>
 
-      <Button guid="guidPompCmdSet" id="cmdidShowChatTools" priority="0x0100" type="Button">
-        <Parent guid="guidPompCmdSet" id="PompToolsMenuGroup" />
+      <Button guid="guidPompCmdSet" id="cmdidOpenPomp" priority="0x0100" type="Button">
+        <Parent guid="guidPompCmdSet" id="PompEditorChatGroup" />
         <Icon guid="guidPompImages" id="pompIcon" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
         <CommandFlag>TextChanges</CommandFlag>
         <Strings>
           <ButtonText>Open POMP</ButtonText>
@@ -100,7 +84,7 @@
       </Button>
 
       <Button guid="guidPompCmdSet" id="cmdidNewSession" priority="0x0110" type="Button">
-        <Parent guid="guidPompCmdSet" id="PompToolsMenuGroup" />
+        <Parent guid="guidPompCmdSet" id="PompEditorChatGroup" />
         <CommandFlag>TextChanges</CommandFlag>
         <Strings>
           <ButtonText>New Conversation</ButtonText>
@@ -111,7 +95,7 @@
       </Button>
 
       <Button guid="guidPompCmdSet" id="cmdidToggleFocus" priority="0x0120" type="Button">
-        <Parent guid="guidPompCmdSet" id="PompToolsMenuGroup" />
+        <Parent guid="guidPompCmdSet" id="PompEditorChatGroup" />
         <CommandFlag>TextChanges</CommandFlag>
         <Strings>
           <ButtonText>Toggle Editor &#x2194; Chat Focus</ButtonText>
@@ -122,7 +106,7 @@
       </Button>
 
       <Button guid="guidPompCmdSet" id="cmdidInlineEdit" priority="0x0100" type="Button">
-        <Parent guid="guidPompCmdSet" id="PompToolsCodeGroup" />
+        <Parent guid="guidPompCmdSet" id="PompEditorContextGroup" />
         <CommandFlag>TextChanges</CommandFlag>
         <Strings><ButtonText>Ask POMP</ButtonText><CommandName>Pomp.InlineEdit</CommandName><CanonicalName>Pomp.InlineEdit</CanonicalName><LocCanonicalName>Pomp.InlineEdit</LocCanonicalName></Strings>
       </Button>
@@ -154,7 +138,7 @@
       <Button guid="guidPompCmdSet" id="cmdidAddFileToContext" priority="0x0100" type="Button">
         <Parent guid="guidPompCmdSet" id="PompEditorFileContextGroup" />
         <CommandFlag>TextChanges</CommandFlag>
-        <Strings><ButtonText>Add File to Chat Context</ButtonText><CommandName>Pomp.AddFileToContext</CommandName><CanonicalName>Pomp.AddFileToContext</CanonicalName><LocCanonicalName>Pomp.AddFileToContext</LocCanonicalName></Strings>
+        <Strings><ButtonText>Add to Context Basket</ButtonText><CommandName>Pomp.AddFileToContext</CommandName><CanonicalName>Pomp.AddFileToContext</CanonicalName><LocCanonicalName>Pomp.AddFileToContext</LocCanonicalName></Strings>
       </Button>
 
       <Button guid="guidPompCmdSet" id="cmdidToggleInlineCompletions" priority="0x0100" type="Button">
@@ -169,6 +153,38 @@
         <Strings><ButtonText>Code Captions</ButtonText><CommandName>Pomp.ToggleCodeCaptions</CommandName><CanonicalName>Pomp.ToggleCodeCaptions</CanonicalName><LocCanonicalName>Pomp.ToggleCodeCaptions</LocCanonicalName></Strings>
       </Button>
 
+      <!-- Live and bookmarks are switched from the chat's icons (and Alt+L / Alt+K): these commands are in no menu, only there for
+           their shortcuts (VsKeyBindings) and Tools > Options > Environment > Keyboard. -->
+      <Button guid="guidPompCmdSet" id="cmdidToggleLiveFollow" priority="0x0130" type="Button">
+        <CommandFlag>TextChanges</CommandFlag>
+        <Strings><ButtonText>Follow Live Edits</ButtonText><CommandName>Pomp.ToggleLiveFollow</CommandName><CanonicalName>Pomp.ToggleLiveFollow</CanonicalName><LocCanonicalName>Pomp.ToggleLiveFollow</LocCanonicalName></Strings>
+      </Button>
+
+      <Button guid="guidPompCmdSet" id="cmdidToggleLiveBookmarks" priority="0x0140" type="Button">
+        <CommandFlag>TextChanges</CommandFlag>
+        <Strings><ButtonText>Bookmark POMP Edits</ButtonText><CommandName>Pomp.ToggleLiveBookmarks</CommandName><CanonicalName>Pomp.ToggleLiveBookmarks</CanonicalName><LocCanonicalName>Pomp.ToggleLiveBookmarks</LocCanonicalName></Strings>
+      </Button>
+
+      <!-- Shows or hides the Live change display (never clears traces): a fixed name with a check mark while shown. -->
+      <Button guid="guidPompCmdSet" id="cmdidToggleLiveChanges" priority="0x0150" type="Button">
+        <Parent guid="guidPompCmdSet" id="PompEditorToggleGroup" />
+        <CommandFlag>TextChanges</CommandFlag>
+        <Strings><ButtonText>Show Changes</ButtonText><CommandName>Pomp.ToggleLiveChanges</CommandName><CanonicalName>Pomp.ToggleLiveChanges</CanonicalName><LocCanonicalName>Pomp.ToggleLiveChanges</LocCanonicalName></Strings>
+      </Button>
+
+      <!-- Drops the current conversation's Live change marks in every file; the code is not touched. -->
+      <Button guid="guidPompCmdSet" id="cmdidClearLiveChanges" priority="0x0155" type="Button">
+        <Parent guid="guidPompCmdSet" id="PompEditorToggleGroup" />
+        <CommandFlag>TextChanges</CommandFlag>
+        <Strings><ButtonText>Clear Changes</ButtonText><CommandName>Pomp.ClearLiveChanges</CommandName><CanonicalName>Pomp.ClearLiveChanges</CanonicalName><LocCanonicalName>Pomp.ClearLiveChanges</LocCanonicalName></Strings>
+      </Button>
+
+      <Button guid="guidPompCmdSet" id="cmdidCleanupPompBookmarks" priority="0x0160" type="Button">
+        <Parent guid="guidPompCmdSet" id="PompEditorToggleGroup" />
+        <CommandFlag>TextChanges</CommandFlag>
+        <Strings><ButtonText>Clean Up POMP Bookmarks</ButtonText><CommandName>Pomp.CleanupPompBookmarks</CommandName><CanonicalName>Pomp.CleanupPompBookmarks</CanonicalName><LocCanonicalName>Pomp.CleanupPompBookmarks</LocCanonicalName></Strings>
+      </Button>
+
       <!-- The first dynamic item; PompCommands answers ids from cmdidSendToTargetStart on (one per agent role or team, "(none)" when there is none). -->
       <Button guid="guidPompCmdSet" id="cmdidSendToTargetStart" priority="0x0100" type="Button">
         <Parent guid="guidPompCmdSet" id="PompEditorTargetItemsGroup" />
@@ -178,41 +194,14 @@
         <Strings><ButtonText>(none)</ButtonText><CommandName>Pomp.SendToTarget</CommandName><CanonicalName>Pomp.SendToTarget</CanonicalName><LocCanonicalName>Pomp.SendToTarget</LocCanonicalName></Strings>
       </Button>
 
-      <!-- POMP > Add to Knowledge, right after Add File to Chat Context: the selected lines go to the chat window's knowledge form, where the knowledge is picked or named. -->
+      <!-- POMP > Add to Knowledge, right after Add to Context Basket: the selected lines go to the chat window's knowledge form, where the knowledge is picked or named. -->
       <Button guid="guidPompCmdSet" id="cmdidKnowledgeTag" priority="0x0200" type="Button">
         <Parent guid="guidPompCmdSet" id="PompEditorFileContextGroup" />
         <CommandFlag>TextChanges</CommandFlag>
         <Strings><ButtonText>Add to Knowledge</ButtonText><CommandName>Pomp.KnowledgeTag</CommandName><CanonicalName>Pomp.KnowledgeTag</CanonicalName><LocCanonicalName>Pomp.KnowledgeTag</LocCanonicalName></Strings>
       </Button>
     </Buttons>
-
-    <!-- The POMP icon (the user's image at 16 px) for View > Other Windows > POMP and Tools > POMP > Open POMP. -->
-    <Bitmaps>
-      <Bitmap guid="guidPompImages" href="Resources\PompCommand.png" usedList="pompIcon" />
-    </Bitmaps>
   </Commands>
-
-  <!-- One command in multiple places: one shortcut, one checked state. The question prompt stays outside the POMP submenu. -->
-  <CommandPlacements>
-    <CommandPlacement guid="guidPompCmdSet" id="cmdidInlineEdit" priority="0x0100">
-      <Parent guid="guidPompCmdSet" id="PompEditorContextGroup" />
-    </CommandPlacement>
-    <CommandPlacement guid="guidPompCmdSet" id="cmdidShowChatTools" priority="0x0100">
-      <Parent guid="guidPompCmdSet" id="PompEditorChatGroup" />
-    </CommandPlacement>
-    <CommandPlacement guid="guidPompCmdSet" id="cmdidNewSession" priority="0x0110">
-      <Parent guid="guidPompCmdSet" id="PompEditorChatGroup" />
-    </CommandPlacement>
-    <CommandPlacement guid="guidPompCmdSet" id="cmdidToggleFocus" priority="0x0120">
-      <Parent guid="guidPompCmdSet" id="PompEditorChatGroup" />
-    </CommandPlacement>
-    <CommandPlacement guid="guidPompCmdSet" id="cmdidToggleInlineCompletions" priority="0x0100">
-      <Parent guid="guidPompCmdSet" id="PompToolsToggleGroup" />
-    </CommandPlacement>
-    <CommandPlacement guid="guidPompCmdSet" id="cmdidToggleCodeCaptions" priority="0x0110">
-      <Parent guid="guidPompCmdSet" id="PompToolsToggleGroup" />
-    </CommandPlacement>
-  </CommandPlacements>
 
   <!--
     docs/architecture.md section 7. VS silently drops an extension binding that is already taken in the same scope.
@@ -231,10 +220,6 @@
     <GuidSymbol name="guidTextEditorScope" value="{8B382828-6202-11d1-8870-0000F87579D2}" />
 
     <GuidSymbol name="guidPompCmdSet" value="{c5eb69b1-9b4c-4566-b74f-30adaf961614}">
-      <IDSymbol name="PompToolsGroup" value="0x1020" />
-      <IDSymbol name="PompToolsMenuGroup" value="0x1021" />
-      <IDSymbol name="PompToolsToggleGroup" value="0x1022" />
-      <IDSymbol name="PompToolsCodeGroup" value="0x1023" />
       <IDSymbol name="PompEditorContextGroup" value="0x1030" />
       <IDSymbol name="PompEditorCodeGroup" value="0x1031" />
       <IDSymbol name="PompEditorToggleGroup" value="0x1032" />
@@ -242,11 +227,10 @@
       <IDSymbol name="PompEditorFileContextGroup" value="0x1034" />
       <IDSymbol name="PompEditorTargetGroup" value="0x1035" />
       <IDSymbol name="PompEditorTargetItemsGroup" value="0x1036" />
-      <IDSymbol name="PompToolsMenu" value="0x1100" />
       <IDSymbol name="PompEditorMenu" value="0x1101" />
       <IDSymbol name="PompEditorTargetMenu" value="0x1102" />
       <IDSymbol name="cmdidShowChatView" value="0x0100" />
-      <IDSymbol name="cmdidShowChatTools" value="0x0101" />
+      <IDSymbol name="cmdidOpenPomp" value="0x0101" />
       <IDSymbol name="cmdidNewSession" value="0x0102" />
       <IDSymbol name="cmdidToggleFocus" value="0x0103" />
       <IDSymbol name="cmdidInlineEdit" value="0x0104" />
@@ -258,9 +242,15 @@
       <IDSymbol name="cmdidFixCode" value="0x010B" />
       <IDSymbol name="cmdidWriteTests" value="0x010C" />
       <IDSymbol name="cmdidKnowledgeTag" value="0x010E" />
+      <IDSymbol name="cmdidToggleLiveFollow" value="0x0110" />
+      <IDSymbol name="cmdidToggleLiveBookmarks" value="0x0111" />
+      <IDSymbol name="cmdidToggleLiveChanges" value="0x0112" />
+      <IDSymbol name="cmdidCleanupPompBookmarks" value="0x0113" />
+      <IDSymbol name="cmdidClearLiveChanges" value="0x0114" />
       <IDSymbol name="cmdidSendToTargetStart" value="0x2000" />
     </GuidSymbol>
 
+    <!-- The POMP menu icon: an image-service moniker defined by Resources\Pomp.imagemanifest (no colour inversion in dark themes). -->
     <GuidSymbol name="guidPompImages" value="{6d3a9f0e-4c1b-4e8a-9b7d-2f5c8e1a0b34}">
       <IDSymbol name="pompIcon" value="1" />
     </GuidSymbol>

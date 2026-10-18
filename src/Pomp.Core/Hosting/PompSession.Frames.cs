@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using Pomp.Bridge;
 using Pomp.Diagnostics;
+using Pomp.Features;
 using Pomp.Internal;
 using Pomp.Json;
 using Pomp.Permissions;
@@ -209,6 +210,9 @@ namespace Pomp.Hosting
                 case "thinking_delta":
                     kind = "thinking";
                     break;
+                case "thinking_end":
+                    PostNarration(messageId, update);
+                    return;
                 default:
                     return;
             }
@@ -290,7 +294,8 @@ namespace Pomp.Hosting
                     if (type == "thinking")
                     {
                         text = block.GetString("thinking") ?? block.GetString("text");
-                        kind = "thinking";
+                        // Narration (prose addressed to the user, sent as thinking) shows as answer text.
+                        kind = block.IsNarration() ? "text" : "thinking";
                     }
                     else if (type == "text")
                     {
@@ -312,6 +317,26 @@ namespace Pomp.Hosting
             {
                 _ui.Post(UiMessageTypes.ChatAssistantDelta, new ChatAssistantDeltaPayload { MessageId = messageId, Kind = "text", Delta = (string)value! });
             }
+        }
+
+        /// <summary>
+        /// omp 18.12+ marks a thinking block that is prose the model addressed to the user (Anthropic narration) on its closed form only:
+        /// once that block ends, the page moves what it streamed as thinking to the answer text.
+        /// </summary>
+        private void PostNarration(string? messageId, JObject? update)
+        {
+            var index = update.GetLong("contentIndex");
+            var content = update.GetString("content");
+            if (messageId == null || index == null || string.IsNullOrEmpty(content)) return;
+            var blocks = update.GetObject("partial").GetArray("content");
+            if (blocks == null || index < 0 || index >= blocks.Count || !blocks[(int)index.Value].IsNarration()) return;
+            lock (_stateLock)
+            {
+                // Nothing streamed yet: the finished message is delivered whole, narration already as text (PostFinalContent).
+                if (!_assistantMessages.TryGetValue(messageId, out var state) || !state.SawDelta) return;
+            }
+
+            _ui.Post(UiMessageTypes.ChatAssistantNarration, new ChatAssistantNarrationPayload { MessageId = messageId, Text = content! });
         }
 
         /// <summary>
@@ -341,7 +366,7 @@ namespace Pomp.Hosting
                 {
                     Advisor = advisor.Length > 200 ? advisor.Substring(0, 200) : advisor,
                     Severity = severity == null ? null : severity.Length > 32 ? severity.Substring(0, 32) : severity,
-                    Note = note!.Length > 8000 ? note.Substring(0, 8000) + "…" : note,
+                    Note = note!.Length > 8000 ? note.Substring(0, 8000) : note,
                 });
             }
             return payload;
@@ -685,7 +710,7 @@ namespace Pomp.Hosting
             if (!streaming) ScheduleQueueDispatch();
         }
 
-        private static string LimitPlanText(string text, int limit) => text.Length <= limit ? text : text.Substring(0, limit) + "…";
+        private static string LimitPlanText(string text, int limit) => text.Length <= limit ? text : text.Substring(0, limit);
 
         /// <summary>
         /// Applies a <c>get_state</c> payload and posts <c>session/info</c> when something changed; false when it was not applied.
@@ -1057,6 +1082,31 @@ namespace Pomp.Hosting
             }
 
             _ui.Post(UiMessageTypes.ChatNotice, new ChatNoticePayload { Level = level, Message = message, Format = format });
+        }
+
+        /// <summary>Tells the user what happened to a <c>.pomp</c> that was recorded for another workspace root.</summary>
+        private void ReportWorkspaceOrigin(WorkspaceOrigin.Outcome origin)
+        {
+            if (origin.Change == WorkspaceOrigin.Change.None) return;
+            var from = origin.From ?? string.Empty;
+            if (origin.Change == WorkspaceOrigin.Change.Moved)
+            {
+                _logger.Info("POMP data moved from " + from + "; paths were rewritten.");
+                PostNotice("info", PompLanguage.Pick("작업 영역이 " + from + "에서 옮겨져, POMP 기록의 경로를 새 위치로 고쳤어요.",
+                    "This workspace moved from " + from + "; POMP's records now point at the new location."));
+                if (origin.Quarantine != null && !origin.Recycled)
+                    PostNotice("warning", PompLanguage.Pick("이전 위치의 격리 작업 사본을 휴지통으로 옮기지 못해 " + origin.Quarantine + "에 모아 두었어요. 필요 없으면 지워도 돼요.",
+                        "The isolation copies of the old location could not be recycled; they are gathered in " + origin.Quarantine + ". You can delete it."));
+                return;
+            }
+            _logger.Info("POMP data copied from " + from + "; its records were " + (origin.Recycled ? "recycled." : "gathered in " + origin.Quarantine + "."));
+            PostNotice("info", origin.Quarantine == null
+                ? PompLanguage.Pick(from + "에서 복사한 POMP 설정을 이 작업 영역에서 쓰도록 맞췄어요.", "The POMP settings copied from " + from + " now belong to this workspace.")
+                : origin.Recycled
+                    ? PompLanguage.Pick(from + "에서 복사한 POMP 데이터에서 그쪽 대화·작업 기록은 휴지통으로 옮기고, 에이전트·규칙·지식 같은 설정은 그대로 쓰도록 맞췄어요.",
+                        "The POMP data copied from " + from + " keeps its settings (agents, rules, knowledge and the rest); its conversations and work records went to the Recycle Bin.")
+                    : PompLanguage.Pick(from + "에서 복사한 POMP 데이터의 대화·작업 기록을 휴지통으로 옮기지 못해 " + origin.Quarantine + "에 모아 두었어요(설정은 그대로). 필요 없으면 지워도 돼요.",
+                        "The conversations and work records copied from " + from + " could not be recycled; they are gathered in " + origin.Quarantine + " (settings kept). You can delete it."));
         }
 
         private static readonly System.Text.RegularExpressions.Regex TerminalEscape = new System.Text.RegularExpressions.Regex(

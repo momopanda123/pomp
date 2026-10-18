@@ -199,12 +199,12 @@ namespace Pomp.Tools
             GitCommandResult result;
             if (options.Action == "commit")
             {
-                ReportProgress(invocation, "Creating Git commit...");
+                ReportProgress(invocation, "Creating Git commit");
                 result = await Adapters.Git.CommitAsync(new GitCommitRequest { Message = options.Message!, Paths = commitPaths, StageAll = options.All }, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                ReportProgress(invocation, "Pushing Git branch...");
+                ReportProgress(invocation, "Pushing Git branch");
                 result = await Adapters.Git.PushAsync(new GitPushRequest { Remote = options.Remote, Branch = options.Branch, SetUpstream = options.SetUpstream }, cancellationToken).ConfigureAwait(false);
             }
 

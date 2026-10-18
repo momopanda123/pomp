@@ -49,6 +49,7 @@ namespace Pomp.Ui
         public const string ChatTurnStarted = "chat/turnStarted";
         public const string ChatAssistantStart = "chat/assistantStart";
         public const string ChatAssistantDelta = "chat/assistantDelta";
+        public const string ChatAssistantNarration = "chat/assistantNarration";
         public const string ChatAssistantEnd = "chat/assistantEnd";
         public const string ChatToolStart = "chat/toolStart";
         public const string ChatToolUpdate = "chat/toolUpdate";
@@ -267,6 +268,12 @@ namespace Pomp.Ui
         /// <summary>Turns "include editor context" on or off.</summary>
         public string EditorContext { get; set; } = "Alt+'";
 
+        /// <summary>Toggles host-only Live edit following without submitting a prompt.</summary>
+        public string LiveFollow { get; set; } = "Alt+L";
+
+        /// <summary>Toggles POMP edit bookmarks without submitting a prompt.</summary>
+        public string LiveBookmarks { get; set; } = "Alt+K";
+
         /// <summary>Opens the composer's permission-mode picker.</summary>
         public string PermissionMode { get; set; } = "Alt+Q";
 
@@ -312,6 +319,10 @@ namespace Pomp.Ui
         public string KnowledgeTag { get; set; } = "Alt+/";
 
         public string ToggleFocus { get; set; } = "Alt+J";
+
+        public string LiveFollow { get; set; } = "Alt+L";
+
+        public string LiveBookmarks { get; set; } = "Alt+K";
     }
 
     /// <summary>
@@ -589,6 +600,12 @@ namespace Pomp.Ui
 
         /// <summary>True when POMP itself answered (no team, agent or instance), so a retry keeps that destination after a partner change.</summary>
         public bool? Main { get; set; }
+
+        /// <summary>
+        /// The agent or team tab the message was sent from when it went to another target (<see cref="ChatSendPayload.From"/>), so the
+        /// sending tab keeps it after a replay or a restored transcript. Null for a message sent to the tab's own partner or from Default.
+        /// </summary>
+        public ConversationPartnerPayload? From { get; set; }
     }
 
     public sealed class ChatAssistantStartPayload
@@ -604,6 +621,17 @@ namespace Pomp.Ui
         public string Kind { get; set; } = "text";
 
         public string Delta { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// The thinking block just streamed for <see cref="MessageId"/> was narration (omp 18.12+: prose the model addressed to the user
+    /// that the provider returned as thinking): the page moves <see cref="Text"/>, the end of that message's thinking, to its answer text.
+    /// </summary>
+    public sealed class ChatAssistantNarrationPayload
+    {
+        public string MessageId { get; set; } = string.Empty;
+
+        public string Text { get; set; } = string.Empty;
     }
 
     public sealed class ChatAssistantEndPayload
@@ -782,6 +810,13 @@ namespace Pomp.Ui
         /// the main conversation (work plan, code review, editor menu) and by retries of messages POMP answered. Excludes the targets above.
         /// </summary>
         public bool? Main { get; set; }
+
+        /// <summary>
+        /// The agent or team tab (kind <c>agent</c>/<c>team</c>, a valid role or team name) this message was sent from when it goes to a
+        /// different target, so that tab keeps showing it after the conversation is restored. View only: it never changes where the
+        /// message goes. Anything else is ignored.
+        /// </summary>
+        public ConversationPartnerPayload? From { get; set; }
     }
 
     /// <summary>workspace/findFiles: workspace files whose path contains <see cref="Query"/> (the @-mention list).</summary>

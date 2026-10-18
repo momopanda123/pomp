@@ -122,7 +122,7 @@ namespace Pomp.VisualStudio.Adapters
                     }
 
                     // The contract says an edit target that is not open gets opened in the editor first.
-                    EditorAdapter.OpenDocumentOnUiThread(context, fullPath, null);
+                    OpenEditTarget(fullPath);
                     buffer = DocumentTable.TryGetTextBuffer(context, fullPath);
                     if (buffer == null)
                     {
@@ -131,7 +131,11 @@ namespace Pomp.VisualStudio.Adapters
                 }
 
                 // Check-and-apply happens in one synchronous block on the UI thread: nothing can edit the buffer in between.
-                return Apply(buffer, request);
+                var before = buffer.CurrentSnapshot;
+                var result = Apply(buffer, request);
+                if (result.Applied && string.IsNullOrEmpty(result.Error))
+                    NotifyApplied(fullPath, buffer, before);
+                return result;
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
@@ -378,6 +382,38 @@ namespace Pomp.VisualStudio.Adapters
 
             var newText = buffer.CurrentSnapshot.GetText();
             return new BufferEditResult { Applied = true, NewContentHash = TextContent.ComputeHash(newText) };
+        }
+
+        private void NotifyApplied(string path, ITextBuffer buffer, ITextSnapshot before)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (ReferenceEquals(before, buffer.CurrentSnapshot)) return;
+            try
+            {
+                var services = Composition.PompServices.Current;
+                if (services == null || (!services.Settings.AppliedLiveFollowEnabled && !services.Settings.AppliedLiveBookmarksEnabled)) return;
+                services.RefreshEditorSession();
+                services.EditorFollow.Record(path, buffer, before, buffer.CurrentSnapshot);
+            }
+            catch (Exception ex)
+            {
+                // An editor decoration failure cannot turn an already committed edit into a failed tool result.
+                context.LogUnexpected("Following the applied edit of '" + path + "'", ex);
+                if (Package.GetGlobalService(typeof(Microsoft.VisualStudio.Shell.Interop.SVsStatusbar)) is Microsoft.VisualStudio.Shell.Interop.IVsStatusbar status)
+                    status.SetText(Pomp.Hosting.PompLanguage.Pick("POMP: 수정은 적용했지만 Live·책갈피 표시를 갱신하지 못했어요: ", "POMP: the edit was applied, but its Live/Bookmark display failed: ") + ex.Message);
+            }
+        }
+
+        private void OpenEditTarget(string path)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            var settings = Composition.PompServices.Current?.Settings;
+            // Live keeps the chat focused: open without activation, but as a visible tab, so an edited file never sits in a hidden
+            // frame when the follow is skipped (the user is busy in an editor) or superseded by a later edit.
+            if (settings?.AppliedLiveFollowEnabled == true || settings?.AppliedLiveBookmarksEnabled == true)
+                Editor.EditorFollowService.OpenDocumentNoActivate(context, path, show: true);
+            else
+                EditorAdapter.OpenDocumentOnUiThread(context, path, null);
         }
 
         /// <summary>Whether <paramref name="buffer"/> moved past <paramref name="before"/> (only this synchronous UI-thread edit can have done it).</summary>

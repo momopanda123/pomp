@@ -13,6 +13,8 @@
   border: 1px solid var(--pomp-border);
   border-radius: var(--pomp-radius);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
 
 .context-menu-item {
@@ -33,4 +35,18 @@
   background: var(--pomp-hover-bg);
   outline: 1px solid var(--pomp-focus-border);
   outline-offset: -1px;
+}
+
+/* Show/hide choices: a fixed check column so the labels line up whether checked or not. */
+.context-menu-item.checkable {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-block: 4px;
+}
+
+.context-menu-check {
+  flex: none;
+  width: 1em;
+  text-align: center;
 }

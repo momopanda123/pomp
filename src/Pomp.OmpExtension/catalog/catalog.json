@@ -503,6 +503,25 @@
       "defaultEnabled": false
     },
     {
+      "id": "drawio",
+      "kind": "skill",
+      "title": "draw.io diagrams linked to code",
+      "titleKo": "코드와 연결된 draw.io 다이어그램",
+      "description": "Draw chosen parts of the project as editable draw.io diagrams linked to the code, and apply the user's diagram edits back to the code.",
+      "descriptionKo": "프로젝트의 원하는 부분을 코드와 연결된 draw.io 다이어그램으로 그리고, 사용자가 다이어그램을 고치면 그 변경을 코드에 반영한다.",
+      "category": "design",
+      "version": "1.0.0",
+      "publisher": "POMP",
+      "license": "PolyForm-Noncommercial-1.0.0",
+      "scopes": [
+        "project",
+        "user"
+      ],
+      "requires": [],
+      "needs": [],
+      "defaultEnabled": false
+    },
+    {
       "id": "github",
       "kind": "mcp",
       "title": "GitHub",

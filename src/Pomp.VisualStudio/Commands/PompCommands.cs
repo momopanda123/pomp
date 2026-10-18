@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.Design;
+using System.Linq;
 using System.Threading;
 using Microsoft.VisualStudio.Shell;
 using Pomp.Diagnostics;
@@ -26,7 +27,7 @@ namespace Pomp.VisualStudio.Commands
 
             var actions = services.Commands;
             Register(commandService, services, PompCommandIds.ShowChatView, "Show chat", () => actions.ShowChatAsync(focus: true));
-            Register(commandService, services, PompCommandIds.ShowChatTools, "Show chat", () => actions.ShowChatAsync(focus: true), ("POMP 열기", "Open POMP"));
+            Register(commandService, services, PompCommandIds.OpenPomp, "Show chat", () => actions.ShowChatAsync(focus: true), ("POMP 열기", "Open POMP"));
             Register(commandService, services, PompCommandIds.NewSession, "New session", () => actions.NewSessionAsync(), ("새 대화", "New Conversation"));
             Register(commandService, services, PompCommandIds.InlineEdit, "Ask POMP", () => actions.ShowInlineEditAsync(), ("POMP에게 질문", "Ask POMP"));
             Register(commandService, services, PompCommandIds.ToggleFocus, "Toggle focus", () => actions.ToggleFocusAsync(), ("에디터 ↔ 채팅 포커스 전환", "Toggle Editor ↔ Chat Focus"));
@@ -34,7 +35,7 @@ namespace Pomp.VisualStudio.Commands
             Register(commandService, services, PompCommandIds.ReviewCode, "Review code", () => actions.ReviewCodeAsync(), ("이 코드 리뷰", "Review This Code"));
             Register(commandService, services, PompCommandIds.FixCode, "Fix code", () => actions.FixCodeAsync(), ("이 코드 고치기", "Fix This Code"));
             Register(commandService, services, PompCommandIds.WriteTests, "Write tests", () => actions.WriteTestsAsync(), ("테스트 작성", "Write Tests"));
-            Register(commandService, services, PompCommandIds.AddFileToContext, "Add file to context", () => actions.AddFileToContextAsync(), ("파일을 채팅 컨텍스트에 추가", "Add File to Chat Context"));
+            Register(commandService, services, PompCommandIds.AddFileToContext, "Add file to context", () => actions.AddFileToContextAsync(), ("컨텍스트 바구니에 추가", "Add to Context Basket"));
             // The selected lines open the chat window's knowledge form, where the knowledge is picked by name or named.
             Register(commandService, services, PompCommandIds.KnowledgeTag, "Add to knowledge", () => actions.AddToKnowledgeAsync(),
                 ("지식에 추가", "Add to Knowledge"), isEnabled: () => services.KnowledgeEditor != null);
@@ -42,15 +43,26 @@ namespace Pomp.VisualStudio.Commands
                 ("인라인 자동완성", "Inline Completions"), () => services.Settings.InlineCompletionsEnabled);
             Register(commandService, services, PompCommandIds.ToggleCodeCaptions, "Toggle code captions", () => actions.ToggleCodeCaptionsAsync(),
                 ("코드 캡션", "Code Captions"), () => services.Settings.CodeCaptionsEnabled);
+            Register(commandService, services, PompCommandIds.ToggleLiveFollow, "Toggle Live edit following", () => actions.ToggleLiveFollowAsync(),
+                ("Live 변경 따라가기", "Follow Live Edits"), () => services.Settings.AppliedLiveFollowEnabled);
+            Register(commandService, services, PompCommandIds.ToggleLiveBookmarks, "Toggle POMP bookmarks", () => actions.ToggleLiveBookmarksAsync(),
+                ("POMP 변경 북마크", "Bookmark POMP Edits"), () => services.Settings.AppliedLiveBookmarksEnabled);
+            Register(commandService, services, PompCommandIds.ToggleLiveChanges, "Toggle Live changes", () => actions.ToggleLiveChangesAsync(),
+                ("변경 내용 표시", "Show Changes"), () => services.Settings.AppliedLiveChangesVisible);
+            Register(commandService, services, PompCommandIds.ClearLiveChanges, "Clear Live changes", () => actions.ClearLiveChangesAsync(),
+                ("변경 내용 지우기", "Clear Changes"));
+            Register(commandService, services, PompCommandIds.CleanupPompBookmarks, "Clean up POMP bookmarks", () => actions.CleanupPompBookmarksAsync(),
+                ("POMP 책갈피 정리", "Clean up POMP bookmarks"));
             // The command keys come from Tools > Options > Pomp > Shortcuts (applied now and after every options apply).
             VsKeyBindings.Install(package, services);
             RegisterSendToTargets(commandService, services, actions);
         }
 
         /// <summary>
-        /// POMP > To Agent or Team in the code editor: one dynamic item per usable agent role and team of the workspace (the roster is read
-        /// when the first item is queried, i.e. each time the submenu opens); choosing one fills the chat input with that send target and the
-        /// editor context. "(none)" when the workspace has neither.
+        /// POMP > To Agent or Team in the code editor. A small roster (up to <see cref="MenuItems"/>) is listed whole; a larger one lists
+        /// only the agents and teams sent to recently in this workspace and ends in "Find agent or team", which opens the chat's
+        /// send-target picker (searchable). The roster is read each time the submenu opens; choosing an entry fills the chat input with that
+        /// send target and the editor context. "(none)" when the workspace has neither.
         /// </summary>
         private static void RegisterSendToTargets(OleMenuCommandService commandService, PompServices services, PompCommandActions actions)
         {
@@ -65,9 +77,11 @@ namespace Pomp.VisualStudio.Commands
             var targets = new System.Collections.Generic.List<EditorSendTarget>();
             DynamicItemCommand? command = null;
             int Index() => command!.MatchedCommandId == 0 ? 0 : command.MatchedCommandId - PompCommandIds.SendToTargetStart;
-            // The menu shows at most MenuItems entries; past that the last one is "show all" (the chat's target picker has every entry).
-            bool ShowAll(int index) => targets.Count > MenuItems && index == MenuItems - 1;
-            command = new DynamicItemCommand(PompCommandIds.SendToTargetStart, () => Math.Max(1, Math.Min(targets.Count, MenuItems)), (sender, args) =>
+            // A large roster: the recent entries, then the "find" entry last (always, so the whole roster is one step away).
+            var large = false;
+            int Shown() => large ? targets.Count + 1 : Math.Max(1, targets.Count);
+            bool ShowAll(int index) => large && index == targets.Count;
+            command = new DynamicItemCommand(PompCommandIds.SendToTargetStart, Shown, (sender, args) =>
             {
                 ThreadHelper.ThrowIfNotOnUIThread();
                 var index = Index();
@@ -88,25 +102,33 @@ namespace Pomp.VisualStudio.Commands
                 var index = Index();
                 if (index == 0)
                 {
-                    targets.Clear();
-                    try { if (services.Session is PompSession session) targets.AddRange(session.ListEditorSendTargets()); }
+                    targets.Clear(); large = false;
+                    try
+                    {
+                        if (services.Session is PompSession session)
+                        {
+                            var all = session.ListEditorSendTargets(MenuItems - 1);
+                            large = all.Count > MenuItems;
+                            targets.AddRange(large ? all.Where(target => target.Recent) : all);
+                        }
+                    }
                     catch (Exception ex) { services.Logger.Debug("Reading the agent roster for the editor menu failed: " + ex.Message); }
                 }
                 var showAll = ShowAll(index);
                 var target = !showAll && index < targets.Count ? targets[index] : null;
                 command!.Visible = index == 0 || target != null || showAll;
                 command.Enabled = target != null || showAll;
-                command.Text = showAll ? PompLanguage.Pick("모두 보기", "Show all") : MenuText(target != null ? target.Title : PompLanguage.Pick("(없음)", "(none)"));
+                command.Text = showAll ? PompLanguage.Pick("에이전트·팀 찾기", "Find Agent or Team") : MenuText(target != null ? target.Title : PompLanguage.Pick("(없음)", "(none)"));
                 command.MatchedCommandId = 0;
             };
             commandService.AddCommand(command);
         }
 
         /// <summary>
-        /// The most entries the editor's target submenu shows, so it never needs scrolling (2026-10-15, user decision; VS itself draws at most
-        /// 100 dynamic items). A larger roster shows the first ones and "show all", which opens the chat's send-target picker.
+        /// A roster up to this size is listed whole in the editor's target submenu; a larger one lists at most this many minus one recent
+        /// entries plus "Find agent or team" (the chat's searchable picker), so the submenu stays short whatever the roster's size.
         /// </summary>
-        private const int MenuItems = 15;
+        private const int MenuItems = 8;
 
         /// <summary>A roster title as menu text: control characters become spaces and '&amp;' is doubled so VS does not read it as a mnemonic.</summary>
         private static string MenuText(string title)

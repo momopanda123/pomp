@@ -38,6 +38,11 @@ namespace Pomp.Features
                 return state;
             }
         }
+        /// <summary>The run targets, newest run first (repeats included); no view budget, so cheaper than <see cref="View"/>.</summary>
+        public List<AgentRunTargetPayload> Targets()
+        {
+            lock (Gate) return Read().Entries.Select(e => e.Target).ToList();
+        }
         public string Begin(string sessionId, AgentRunTargetPayload target, string text, string? promptId = null)
         {
             lock (Gate)

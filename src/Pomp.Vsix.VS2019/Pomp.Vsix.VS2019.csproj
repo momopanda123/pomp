@@ -1,7 +1,6 @@
 <Project>
   <!--
     VSIX for Visual Studio 2019 (16.10 - 16.11): 32-bit devenv.exe.
-    Not installable in this development environment (no VS 2019); build-verified only.
 
     All Visual Studio specific source lives in ..\Pomp.VisualStudio and is shared with the VS 2022 VSIX; everything
     that is identical between the two flavours is in ..\Pomp.VisualStudio\Pomp.Vsix.Common.targets.

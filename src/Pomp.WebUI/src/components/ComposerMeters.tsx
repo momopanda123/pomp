@@ -576,6 +576,8 @@ function FastToggleView({ fast, connected }: { fast: FastMode | undefined; conne
           ? t('fast.on')
           : `${t('fast.on')}\n${t('fast.requested')}`
         : t('fast.off');
+  // Unavailable stays hoverable (aria-disabled, not disabled) so its tooltip can say why; WebView2 shows no tooltip on a disabled button.
+  const inactive = !connected || !available || pending !== null;
   return (
     <button
       type="button"
@@ -583,9 +585,10 @@ function FastToggleView({ fast, connected }: { fast: FastMode | undefined; conne
       data-testid="fast-toggle"
       aria-pressed={enabled}
       aria-label={t('fast.label')}
+      aria-disabled={inactive}
       title={plainControls(title)}
-      disabled={!connected || !available || pending !== null}
       onClick={() => {
+        if (inactive) return;
         const requestId = newId();
         setError(null);
         if (send('session/fast', { requestId, enabled: !enabled })) setPending(requestId);
