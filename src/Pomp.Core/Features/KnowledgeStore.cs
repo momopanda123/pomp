@@ -10,20 +10,23 @@ using Pomp.Internal;
 namespace Pomp.Features
 {
     /// <summary>
-    /// The unified knowledge of one workspace, kept in its <c>.pomp/local/knowledge.json</c> (not committed): each knowledge is a
-    /// user tag (a name and a color) holding pieces of text, used as written (<c>original</c>) or as an editor-model summary
-    /// (<c>optimized</c>). Roles and teams check the knowledge they always get; the conversation selects its own.
+    /// The knowledge a workspace can use, from two files listed as one: <c>project</c> knowledge in the workspace's
+    /// <c>.pomp/knowledge.json</c> (committed, so the project's people share it) and <c>user</c> knowledge in the user's own
+    /// <c>~/.pomp/knowledge.json</c> (this PC, every project). Each knowledge is a user tag (a name and a color) holding pieces of
+    /// text, used as written (<c>original</c>) or as an editor-model summary (<c>optimized</c>). A knowledge reaches a model when the
+    /// conversation selects it, when a role or team it is checked for works, or in every conversation when it is a default.
     /// A model can only add <c>candidate</c> pieces; the user accepts, edits or deletes them. Duplicates (same normalized
     /// text and anchor path as another saved piece) are kept only once. Nothing is evicted silently, and a malformed file
     /// fails closed (mutations throw and never overwrite it). Pieces stay in the order they were added; knowledge newest first.
     /// </summary>
     internal sealed class KnowledgeStore
     {
-        /// <summary>The whole store's size: knowledge, pieces and candidates have no count limit of their own.</summary>
+        /// <summary>Each file's size: knowledge, pieces and candidates have no count limit of their own.</summary>
         internal const int MaxBytes = 4 * 1024 * 1024;
         internal const int MaxNameChars = 40;
         internal const int MaxPieceChars = 8000;
         internal const int MaxOptimizedChars = 16000;
+        internal const string FileName = "knowledge.json";
 
         /// <summary>Distinct hues a new knowledge takes in turn (a color default, not a tag).</summary>
         internal static readonly string[] ColorRotation = new[] { "#E5484D", "#F76B15", "#FFB224", "#46A758", "#12A594", "#0090FF", "#8E4EC6", "#D6409F" };
@@ -39,25 +42,70 @@ namespace Pomp.Features
         private static readonly Regex IdRegex = new Regex(@"\A[0-9a-f]{32}\z", RegexOptions.CultureInvariant);
         private static readonly Regex ColorRegex = new Regex(@"\A#[0-9A-Fa-f]{6}\z", RegexOptions.CultureInvariant);
         private static readonly Regex HashRegex = new Regex(@"\A[0-9a-f]{64}\z", RegexOptions.CultureInvariant);
+        private static readonly HashSet<string> RowFields = new HashSet<string>(StringComparer.Ordinal) { "id", "name", "color", "scope", "use", "default", "pieces", "optimized", "roles", "teams", "createdAt", "updatedAt", "revision" };
 
         private static readonly WorkspaceJsonFile.Shape Shape = new WorkspaceJsonFile.Shape
         {
-            Folder = "knowledge-v2", FileName = "knowledge.json", Rows = "knowledge", MaxBytes = MaxBytes, MaxRows = int.MaxValue,
-            Fields = new HashSet<string>(StringComparer.Ordinal) { "id", "name", "color", "scope", "use", "pieces", "optimized", "roles", "teams", "createdAt", "updatedAt", "revision" },
-            CheckRow = CheckRow,
+            Folder = "knowledge-v2", FileName = FileName, Rows = "knowledge", MaxBytes = MaxBytes, MaxRows = int.MaxValue, Shared = true,
+            Fields = RowFields, CheckRow = CheckRow,
             Busy = ("다른 창에서 지식 저장소를 쓰고 있어요.", "The knowledge store is busy in another window."),
             Full = ("지식 저장소가 가득 찼어요.", "The knowledge store is full."),
             Unreadable = ("지식 저장소 파일을 읽지 못했어요: ", "The knowledge store could not be read: "),
         };
 
+        private static readonly WorkspaceJsonFile.Shape UserShape = new WorkspaceJsonFile.Shape
+        {
+            Folder = "knowledge-user", Rows = "knowledge", MaxBytes = MaxBytes, MaxRows = int.MaxValue,
+            Fields = RowFields, CheckRow = CheckRow,
+            Busy = ("다른 창에서 PC 전체 지식을 쓰고 있어요.", "This PC's knowledge is busy in another window."),
+            Full = ("PC 전체 지식 저장소가 가득 찼어요.", "This PC's knowledge store is full."),
+            Unreadable = ("PC 전체 지식 파일(~/.pomp/knowledge.json)을 읽지 못했어요: ", "This PC's knowledge file (~/.pomp/knowledge.json) could not be read: "),
+        };
+
         private readonly WorkspaceJsonFile store;
+        private readonly WorkspaceJsonFile user;
         private readonly WorkspaceJsonFile v1;
 
-        internal KnowledgeStore(string dataDirectory, string workspaceRoot)
+        internal KnowledgeStore(string dataDirectory, string workspaceRoot, string? userHome)
         {
             store = new WorkspaceJsonFile(dataDirectory, workspaceRoot, Shape);
+            user = WorkspaceJsonFile.At(UserFile(userHome), UserShape);
             v1 = WorkspaceJsonFile.AtOldLocation(dataDirectory, workspaceRoot, V1Shape);
         }
+
+        /// <summary><c>~/.pomp/knowledge.json</c>: the knowledge of every project on this PC.</summary>
+        internal static string UserFile(string? userHome) => Path.Combine(ToolResourceFiles.Home(userHome), ".pomp", FileName);
+
+        /// <summary>Both files as one list, newest first. A row is in the file of its scope; an id seen twice (an interrupted move) counts once, the project's.</summary>
+        private JArray ReadAll() => Merge(store.Read(), user.Read());
+
+        private static JArray Merge(JArray project, JArray mine)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var rows = new List<JObject>();
+            foreach (var (rowsOf, scope) in new[] { (project, "project"), (mine, "user") })
+                foreach (var row in rowsOf.OfType<JObject>())
+                {
+                    if (!seen.Add((string)row["id"]!)) continue;
+                    var copy = (JObject)row.DeepClone();
+                    // The file decides the scope ("personal", an earlier scope, was project knowledge too).
+                    copy["scope"] = scope;
+                    rows.Add(copy);
+                }
+            return new JArray(rows.Select((row, index) => (row, index)).OrderByDescending(x => (string)x.row["createdAt"]!, StringComparer.Ordinal).ThenBy(x => x.index).Select(x => x.row));
+        }
+
+        /// <summary>Applies <paramref name="change"/> to the merged list and writes each knowledge back to the file of its scope.</summary>
+        private T MutateAll<T>(Func<JArray, T> change) => store.MutateWith(user, (project, mine) =>
+        {
+            var before = new HashSet<string>(mine.OfType<JObject>().Select(r => (string)r["id"]!), StringComparer.Ordinal);
+            var merged = Merge(project, mine);
+            var result = change(merged);
+            project.Clear(); mine.Clear();
+            foreach (var row in merged.OfType<JObject>()) ((string?)row["scope"] == "user" ? mine : project).Add(row);
+            // The file a knowledge moved into is written first: an interruption leaves it in both files, never in none.
+            return (result, mine.OfType<JObject>().Any(r => !before.Contains((string)r["id"]!)));
+        });
 
         internal sealed class Knowledge
         {
@@ -73,6 +121,8 @@ namespace Pomp.Features
             public string CreatedAt { get; set; } = "";
             public string UpdatedAt { get; set; } = "";
             public int Revision { get; set; } = 1;
+            /// <summary>Used in every conversation, agent and team without being selected.</summary>
+            public bool Default { get; set; }
         }
 
         internal sealed class Piece
@@ -128,13 +178,13 @@ namespace Pomp.Features
         internal IReadOnlyList<Knowledge> List()
         {
             EnsureMigrated();
-            return store.Read().OfType<JObject>().Select(ToKnowledge).ToList();
+            return ReadAll().OfType<JObject>().Select(ToKnowledge).ToList();
         }
 
         internal Knowledge? FindByName(string name)
         {
             EnsureMigrated();
-            return store.Read().OfType<JObject>().Where(row => string.Equals((string?)row["name"], name, StringComparison.OrdinalIgnoreCase))
+            return ReadAll().OfType<JObject>().Where(row => string.Equals((string?)row["name"], name, StringComparison.OrdinalIgnoreCase))
                 .Select(ToKnowledge).FirstOrDefault();
         }
 
@@ -142,7 +192,7 @@ namespace Pomp.Features
         internal Knowledge Get(string id, int revision)
         {
             EnsureMigrated();
-            var row = store.Read().OfType<JObject>().FirstOrDefault(r => (string?)r["id"] == id);
+            var row = ReadAll().OfType<JObject>().FirstOrDefault(r => (string?)r["id"] == id);
             if (row == null || (int)row["revision"]! != revision) throw new InvalidOperationException(PompLanguage.Pick("지식이 바뀌었거나 지워졌어요.", "The knowledge changed or was deleted."));
             return ToKnowledge(row);
         }
@@ -161,6 +211,41 @@ namespace Pomp.Features
 
         internal static string RenderPiece(string text, Anchor? anchor) =>
             anchor == null ? text : "`" + anchor.Path + "` lines " + anchor.StartLine + "–" + anchor.EndLine + ":\n```\n" + text + "\n```";
+
+        /// <summary>The used content of every default knowledge, newest first, within the budgets.</summary>
+        internal IReadOnlyList<(string Id, string Title, string Body)> DefaultItems(int maxItems, int maxChars)
+        {
+            var result = new List<(string Id, string Title, string Body)>();
+            var used = 0;
+            foreach (var knowledge in List().Where(k => k.Default))
+            {
+                var body = UsedContent(knowledge);
+                if (body.Length == 0) continue;
+                used += knowledge.Name.Length + body.Length;
+                if (used > maxChars || result.Count >= maxItems) break;
+                result.Add((knowledge.Id, knowledge.Name, body));
+            }
+            return result;
+        }
+
+        /// <summary>Makes the knowledge a default (used everywhere without being selected) or an ordinary one.</summary>
+        internal void SetDefault(string id, int revision, bool on)
+        {
+            EnsureMigrated();
+            MutateAll(rows =>
+            {
+                var row = Find(rows, id, revision);
+                if (((bool?)row["default"] == true) == on) return id;
+                if (on) row["default"] = true; else row.Remove("default");
+                Touch(row);
+                return id;
+            });
+        }
+
+        private static void CheckScope(string scope)
+        {
+            if (scope != "project" && scope != "user") throw new ArgumentException(PompLanguage.Pick("범위가 올바르지 않아요.", "The scope is invalid."));
+        }
 
         /// <summary>Every role's knowledge, newest first, at most <paramref name="maxNotes"/> and <paramref name="maxChars"/> of title and body each.</summary>
         internal IReadOnlyDictionary<string, List<(string Title, string Body)>> RoleKnowledge(int maxNotes, int maxChars)
@@ -229,11 +314,11 @@ namespace Pomp.Features
         {
             name = CheckName(name);
             color = color == null ? null : CheckColor(color);
-            if (scope != "project" && scope != "personal") throw new ArgumentException(PompLanguage.Pick("범위가 올바르지 않아요.", "The scope is invalid."));
+            CheckScope(scope);
             var text = piece == null ? null : CheckText(piece.Text);
             var anchor = piece?.Anchor == null ? null : CheckAnchor(piece!.Anchor!);
             EnsureMigrated();
-            return store.Mutate(rows =>
+            return MutateAll(rows =>
             {
                 if (rows.OfType<JObject>().Any(r => string.Equals((string?)r["name"], name, StringComparison.OrdinalIgnoreCase)))
                     throw new InvalidOperationException(PompLanguage.Pick("같은 이름의 지식이 있어요.", "A knowledge with this name already exists."));
@@ -255,10 +340,10 @@ namespace Pomp.Features
         {
             name = CheckName(name);
             color = CheckColor(color);
-            if (scope != "project" && scope != "personal") throw new ArgumentException(PompLanguage.Pick("범위가 올바르지 않아요.", "The scope is invalid."));
+            CheckScope(scope);
             if (use != "original" && use != "optimized") throw new ArgumentException(PompLanguage.Pick("사용 방식이 올바르지 않아요.", "The knowledge use is invalid."));
             EnsureMigrated();
-            store.Mutate(rows =>
+            MutateAll(rows =>
             {
                 var row = Find(rows, id, revision);
                 if (rows.OfType<JObject>().Any(r => r != row && string.Equals((string?)r["name"], name, StringComparison.OrdinalIgnoreCase)))
@@ -275,7 +360,7 @@ namespace Pomp.Features
         internal void Delete(string id, int revision)
         {
             EnsureMigrated();
-            store.Mutate(rows => { rows.Remove(Find(rows, id, revision)); return id; });
+            MutateAll(rows => { rows.Remove(Find(rows, id, revision)); return id; });
         }
 
         /// <summary>
@@ -288,7 +373,7 @@ namespace Pomp.Features
             if (source != "user" && source != "agent" && source != "editor") throw new ArgumentException(PompLanguage.Pick("출처가 올바르지 않아요.", "The piece source is invalid."));
             if (status != "saved" && status != "candidate") throw new ArgumentException(PompLanguage.Pick("상태가 올바르지 않아요.", "The piece status is invalid."));
             EnsureMigrated();
-            return store.Mutate(rows =>
+            return MutateAll(rows =>
             {
                 var row = Find(rows, id, revision);
                 var pieces = (JArray)row["pieces"]!;
@@ -306,7 +391,7 @@ namespace Pomp.Features
         {
             text = CheckText(text);
             EnsureMigrated();
-            store.Mutate(rows =>
+            MutateAll(rows =>
             {
                 var row = Find(rows, id, revision);
                 var pieces = (JArray)row["pieces"]!;
@@ -330,7 +415,7 @@ namespace Pomp.Features
         internal void DeletePiece(string id, int revision, string pieceId)
         {
             EnsureMigrated();
-            store.Mutate(rows =>
+            MutateAll(rows =>
             {
                 var row = Find(rows, id, revision);
                 var pieces = (JArray)row["pieces"]!;
@@ -348,7 +433,7 @@ namespace Pomp.Features
         internal void AcceptPiece(string id, int revision, string pieceId)
         {
             EnsureMigrated();
-            store.Mutate(rows =>
+            MutateAll(rows =>
             {
                 var row = Find(rows, id, revision);
                 var pieces = (JArray)row["pieces"]!;
@@ -375,7 +460,7 @@ namespace Pomp.Features
             if (sourceHash == null || !HashRegex.IsMatch(sourceHash)) throw new ArgumentException(PompLanguage.Pick("변환본이 올바르지 않아요.", "The optimized text is invalid."));
             if (model != null && (model.Length == 0 || model.Length > 200 || model.Any(char.IsControl))) throw new ArgumentException(PompLanguage.Pick("변환본이 올바르지 않아요.", "The optimized text is invalid."));
             EnsureMigrated();
-            return store.Mutate(rows =>
+            return MutateAll(rows =>
             {
                 var row = rows.OfType<JObject>().FirstOrDefault(r => (string?)r["id"] == id);
                 if (row == null) return false;
@@ -398,9 +483,9 @@ namespace Pomp.Features
             var wanted = new HashSet<string>(ids ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
             if (wanted.Any(i => i == null || !IdRegex.IsMatch(i))) throw new ArgumentException(PompLanguage.Pick("지식이 바뀌었거나 지워졌어요.", "The knowledge changed or was deleted."));
             EnsureMigrated();
-            var known = new HashSet<string>(store.Read().OfType<JObject>().Select(r => (string)r["id"]!), StringComparer.Ordinal);
+            var known = new HashSet<string>(ReadAll().OfType<JObject>().Select(r => (string)r["id"]!), StringComparer.Ordinal);
             if (!wanted.All(known.Contains)) throw new InvalidOperationException(PompLanguage.Pick("지식이 바뀌었거나 지워졌어요.", "The knowledge changed or was deleted."));
-            store.Mutate(rows =>
+            MutateAll(rows =>
             {
                 foreach (var row in rows.OfType<JObject>())
                 {
@@ -423,17 +508,15 @@ namespace Pomp.Features
             });
         }
 
-        /// <summary>An agent proposal: a candidate piece in the named knowledge (a new candidate knowledge when the name is new). Personal knowledge can never be targeted.</summary>
+        /// <summary>An agent proposal: a candidate piece in the named knowledge of either scope (a new candidate project knowledge when the name is new).</summary>
         internal ProposeOutcome Propose(string tag, string text)
         {
             var name = CheckName(tag);
             text = CheckText(text);
             EnsureMigrated();
-            return store.Mutate(rows =>
+            return MutateAll(rows =>
             {
                 var row = rows.OfType<JObject>().FirstOrDefault(r => string.Equals((string?)r["name"], name, StringComparison.OrdinalIgnoreCase));
-                if (row != null && (string?)row["scope"] == "personal")
-                    throw new InvalidOperationException(PompLanguage.Pick("같은 이름의 개인 지식이 있어요.", "A personal knowledge with this name already exists."));
                 if (row != null)
                 {
                     var pieces = (JArray)row["pieces"]!;
@@ -465,7 +548,7 @@ namespace Pomp.Features
             var list = moves.ToList();
             if (list.Count == 0) return;
             EnsureMigrated();
-            store.Mutate(rows =>
+            MutateAll(rows =>
             {
                 foreach (var move in list)
                 {
@@ -555,7 +638,7 @@ namespace Pomp.Features
             } : null,
             Roles = ((JArray)row["roles"]!).Select(t => (string)t!).ToList(),
             Teams = ((JArray)row["teams"]!).Select(t => (string)t!).ToList(),
-            CreatedAt = (string)row["createdAt"]!, UpdatedAt = (string)row["updatedAt"]!, Revision = (int)row["revision"]!,
+            CreatedAt = (string)row["createdAt"]!, UpdatedAt = (string)row["updatedAt"]!, Revision = (int)row["revision"]!, Default = (bool?)row["default"] == true,
         };
 
         private static Anchor? ToAnchor(JObject? anchor) => anchor == null ? null : new Anchor
@@ -573,8 +656,10 @@ namespace Pomp.Features
                 throw new InvalidDataException("Invalid knowledge field type.");
             CheckName((string)row["name"]!);
             CheckColor((string)row["color"]!);
-            if ((string)row["scope"]! is not ("project" or "personal") || (string)row["use"]! is not ("original" or "optimized"))
+            // "personal" is an earlier scope: it reads as project knowledge (the file decides the scope).
+            if ((string)row["scope"]! is not ("project" or "user" or "personal") || (string)row["use"]! is not ("original" or "optimized"))
                 throw new InvalidDataException("Invalid knowledge scope or use.");
+            if (row["default"] != null && row["default"]!.Type != JTokenType.Boolean) throw new InvalidDataException("Invalid knowledge default.");
             var pieceIds = new HashSet<string>(StringComparer.Ordinal);
             foreach (var token in pieces)
             {
@@ -662,9 +747,9 @@ namespace Pomp.Features
         {
             // Strict like the old store: a broken v1 file fails closed (nothing is written anywhere, the file stays).
             var entries = v1.Read().OfType<JObject>().ToList();
-            store.Mutate(rows =>
+            MutateAll(rows =>
             {
-                if (rows.Count > 0) return 0; // Another process (or window) migrated first.
+                if (rows.OfType<JObject>().Any(r => (string?)r["scope"] == "project")) return 0; // Another process (or window) migrated first.
                 var groups = new Dictionary<string, JObject>(StringComparer.OrdinalIgnoreCase);
                 var order = new List<JObject>();
                 foreach (var entry in entries)
@@ -680,7 +765,7 @@ namespace Pomp.Features
                         row = new JObject
                         {
                             ["id"] = Guid.NewGuid().ToString("N"), ["name"] = name, ["color"] = ColorRotation[order.Count % ColorRotation.Length],
-                            ["scope"] = scope == "personal" ? "personal" : "project", ["use"] = "original",
+                            ["scope"] = "project", ["use"] = "original",
                             ["pieces"] = new JArray(), ["roles"] = new JArray(), ["teams"] = new JArray(),
                             ["createdAt"] = entry["createdAt"], ["updatedAt"] = entry["updatedAt"], ["revision"] = 1,
                         };

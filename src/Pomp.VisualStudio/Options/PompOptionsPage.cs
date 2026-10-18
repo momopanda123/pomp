@@ -378,11 +378,6 @@ namespace Pomp.VisualStudio.Options
         // ---- Knowledge (Tools > Knowledge in the chat window) ----------------------------------------
 
         [PompCategory("지식", "Knowledge")]
-        [PompDisplayName("에이전트가 지식 읽기", "Agents read knowledge")]
-        [Description("")]
-        public bool KnowledgeAgentRead { get; set; } = false;
-
-        [PompCategory("지식", "Knowledge")]
         [PompDisplayName("지식 자동 변환", "Optimize knowledge automatically")]
         [Description("")]
         public bool KnowledgeAutoOptimize { get; set; } = false;
@@ -392,7 +387,6 @@ namespace Pomp.VisualStudio.Options
         [Description("")]
         public bool KnowledgeLineColors { get; set; } = true;
 
-        bool IKnowledgeSettings.KnowledgeAgentRead => Applied.KnowledgeAgentRead;
         bool IKnowledgeSettings.KnowledgeAutoOptimize => Applied.KnowledgeAutoOptimize;
         bool IKnowledgeSettings.KnowledgeLineColors => Applied.KnowledgeLineColors;
 
@@ -1096,7 +1090,6 @@ namespace Pomp.VisualStudio.Options
                 ComputerUseMode = page.ComputerUseMode;
                 BrowserControl = page.BrowserControl;
                 ComputerConfirmReads = page.ComputerConfirmReads;
-                KnowledgeAgentRead = page.KnowledgeAgentRead;
                 KnowledgeAutoOptimize = page.KnowledgeAutoOptimize;
                 KnowledgeLineColors = page.KnowledgeLineColors;
                 AlwaysAllowedPolicyKeys = ParseKeys(page.AlwaysAllowedPolicyKeys).AsReadOnly();
@@ -1161,7 +1154,6 @@ namespace Pomp.VisualStudio.Options
                 ComputerUseMode = source.ComputerUseMode;
                 BrowserControl = source.BrowserControl;
                 ComputerConfirmReads = source.ComputerConfirmReads;
-                KnowledgeAgentRead = source.KnowledgeAgentRead;
                 KnowledgeAutoOptimize = source.KnowledgeAutoOptimize;
                 KnowledgeLineColors = source.KnowledgeLineColors;
                 AlwaysAllowedPolicyKeys = keys;
@@ -1244,7 +1236,6 @@ namespace Pomp.VisualStudio.Options
             public bool BrowserControl { get; }
             public bool ComputerConfirmReads { get; }
 
-            public bool KnowledgeAgentRead { get; }
             public bool KnowledgeAutoOptimize { get; }
             public bool KnowledgeLineColors { get; }
 

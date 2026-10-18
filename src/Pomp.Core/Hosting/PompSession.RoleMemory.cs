@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -11,14 +12,18 @@ using Pomp.Internal;
 namespace Pomp.Hosting
 {
     // Role memory (docs/architecture.md §8.9): the knowledge assigned to each agent role, handed to the omp extension through
-    // POMP_STATE_DIR/role-memory.json (that role's notes in its subagent system prompt, as reference material), and the
-    // conversation's selected knowledge through session-knowledge.json (the main session's system prompt).
+    // POMP_STATE_DIR/role-memory.json (that role's notes in its subagent system prompt, as reference material, and the default
+    // knowledge in every subagent's), and the default plus the conversation's selected knowledge through session-knowledge.json
+    // (the main session's system prompt).
     public sealed partial class PompSession
     {
         internal const string RoleMemoryFileName = "role-memory.json";
         internal const string SessionKnowledgeFileName = "session-knowledge.json";
         private const int RoleMemoryNotes = 10;
         private const int RoleMemoryChars = 8000;
+        /// <summary>The knowledge one session's system prompt carries (defaults and the selection together); the extension reads within the same bounds.</summary>
+        private const int KnowledgeItems = 20;
+        private const int KnowledgeChars = 24000;
 
         private string? _roleMemoryDirectory;
 
@@ -42,25 +47,30 @@ namespace Pomp.Hosting
             string? directory; string root;
             lock (_stateLock) { directory = _roleMemoryDirectory; root = _workingDirectory; }
             if (directory == null) return;
-            var roles = new JObject();
+            var roles = new JObject(); var defaults = new JArray();
             try
             {
                 if (root.Length > 0)
-                    foreach (var pair in new KnowledgeStore(_environment.DataDirectory, root).RoleKnowledge(RoleMemoryNotes, RoleMemoryChars))
+                {
+                    var store = new KnowledgeStore(_environment.DataDirectory, root, _options.UserHome);
+                    foreach (var pair in store.RoleKnowledge(RoleMemoryNotes, RoleMemoryChars))
                         roles[pair.Key] = new JArray(pair.Value.Select(note => new JObject { ["title"] = note.Title, ["body"] = note.Body }));
+                    foreach (var item in store.DefaultItems(KnowledgeItems, KnowledgeChars))
+                        defaults.Add(new JObject { ["title"] = item.Title, ["body"] = item.Body });
+                }
             }
             catch (Exception ex)
             {
-                roles = new JObject();
+                roles = new JObject(); defaults = new JArray();
                 _logger.Warn("Role memory was left empty: " + ex.Message);
             }
 
-            WriteStateFile(directory, RoleMemoryFileName, new JObject { ["version"] = 1, ["root"] = root, ["roles"] = roles });
+            WriteStateFile(directory, RoleMemoryFileName, new JObject { ["version"] = 1, ["root"] = root, ["roles"] = roles, ["defaults"] = defaults });
         }
 
         /// <summary>
-        /// Rewrites the conversation's selected knowledge for the extension (selection order, 20 items / 24,000 chars). Never
-        /// throws; a missing selection or a failed write leaves the previous file or none, which only means less reference material.
+        /// Rewrites the default knowledge and then the conversation's selected knowledge for the extension (20 items / 24,000 chars
+        /// together). Never throws; a failed write leaves the previous file or none, which only means less reference material.
         /// </summary>
         private void WriteSessionKnowledge()
         {
@@ -72,8 +82,15 @@ namespace Pomp.Hosting
             try
             {
                 if (root.Length > 0 && session.Length > 0)
-                    foreach (var item in new KnowledgeStore(_environment.DataDirectory, root).SelectedItems(KnowledgeSelectionFor(session), 20, 24000))
+                {
+                    var store = new KnowledgeStore(_environment.DataDirectory, root, _options.UserHome);
+                    var defaults = store.DefaultItems(KnowledgeItems, KnowledgeChars);
+                    var used = 0;
+                    foreach (var item in defaults) { items.Add(new JObject { ["title"] = item.Title, ["body"] = item.Body }); used += item.Title.Length + item.Body.Length; }
+                    var shown = new HashSet<string>(defaults.Select(item => item.Id), StringComparer.Ordinal);
+                    foreach (var item in store.SelectedItems(KnowledgeSelectionFor(session).Where(id => !shown.Contains(id)), KnowledgeItems - defaults.Count, KnowledgeChars - used))
                         items.Add(new JObject { ["title"] = item.Title, ["body"] = item.Body });
+                }
             }
             catch (Exception ex)
             {

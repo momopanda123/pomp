@@ -15,11 +15,12 @@ namespace Pomp.Features
 {
     /// <summary>
     /// The rows of one workspace store in the workspace's own data folder: <c>&lt;root&gt;/.pomp/local/&lt;name&gt;.json</c> holding
-    /// <c>{"version":1,"&lt;rows&gt;":[...]}</c>. Every row is an object with a unique 32-hex <c>id</c>, known fields only and
-    /// whatever the store's own row check accepts. Reads are bounded and strict and fail closed: a broken file throws and is
-    /// never reset. A mutation holds the store's process gate and a cross-process lease (<c>.lock</c>, no sharing) across
-    /// read, change, limits and atomic write, so it never writes a file that its own read would refuse. A store an earlier POMP
-    /// kept in the data directory (<c>&lt;folder&gt;/&lt;hash of the root&gt;.json</c>) is moved here on first use.
+    /// <c>{"version":1,"&lt;rows&gt;":[...]}</c>, or for a <see cref="Shape.Shared"/> store <c>&lt;root&gt;/.pomp/&lt;name&gt;.json</c>, which
+    /// is committed. Every row is an object with a unique 32-hex <c>id</c>, known fields only and whatever the store's own row check
+    /// accepts. Reads are bounded and strict and fail closed: a broken file throws and is never reset. A mutation holds the store's
+    /// process gate and a cross-process lease (<c>.lock</c> in <c>.pomp/local</c>, no sharing) across read, change, limits and atomic
+    /// write, so it never writes a file that its own read would refuse. A store an earlier POMP kept in the data directory
+    /// (<c>&lt;folder&gt;/&lt;hash of the root&gt;.json</c>), or a shared one it kept in <c>.pomp/local</c>, is moved here on first use.
     /// </summary>
     internal sealed class WorkspaceJsonFile
     {
@@ -40,6 +41,8 @@ namespace Pomp.Features
             public (string Ko, string En) Full { get; set; }
             /// <summary>Prefix of the read failure; the cause follows it.</summary>
             public (string Ko, string En) Unreadable { get; set; }
+            /// <summary>Kept in <c>.pomp</c> itself and committed: written indented, so git shows and merges it by line.</summary>
+            public bool Shared { get; set; }
         }
 
         private static readonly ConcurrentDictionary<string, object> Gates = new ConcurrentDictionary<string, object>(StringComparer.Ordinal);
@@ -49,18 +52,40 @@ namespace Pomp.Features
         private readonly string file, lockFile;
         private readonly object gate;
 
-        internal WorkspaceJsonFile(string dataDirectory, string workspaceRoot, Shape shape) : this(shape, PathFor(dataDirectory, shape.Folder, workspaceRoot, shape.FileName)) { }
+        internal WorkspaceJsonFile(string dataDirectory, string workspaceRoot, Shape shape)
+            : this(shape, shape.Shared ? SharedPathFor(dataDirectory, workspaceRoot, shape) : PathFor(dataDirectory, shape.Folder, workspaceRoot, shape.FileName),
+                   shape.Shared ? Path.Combine(ProjectData.LocalFolder(workspaceRoot), NameOf(shape) + ".lock") : null) { }
 
-        private WorkspaceJsonFile(Shape shape, string file)
+        private WorkspaceJsonFile(Shape shape, string file, string? lockFile = null)
         {
             this.shape = shape;
             this.file = file;
-            lockFile = file + ".lock";
+            this.lockFile = lockFile ?? file + ".lock";
             gate = Gates.GetOrAdd(shape.Folder, _ => new object());
+        }
+
+        private static string NameOf(Shape shape) => string.IsNullOrEmpty(shape.FileName) ? shape.Folder + ".json" : shape.FileName;
+
+        /// <summary><c>.pomp/&lt;name&gt;</c>; the file an earlier POMP kept in <c>.pomp/local</c> (or, before that, in the data directory) is moved there first.</summary>
+        private static string SharedPathFor(string dataDirectory, string workspaceRoot, Shape shape)
+        {
+            var target = Path.Combine(ProjectData.ProjectFolder(workspaceRoot), NameOf(shape));
+            var local = PathFor(dataDirectory, shape.Folder, workspaceRoot, shape.FileName);
+            try
+            {
+                CheckpointStore.CheckDirectPath(target);
+                if (!File.Exists(target) && File.Exists(local)) File.Move(local, target);
+            }
+            catch (IOException) { } // Another window moved it first, or it cannot move: the next use tries again.
+            catch (UnauthorizedAccessException) { }
+            return target;
         }
 
         /// <summary>A store still at its old place in the data directory, to be read (and imported) only: nothing is created or moved.</summary>
         internal static WorkspaceJsonFile AtOldLocation(string dataDirectory, string workspaceRoot, Shape shape) => new WorkspaceJsonFile(shape, OldPath(dataDirectory, shape.Folder, workspaceRoot));
+
+        /// <summary>A store at <paramref name="file"/> (outside any workspace, such as the user's own), with its lease next to it.</summary>
+        internal static WorkspaceJsonFile At(string file, Shape shape) => new WorkspaceJsonFile(shape, Path.GetFullPath(file));
 
         /// <summary>The store file.</summary>
         internal string FilePath => file;
@@ -89,27 +114,61 @@ namespace Pomp.Features
         internal T Mutate<T>(Func<JArray, T> change)
         {
             lock (gate)
-            {
-                CheckpointStore.CheckDirectPath(lockFile);
-                Directory.CreateDirectory(Path.GetDirectoryName(lockFile)!);
-                FileStream lease;
-                try { lease = new FileStream(lockFile, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
-                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-                {
-                    throw new InvalidOperationException(PompLanguage.Pick(shape.Busy.Ko, shape.Busy.En), ex);
-                }
-
-                using (lease)
+                using (Lease())
                 {
                     var rows = ReadLocked();
                     var result = change(rows);
-                    var text = new JObject { ["version"] = 1, [shape.Rows] = rows }.ToString(Formatting.None);
-                    if (rows.Count > shape.MaxRows || Encoding.UTF8.GetByteCount(text) > shape.MaxBytes) throw new InvalidOperationException(PompLanguage.Pick(shape.Full.Ko, shape.Full.En));
-                    CheckpointStore.CheckDirectPath(file);
-                    AtomicFile.WriteAllText(file, text);
+                    var text = Serialize(rows);
+                    Write(text);
                     return result;
                 }
+        }
+
+        /// <summary>
+        /// Like <see cref="Mutate{T}"/> over this store and <paramref name="other"/> together, each under its own gate and lease. Each
+        /// file is replaced atomically, the pair is not: <paramref name="change"/> says which file to write first (the one rows moved into,
+        /// so an interruption leaves a row twice rather than nowhere).
+        /// </summary>
+        internal T MutateWith<T>(WorkspaceJsonFile other, Func<JArray, JArray, (T Result, bool OtherFirst)> change)
+        {
+            lock (gate)
+                using (Lease())
+                lock (other.gate)
+                    using (other.Lease())
+                    {
+                        var rows = ReadLocked(); var others = other.ReadLocked();
+                        var (result, otherFirst) = change(rows, others);
+                        var text = Serialize(rows); var otherText = other.Serialize(others);
+                        if (otherFirst) { other.Write(otherText); Write(text); }
+                        else { Write(text); other.Write(otherText); }
+                        return result;
+                    }
+        }
+
+        private FileStream Lease()
+        {
+            CheckpointStore.CheckDirectPath(lockFile);
+            Directory.CreateDirectory(Path.GetDirectoryName(lockFile)!);
+            try { return new FileStream(lockFile, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                throw new InvalidOperationException(PompLanguage.Pick(shape.Busy.Ko, shape.Busy.En), ex);
             }
+        }
+
+        /// <summary>The file text for <paramref name="rows"/>; throws when it is over the store's limits (nothing is written then).</summary>
+        private string Serialize(JArray rows)
+        {
+            var text = new JObject { ["version"] = 1, [shape.Rows] = rows }.ToString(shape.Shared ? Formatting.Indented : Formatting.None);
+            if (rows.Count > shape.MaxRows || Encoding.UTF8.GetByteCount(text) > shape.MaxBytes) throw new InvalidOperationException(PompLanguage.Pick(shape.Full.Ko, shape.Full.En));
+            return shape.Shared ? text + "\n" : text;
+        }
+
+        private void Write(string text)
+        {
+            CheckpointStore.CheckDirectPath(file);
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            AtomicFile.WriteAllText(file, text);
         }
 
         private JArray ReadLocked()

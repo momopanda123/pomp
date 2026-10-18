@@ -67,9 +67,6 @@ namespace Pomp.Features
     /// <summary>The knowledge options of Tools › Options › Pomp (implemented by the options page).</summary>
     public interface IKnowledgeSettings
     {
-        /// <summary>Agents may list and read project knowledge on their own; what they read stays selected for the conversation.</summary>
-        bool KnowledgeAgentRead { get; }
-
         /// <summary>A knowledge that is used in its optimized form is optimized again when its pieces change.</summary>
         bool KnowledgeAutoOptimize { get; }
 

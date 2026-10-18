@@ -2695,7 +2695,7 @@ This is Agents › 역할 › POMP, the chat agent.
 
 ### Knowledge
 
-One list per workspace, managed in Tools › Knowledge.
+One list per workspace, managed in Tools › Knowledge: the workspace's project knowledge and this PC's user knowledge together.
 The role and team editors and the context basket read the same list.
 A knowledge is a user tag holding **pieces**. A tag has a name and color; there are no predefined tags.
 
@@ -2718,8 +2718,8 @@ Payload: `{ requestId?, root, sessionId?, selected: string[], optimizing?: strin
 `KnowledgeItem`:
 
 ```
-{ id, name, color: "#rrggbb", scope: "project"|"personal", use: "original"|"optimized", revision, createdAt, updatedAt,
-  roles: string[], teams: string[], candidate: boolean, optimized?: { text, createdAt, stale },
+{ id, name, color: "#rrggbb", scope: "project"|"user", use: "original"|"optimized", revision, createdAt, updatedAt,
+  roles: string[], teams: string[], candidate: boolean, default: boolean, optimized?: { text, createdAt, stale },
   pieces: [{ id, text, source: "user"|"agent"|"editor", status: "saved"|"candidate", createdAt,
              anchor?: { path, startLine, endLine, status: "current"|"moved"|"changed"|"missing" } }] }
 ```
@@ -2753,6 +2753,7 @@ Payload: `{ requestId, root, action }` plus the action's fields.
 | `create` | `knowledge: { name, color, scope }`, `piece?: { text, anchor?: { path, startLine, endLine } }` | New knowledge. |
 | `update` | `id`, `revision`, `knowledge: { name, color, scope, use }` | Updates the knowledge. |
 | `delete` | `id`, `revision` | Removes the knowledge. |
+| `setDefault` | `id`, `revision`, `on` | Makes the knowledge a default or an ordinary one. |
 | `addPiece` | `id`, `revision`, `piece: { text, anchor? }` | Adds a saved piece. |
 | `updatePiece` | `id`, `revision`, `pieceId`, `text` | Changes a piece's text. |
 | `deletePiece` | `id`, `revision`, `pieceId` | Deletes a piece. |
@@ -2775,10 +2776,14 @@ Payload: `{ requestId, root, action }` plus the action's fields.
 - Name: 1–40 characters, no control characters.
 - Piece text ≤ 8,000. Anchor ≤ 200 lines. Optimized text ≤ 16,000.
 - Knowledge, pieces and candidate pieces have no count limit of their own; the store size bounds them.
-- Store ≤ 4 MiB.
-- Stored in the workspace's `.pomp/local/knowledge.json`, which is git-ignored.
+- Each file ≤ 4 MiB.
+- `project`: the workspace's `.pomp/knowledge.json` (indented), which is committed. Its lease file stays in `.pomp/local`.
+  A file an earlier POMP kept in `.pomp/local/knowledge.json` is moved there on first use.
+- `user`: `~/.pomp/knowledge.json` (`%USERPROFILE%`), listed in every workspace on this PC. Its lease is next to it.
+- A change takes both leases. Switching the scope moves the knowledge to the other file; the file it moves into is written first.
+- An earlier scope `personal` reads as `project`.
+- The model cannot write either file with an always-allow approval: every write asks.
 - The former `%LOCALAPPDATA%\Pomp\knowledge\` store is migrated once and then removed.
-- Scopes are POMP usage scopes, not access control.
 
 #### Duplicates
 
@@ -2809,8 +2814,13 @@ When building the state, the host looks for the stored lines in the file.
 All delivery is inside blocks marked as reference material.
 These are not instructions that change tool permissions, approvals or host policy. Tags inside are neutralized.
 
-- **Selected knowledge of the conversation**
+- **Default knowledge** (`default: true`)
+  - Goes with every conversation, agent and team without being selected.
+  - In the main session it comes first in `session-knowledge.json`, ahead of the selection.
+  - Every subagent gets it from `role-memory.json` `defaults` as its own `<pomp_knowledge>` block.
   - Limit: 20 items / 24,000 characters.
+- **Selected knowledge of the conversation**
+  - Limit: 20 items / 24,000 characters, shared with the default knowledge.
   - Written to `POMP_STATE_DIR/session-knowledge.json` as `{ version: 1, root, sessionId, items: [{ title, body }] }`.
   - The omp extension appends it to the main session's system prompt as `<pomp_knowledge>` when root and session match.
   - A resumed conversation keeps its selection. A new one starts empty.
@@ -2820,19 +2830,16 @@ These are not instructions that change tool permissions, approvals or host polic
   - Restored transcripts hide the block.
 - **Knowledge assigned to a role**
   - Limit: newest 10 / 8,000 characters per role.
-  - Written to `POMP_STATE_DIR/role-memory.json` v1. The title is the knowledge name.
+  - Written to `POMP_STATE_DIR/role-memory.json` v1 (`roles`, plus `defaults`). The title is the knowledge name.
   - The extension adds it to that role's subagent system prompt as `<role_memory>`.
+- The main agent's system prompt names both knowledge files (`features-guidance`).
 
 #### Host tools
 
 - `propose_knowledge { tag, text }` adds a **candidate** piece to the knowledge named `tag`.
-- Without such a knowledge, it creates a new candidate project knowledge, never personal.
+- Without such a knowledge, it creates a new candidate project knowledge.
 - Only the user accepts a candidate.
-- `read_knowledge { ids? }` is available only with the option `Agents read knowledge`. It is read-only.
-- Without `ids`, it lists project knowledge as `{ id, name, pieces, chars }`.
-- With `ids`, it returns their used content, ≤ 24,000 characters, and adds them to the conversation's selection.
-- Personal knowledge is never listed or returned.
-- Both tools post an unasked `knowledge/state`.
+- It posts an unasked `knowledge/state`.
 
 ### Advisors
 

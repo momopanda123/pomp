@@ -6,8 +6,8 @@ namespace Pomp.Features
 {
     /// <summary>
     /// Where a workspace keeps what POMP knows about it: everything lives in <c>&lt;root&gt;/.pomp/</c>, so deleting that one folder resets
-    /// POMP for the project. The shared project files (rules, workflows, skills, hooks, teams, agents, permissions.json) sit directly in
-    /// it; POMP's own data (conversations, presets, knowledge, checkpoints, ...) in <c>.pomp/local/</c>, which its own <c>.gitignore</c>
+    /// POMP for the project. The shared project files (rules, workflows, skills, hooks, teams, agents, permissions.json, knowledge.json) sit directly in
+    /// it; POMP's own data (conversations, presets, checkpoints, ...) in <c>.pomp/local/</c>, which its own <c>.gitignore</c>
     /// keeps out of commits. Data an earlier POMP kept for the workspace under <c>%LOCALAPPDATA%\Pomp</c> is moved (not copied) on first
     /// use, so it does not come back after the folder is deleted. Workspace trust and remembered tool approvals stay outside the project:
     /// a repository must not be able to ship them.

@@ -340,8 +340,8 @@ export interface WorkspaceTrustState {
 }
 export const WORKSPACE_TRUST_REQUIRED = 'workspaceTrustRequired';
 
-/** `personal` is never shown to agents on their own; the user may still select it or give it to a role or team. */
-export type KnowledgeScope = 'project' | 'personal';
+/** `project`: the workspace's `.pomp/knowledge.json` (committed); `user`: `~/.pomp/knowledge.json` (every project on this PC). */
+export type KnowledgeScope = 'project' | 'user';
 /** `original`: the pieces as written; `optimized`: the compact text the editor model made from them. */
 export type KnowledgeUse = 'original' | 'optimized';
 /** Where the lines of an anchored piece are now, as the host found them in the file on disk. */
@@ -360,6 +360,8 @@ export interface KnowledgeItem {
   roles: string[]; teams: string[];
   /** Every piece is a candidate: an agent proposed this name and the user has not accepted anything yet. */
   candidate: boolean;
+  /** Used in every conversation, agent and team without being selected in the basket. */
+  default: boolean;
   /** `stale`: the pieces changed after the last conversion, so the original is used until it is converted again. */
   optimized?: { text: string; createdAt: string; stale: boolean };
   pieces: KnowledgePiece[];
@@ -383,6 +385,7 @@ export type KnowledgeCommand =
   | { action: 'create'; knowledge: KnowledgeFields; piece?: KnowledgePieceInput }
   | { action: 'update'; id: string; revision: number; knowledge: KnowledgeFields & { use: KnowledgeUse } }
   | { action: 'delete'; id: string; revision: number }
+  | { action: 'setDefault'; id: string; revision: number; on: boolean }
   | { action: 'addPiece'; id: string; revision: number; piece: KnowledgePieceInput }
   | { action: 'updatePiece'; id: string; revision: number; pieceId: string; text: string }
   | { action: 'deletePiece'; id: string; revision: number; pieceId: string }

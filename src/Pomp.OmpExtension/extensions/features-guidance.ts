@@ -26,6 +26,8 @@ export const FEATURES_GUIDANCE = [
 	"- All of the user's projects: `.pomp/skills/<name>/SKILL.md` under the user's home folder (`%USERPROFILE%`). Only when the user asks for that.",
 	"- `<name>`: 2 to 40 lowercase letters, digits and hyphens. The file starts with YAML frontmatter holding `name: <name>` (the folder name) and a one-line `description:` that says when to use the skill, then the instructions in Markdown. Supporting files (references, scripts) go in the same folder.",
 	"- POMP picks the skill up when your reply ends: it appears in Tools > Skills and the user can run it as `/skill:<name>`. No restart is needed.",
+	"",
+	"POMP knowledge (Tools > Knowledge) lives in two files POMP manages: `.pomp/knowledge.json` under the workspace root (this project, committed with it) and `.pomp/knowledge.json` under the user's home folder (`%USERPROFILE%`; every project on this PC). Knowledge the user selected for the conversation or set as default reaches you in a `<pomp_knowledge>` block. To add knowledge, use `propose_knowledge` (the user accepts it); do not edit these files.",
 ].join("\n");
 
 export default function featuresGuidance(pi: ExtensionAPI): void {
