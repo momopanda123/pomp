@@ -25,7 +25,9 @@ namespace Pomp.VisualStudio.Editor
 {
     [Export(typeof(IWpfTextViewCreationListener))]
     [Export(typeof(ILineTransformSourceProvider))]
-    [ContentType("code")]
+    // "text", not "code": a language Visual Studio has no service for (a .py without the Python workload) opens as plain text, and its
+    // declarations still come from the lexical scanner. Files the scanner does not read (notes, data) get no captions.
+    [ContentType("text")]
     [TextViewRole(PredefinedTextViewRoles.Editable)]
     internal sealed class CodeCaptionFeature : IWpfTextViewCreationListener, ILineTransformSourceProvider
     {

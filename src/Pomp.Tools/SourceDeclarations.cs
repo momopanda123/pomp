@@ -11,28 +11,30 @@ namespace Pomp.Tools
             IsType = isType; Line = line; Start = start; Length = length; Name = name;
         }
 
-        /// <summary>A class, struct, interface, enum, record, delegate or type alias; otherwise a member (function, method, constructor, operator, property, event).</summary>
+        /// <summary>A class, struct, interface, enum, record, trait, impl, module, delegate or type alias; otherwise a member (function, method, constructor, operator, property, event, SQL procedure / function / view / trigger).</summary>
         public bool IsType { get; }
         /// <summary>1-based line of <see cref="Start"/>.</summary>
         public int Line { get; }
-        /// <summary>Offset of the declaration's first token (attributes excluded, a C++ template header included).</summary>
+        /// <summary>Offset of the declaration's first token (attributes, annotations and decorators excluded, a C++ template header included).</summary>
         public int Start { get; }
-        /// <summary>Through the body's closing brace or the terminating ';'.</summary>
+        /// <summary>Through the body's closing brace or <c>end</c> keyword, the terminating ';', the last line of an indented body, or the end of the statement.</summary>
         public int Length { get; }
         /// <summary>The signature as written, whitespace collapsed, at most 120 characters.</summary>
         public string Name { get; }
     }
 
     /// <summary>
-    /// Declarations of a source file for editors without a language service model (C/C++, TypeScript/JavaScript, C# outside
-    /// Roslyn): the lexical scanner of the symbol outline, not a compiler. Lines break as in the Visual Studio editor
-    /// (CR LF, CR, LF, U+0085, U+2028, U+2029), so <see cref="SourceDeclaration.Line"/> is the editor's line number.
+    /// Declarations of a source file for editors without a language service model: the lexical scanners of the symbol outline, not a
+    /// compiler. C/C++, TypeScript/JavaScript and C# outside Roslyn through the brace scanner; Python, Java, Kotlin, Go, Rust, PHP, Ruby,
+    /// Swift, Scala, Dart, Lua, PowerShell, shell scripts, F#, SQL, R, Objective-C, Perl and Groovy through the declaration scanner.
+    /// Lines break as in the Visual Studio editor (CR LF, CR, LF, U+0085, U+2028, U+2029), so <see cref="SourceDeclaration.Line"/> is the
+    /// editor's line number.
     /// </summary>
     public static class SourceDeclarations
     {
         private const int MaxNameCharacters = 120;
 
-        /// <summary>Declarations in source order; null when the file type is not scanned this way (Visual Basic, unknown extensions).</summary>
+        /// <summary>Declarations in source order; null when the file type is not scanned this way (Visual Basic, other extensions).</summary>
         public static IReadOnlyList<SourceDeclaration>? Find(string path, string text)
         {
             var lines = new List<string>();

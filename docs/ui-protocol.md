@@ -247,7 +247,7 @@ Host text the page shows says what happened, the current state or a reason.
 
 | type | payload | notes |
 |---|---|---|
-| `host/hello` | `{ version, vsVersion?, locale?, includeEditorContextByDefault, composerPredictions, approvalMode, shortcuts }` | First message after `ui/ready`. See "host/hello" below. |
+| `host/hello` | `{ version, vsVersion?, locale?, includeEditorContextByDefault, composerPredictions, wordCompletion, approvalMode, shortcuts }` | First message after `ui/ready`. See "host/hello" below. |
 | `host/editorFollow` | `{ live, bookmarks, requestId?, error? }` | Editor follow capability and applied settings. See "Host-internal messages". |
 | `bridge/state` | `{ state, message?, attempt?, nextRetryMs?, reason? }` | Engine connection state. See "bridge/state" below. |
 | `workspace/trustState` | `{ requestId?, root, required, trusted, fingerprint, files: [{ path, kind, detail? }], truncated?, error? }` | Workspace engine configuration needing trust. See "Workspace trust". |
@@ -296,11 +296,14 @@ shows that the answer was cut.
 - It is sent again when:
   - the language option changes the effective locale. The option is Tools > Options > Pomp > General > Chat > Language: Automatic / 한국어 / English;
   - the approval mode changes;
-  - the shortcuts change.
+  - the shortcuts change;
+  - a Chat option it carries changes (`includeEditorContextByDefault`, `composerPredictions`, `wordCompletion`).
 - Nothing else resets it. The page compares nothing; it applies what it gets.
 - `locale` is `ko-KR`/`en-US` for an explicit choice, else VS's UI culture.
 - `approvalMode` is omp's approval mode in effect: `alwaysAsk` \| `write` \| `yolo`.
   The composer's permission-mode chip shows it. `permission/mode` changes it.
+- `wordCompletion` is Tools > Options > Pomp > General > Chat > Word completion (default on; absent from an older host means on).
+  While it is true, the page shows the rest of the word being typed and Tab inserts it. See "Word completion".
 
 `shortcuts` come from Tools > Options > Pomp > General > Shortcuts.
 
@@ -2008,6 +2011,21 @@ The count starts at the start of the goal; its first run belongs to the goal.
 - It is present when the host can match the approval to exactly one pending task call of that conversation.
 - It is display only; the approve/deny path is unchanged.
 - Without it, the page shows `message` as received.
+
+## Word completion
+
+Word completion has no messages of its own: the page completes words locally while `host/hello.wordCompletion` is true.
+
+- Its words come from what the page already has:
+  - the prompts sent in this workspace (page storage);
+  - the current conversation's user and finished assistant messages;
+  - attachment paths and tool `path`-like arguments in the conversation;
+  - the paths and symbols of `workspace/files` answers (@mention lookups, the file picker).
+- A word is a run of letters, marks, digits and `_` that starts with a letter; at most 20,000 are kept.
+- Ranking: prefix match (any case), then frequency, words accepted with Tab, and recency.
+- Accepted words are kept per workspace in the page storage key `pomp.wordCompletion:<workspace>`, at most 500.
+- It never completes during IME composition, inside a `` ` `` code span, in an @mention or a leading `/command`, in a URL, or with text after the caret on the same line.
+- While a word completion shows, Tab inserts it before a composer prediction, and Esc clears both.
 
 ## Sessions
 

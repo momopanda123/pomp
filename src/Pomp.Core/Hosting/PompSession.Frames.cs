@@ -988,6 +988,7 @@ namespace Pomp.Hosting
             Locale = PompLanguage.Locale,
             IncludeEditorContextByDefault = _settings.IncludeEditorContextByDefault,
             ComposerPredictions = _settings.ComposerPredictions,
+            WordCompletion = _settings.WordCompletion,
             ApprovalMode = _settings.ApprovalMode,
             Shortcuts = (_settings as IUiShortcutSettings)?.Shortcuts ?? new UiShortcutsPayload(),
         };

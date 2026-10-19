@@ -50,6 +50,8 @@ export interface HostHelloPayload {
   locale?: string;
   includeEditorContextByDefault: boolean;
   composerPredictions: boolean;
+  /** Word completion in the chat input (Tools > Options > Pomp > Chat); absent on an older host (= on). */
+  wordCompletion?: boolean;
   /** omp's approval mode in effect; absent on an older host (= alwaysAsk). Changed with `permission/mode`. */
   approvalMode?: ApprovalMode;
   /** The page's shortcuts (Tools > Options > Pomp > Shortcuts); absent keys keep {@link DEFAULT_SHORTCUTS}. */

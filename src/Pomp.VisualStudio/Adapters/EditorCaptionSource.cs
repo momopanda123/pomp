@@ -5,15 +5,19 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.VisualStudio.LanguageServices;
+using Microsoft.VisualStudio.Text.Tagging;
 using Microsoft.VisualStudio.Threading;
 using Pomp.Features;
 using Pomp.Tools;
+using Pomp.VisualStudio.Editor;
 using Task = System.Threading.Tasks.Task;
 namespace Pomp.VisualStudio.Adapters
 {
     /// <summary>
-    /// Caption targets of an editor file: Roslyn's syntax tree where the file is a Roslyn document (C#, VB), otherwise the lexical
-    /// declaration scanner (<see cref="SourceDeclarations"/>: C/C++, TypeScript/JavaScript, C# outside Roslyn). Other file types have none.
+    /// Caption targets of an editor file in the workspace folder: Roslyn's syntax tree where the file is a Roslyn document (C#, VB), otherwise
+    /// the lexical declaration scanners (<see cref="SourceDeclarations"/>: C/C++, TypeScript/JavaScript, C# outside Roslyn, Python, Java,
+    /// Kotlin, Go, Rust, PHP, Ruby, Swift, Scala, Dart, Lua, PowerShell, shell, F#, SQL, R, Objective-C, Perl, Groovy), otherwise the type and
+    /// member blocks of the editor's own block structure (<see cref="EditorStructureDeclarations"/>). Files outside the folder have none.
     /// </summary>
     internal sealed class EditorCaptionSource : IEditorCaptionLocationSource
     {
@@ -35,7 +39,11 @@ namespace Pomp.VisualStudio.Adapters
             await TaskScheduler.Default;
             if (!new PathGuard(root).TryResolve(path, out var file, out _) || exactText.Length > 500000) return new EditorCaptionSnapshot(true, Array.Empty<EditorCaptionTarget>());
             var document = solution?.GetDocumentIdsWithFilePath(file).Select(id => solution.GetDocument(id)).FirstOrDefault(d => d?.SupportsSyntaxTree == true);
-            if (document == null) return Lexical(file, exactText, firstLine, lastLine, position);
+            if (document == null)
+            {
+                var declarations = SourceDeclarations.Find(file, exactText) ?? await StructureAsync(file, exactText, token);
+                return declarations == null ? new EditorCaptionSnapshot(false, Array.Empty<EditorCaptionTarget>()) : Lexical(declarations, firstLine, lastLine, position);
+            }
             var text = await document.GetTextAsync(token).ConfigureAwait(false);
             if (!string.Equals(text.ToString(), exactText, StringComparison.Ordinal)) return new EditorCaptionSnapshot(false, Array.Empty<EditorCaptionTarget>());
             var syntax = await document.GetSyntaxRootAsync(token).ConfigureAwait(false);
@@ -67,13 +75,25 @@ namespace Pomp.VisualStudio.Adapters
         }
 
         /// <summary>
-        /// The same targets from the lexical scanner, which reads <paramref name="exactText"/> itself (so the source always matches): every
-        /// type and member declaration starting in the lines, or the innermost one around <paramref name="position"/>.
+        /// The editor's block structure of the open buffer of <paramref name="file"/>: none when it is not open, null when the buffer no
+        /// longer holds <paramref name="exactText"/>.
         /// </summary>
-        private static EditorCaptionSnapshot Lexical(string file, string exactText, int firstLine, int lastLine, int? position)
+        private async Task<IReadOnlyList<SourceDeclaration>?> StructureAsync(string file, string exactText, CancellationToken token)
         {
-            var declarations = SourceDeclarations.Find(file, exactText);
-            if (declarations == null) return new EditorCaptionSnapshot(true, Array.Empty<EditorCaptionTarget>());
+            await context.Jtf.SwitchToMainThreadAsync(token);
+            var buffer = DocumentTable.TryGetTextBuffer(context, file);
+            if (buffer == null) return Array.Empty<SourceDeclaration>();
+            var snapshot = buffer.CurrentSnapshot;
+            if (snapshot.Length != exactText.Length || !string.Equals(snapshot.GetText(), exactText, StringComparison.Ordinal)) return null;
+            return EditorStructureDeclarations.Find(context.ComponentModel.GetService<IBufferTagAggregatorFactoryService>(), snapshot);
+        }
+
+        /// <summary>
+        /// The targets among <paramref name="declarations"/> (read from the exact source): every type and member declaration starting in
+        /// the lines, or the innermost one around <paramref name="position"/>.
+        /// </summary>
+        private static EditorCaptionSnapshot Lexical(IReadOnlyList<SourceDeclaration> declarations, int firstLine, int lastLine, int? position)
+        {
             var targets = new List<EditorCaptionTarget>(); var lines = new HashSet<int>();
             if (position.HasValue)
             {

@@ -1133,9 +1133,19 @@ WebView2 안의 키:
 
 ### 편집기 기능의 언어 범위
 
-- 인라인 자동완성·질문 창(`InlineEditorFeature`)과 POMP 장식 캡션(`CodeCaptionFeature`)은 `code` 콘텐츠 형식에 등록한다. 레거시 언어 서비스의 형식(`C/C++` 등)은 VS 편집기가 `code`를 기반으로 만들고(`LegacyContentTypeSource`), TextMate 언어의 `code++`도 `code`를 기반으로 한다. 언어를 거르는 코드는 없다. 언어 이름(`ContentType.TypeName`)은 모델 프롬프트에만 들어간다.
-- 캡션 대상은 `EditorCaptionSource`가 정한다. Roslyn 문서(C#, VB)는 구문 트리, 그 밖의 파일은 `Pomp.Tools`의 `SourceDeclarations`다. 이것은 `read_buffer` 개요와 같은 어휘 스캐너(`SymbolOutline`)이고 C·C++, TypeScript·JavaScript, C#을 읽는다. 대상의 줄·시작·길이는 선언 첫 토큰부터 본문의 닫는 중괄호나 끝 `;`까지다. 이름공간과 본문 없는 형식 선언(`class Foo;`)은 대상이 아니다.
-- 질문 범위(`CodeScopeSelection`)도 Roslyn 문서가 없으면 같은 스캐너로 가장 안쪽 멤버를 고른다.
+- 인라인 자동완성·질문 창(`InlineEditorFeature`)은 `code` 콘텐츠 형식에 등록한다. 레거시 언어 서비스의 형식(`C/C++` 등)은 VS 편집기가 `code`를 기반으로 만들고(`LegacyContentTypeSource`), TextMate 언어의 `code++`도 `code`를 기반으로 한다. 언어를 거르는 코드는 없다. 언어 이름(`ContentType.TypeName`)은 모델 프롬프트에만 들어간다.
+- POMP 장식 캡션(`CodeCaptionFeature`)은 `text`에 등록한다. VS에 언어 서비스가 없어 일반 텍스트로 열린 파일(Python 워크로드 없이 연 `.py` 등)도 아래 스캐너가 선언을 찾는다. 스캐너가 읽지 않는 파일(메모, 데이터)은 캡션이 없다.
+- 캡션 대상은 `EditorCaptionSource`가 정한다. 작업 영역 폴더 밖의 파일(`PathGuard`)은 대상이 없다. 폴더 안에서는 이 순서로 찾는다.
+  1. Roslyn 문서(C#, VB)는 구문 트리.
+  2. 그 밖의 파일은 `Pomp.Tools`의 `SourceDeclarations`. `read_buffer` 개요와 같은 어휘 스캐너다. C·C++, TypeScript·JavaScript, C#은 중괄호 스캐너(`SymbolOutline`)가 읽는다. Python, Java, Kotlin, Go, Rust, PHP, Ruby, Swift, Scala, Dart, Groovy, Lua, Perl, R, PowerShell, 셸 스크립트, F#, SQL, Objective-C는 선언 스캐너(`DeclarationScanner`)가 읽는다. 언어는 확장자, 파일 이름(`Rakefile` 등), 확장자 없는 파일의 `#!` 줄로 고른다(`ScannedLanguage`).
+  3. 스캐너가 없는 언어는 편집기 블록 구조(`EditorStructureDeclarations`). 열린 버퍼의 `IStructureTag` 중 형식이 `Type`·`Member`인 블록만 쓴다. 문장·반복·조건·주석·영역 블록은 쓰지 않는다. 언어 서비스가 이런 블록을 주지 않으면 대상이 없다. VS 2017 15.8 SDK부터 있는 API다.
+- 선언 스캐너는 먼저 주석과 문자열·문자 리터럴 내용을 공백으로 지운다(`SourceMask`). 삼중 따옴표, 원시 문자열, 보간 안의 따옴표, here-doc, SQL `$$` 본문, Lua 긴 괄호도 지운다. 그 다음 문장 시작(줄 첫 토큰, 중괄호 언어는 `;`·`{`·`}` 뒤)에서 언어별 선언 패턴을 맞춘다. 본문 끝은 언어마다 다르다.
+  - 중괄호 언어: 맞는 닫는 중괄호. 본문 없는 선언(`;`로 끝나는 프로토타입, 줄바꿈으로 끝나는 Kotlin·Swift·Go·Scala 선언)은 문장 끝. `=`·`=>` 식 본문은 식의 끝.
+  - Python·F#·Scala 3: 들여쓰기 블록.
+  - Ruby·Lua: 짝이 맞는 `end`. Objective-C `@interface`·`@implementation`: `@end`.
+  - SQL: 배치 구분자(`GO`, `/`, `DELIMITER`), 그다음 가장 바깥 `BEGIN … END`, 그다음 첫 `;`.
+- 대상의 줄·시작·길이는 선언 첫 토큰(특성·어노테이션·데코레이터 제외)부터 본문 끝까지다. 이름공간, 본문 없는 C++ 형식 선언(`class Foo;`), 본문이 닫히지 않는 선언은 대상이 아니다. 키워드 없이 선언하는 언어(Java, Dart, Objective-C의 C 함수)는 함수 안에서 선언을 찾지 않는다. 호출과 구별할 수 없기 때문이다.
+- 질문 범위(`CodeScopeSelection`)도 Roslyn 문서가 없으면 같은 순서(어휘 스캐너, 그다음 편집기 블록 구조)로 가장 안쪽 멤버를 고른다.
 - 변경 제안의 컴파일 검사(`RoslynShadowValidator`)는 Roslyn 문서만 컴파일한다. 그 밖의 파일은 오류가 아닌 메모 `컴파일러 검사 없음 (Roslyn 문서 아님)`을 달고 검사를 끝낸다. 그래서 C++ 파일의 제안도 적용할 수 있다.
 
 ## 8. 에이전트·팀 구현 계약

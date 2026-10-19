@@ -28,13 +28,20 @@ namespace Pomp.Tools
         internal static string CreateBounded(string path, IReadOnlyList<string> lines, int maxEntries, int maxCharacters)
         {
             var language = GetLanguage(path);
-            if (language == Language.Unknown || lines.Count == 0)
+            if (lines.Count == 0) return string.Empty;
+            List<LexicalDeclaration>? declarations = null;
+            if (language == Language.Unknown)
             {
-                return string.Empty;
+                declarations = DeclarationScanner.Find(path, lines);
+                if (declarations == null || declarations.Count == 0) return string.Empty;
             }
 
             var output = new OutlineWriter(Math.Min(MaxEntries, Math.Max(1, maxEntries)), Math.Min(MaxCharacters, Math.Max(64, maxCharacters)));
-            if (language == Language.VisualBasic)
+            if (declarations != null)
+            {
+                WriteDeclarations(lines, declarations, output);
+            }
+            else if (language == Language.VisualBasic)
             {
                 ScanVisualBasic(lines, output);
             }
@@ -46,15 +53,54 @@ namespace Pomp.Tools
             return output.Finish();
         }
 
+        /// <summary>Outline rows of the <see cref="DeclarationScanner"/> languages: each declaration's signature, nested under the ones around it.</summary>
+        private static void WriteDeclarations(IReadOnlyList<string> lines, List<LexicalDeclaration> declarations, OutlineWriter output)
+        {
+            var enclosing = new List<LexicalDeclaration>();
+            var signature = new StringBuilder();
+            foreach (var declaration in declarations)
+            {
+                while (enclosing.Count > 0 && Compare(enclosing[enclosing.Count - 1].EndLine, enclosing[enclosing.Count - 1].EndColumn, declaration.Line, declaration.Column) <= 0)
+                {
+                    enclosing.RemoveAt(enclosing.Count - 1);
+                }
+
+                if (!output.NeedsSignature) { output.Omit(); continue; }
+                signature.Clear();
+                var space = false;
+                for (var line = declaration.Line; line <= declaration.HeadLine && signature.Length <= MaxSignatureCharacters; line++)
+                {
+                    var text = lines[line - 1];
+                    var from = line == declaration.Line ? declaration.Column : 0;
+                    var to = line == declaration.HeadLine ? Math.Min(declaration.HeadColumn, text.Length) : text.Length;
+                    for (var i = from; i < to && signature.Length <= MaxSignatureCharacters; i++)
+                    {
+                        if (char.IsWhiteSpace(text[i])) { space = signature.Length > 0; continue; }
+                        if (space) { signature.Append(' '); space = false; }
+                        signature.Append(text[i]);
+                    }
+
+                    space = signature.Length > 0;
+                }
+
+                output.Add(declaration.Line, enclosing.Count, signature.ToString());
+                enclosing.Add(declaration);
+            }
+        }
+
+        private static int Compare(int line, int column, int otherLine, int otherColumn) => line != otherLine ? line.CompareTo(otherLine) : column.CompareTo(otherColumn);
+
         /// <summary>
-        /// The type and member declarations of a brace language file (C#, TypeScript/JavaScript, C/C++), in source order, with the
-        /// position of their first token and of the end of their body or terminator. Null when the file type is not scanned this way
-        /// (Visual Basic, unknown extensions). Namespaces and declarations whose body never closes are left out.
+        /// The type and member declarations of a file, in source order, with the position of their first token and of the end of their
+        /// body or terminator. Brace languages (C#, TypeScript/JavaScript, C/C++) through the brace scanner, the other languages through
+        /// <see cref="DeclarationScanner"/>. Null when the file type is not scanned this way (Visual Basic, unknown extensions).
+        /// Namespaces and declarations whose body never closes are left out.
         /// </summary>
         internal static List<LexicalDeclaration>? FindDeclarations(string path, IReadOnlyList<string> lines)
         {
             var language = GetLanguage(path);
-            if (language == Language.Unknown || language == Language.VisualBasic) return null;
+            if (language == Language.VisualBasic) return null;
+            if (language == Language.Unknown) return DeclarationScanner.Find(path, lines);
             var found = new List<LexicalDeclaration>();
             new BraceScanner(lines, language, null, found).Scan();
             found.RemoveAll(declaration => declaration.EndLine == 0);
@@ -88,7 +134,7 @@ namespace Pomp.Tools
             var extension = Path.GetExtension(path).ToLowerInvariant();
             switch (extension)
             {
-                case ".cs": return Language.CSharp;
+                case ".cs": case ".csx": return Language.CSharp;
                 case ".vb": return Language.VisualBasic;
                 case ".ts": case ".tsx": case ".js": case ".jsx": case ".mjs": case ".cjs": case ".mts": case ".cts":
                     return Language.JavaScript;

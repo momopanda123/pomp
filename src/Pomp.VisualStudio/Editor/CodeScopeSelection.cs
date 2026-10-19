@@ -8,6 +8,7 @@ using Microsoft.VisualStudio.ComponentModelHost;
 using Microsoft.VisualStudio.LanguageServices;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
+using Microsoft.VisualStudio.Text.Tagging;
 using Microsoft.VisualStudio.Threading;
 using Pomp.Tools;
 using Task = System.Threading.Tasks.Task;
@@ -19,9 +20,11 @@ namespace Pomp.VisualStudio.Editor
     /// selected in the editor before the question goes out, so the person sees it and the chat's editor context carries exactly it.
     /// A selection the person made is never touched. Otherwise the innermost member around the caret: method, constructor, property,
     /// operator, event, local function through Roslyn in C# and VB; function, method, constructor, operator, property through the lexical
-    /// declaration scanner (<see cref="SourceDeclarations"/>) in other files it reads (C/C++, TypeScript/JavaScript). Outside a member, or in a
-    /// file neither reads, the caret's line without its indentation. A blank line outside a member selects nothing (the context then names
-    /// the caret as before).
+    /// declaration scanners (<see cref="SourceDeclarations"/>) in the other files they read (C/C++, TypeScript/JavaScript, Python, Java,
+    /// Kotlin, Go, Rust, PHP, Ruby, Swift, Scala, Dart, Lua, PowerShell, shell, F#, SQL, R, Objective-C, Perl, Groovy); a member block of the
+    /// editor's own block structure (<see cref="EditorStructureDeclarations"/>) in any other file. Outside a member, or in a file none of
+    /// these reads, the caret's line without its indentation. A blank line outside a member selects nothing (the context then names the
+    /// caret as before).
     /// </summary>
     internal static class CodeScopeSelection
     {
@@ -56,7 +59,7 @@ namespace Pomp.VisualStudio.Editor
                 var path = document.FilePath; var text = snapshot.GetText(); var position = caret.Position;
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(LookupTimeout);
-                try { member = await FindMemberAsync(solution, path, text, position, blank, timeout.Token).ConfigureAwait(false); }
+                try { member = await FindMemberAsync(solution, path, text, position, blank, snapshot, components, jtf, timeout.Token).ConfigureAwait(false); }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
                 // A failed lookup falls back to the caret's line like a slow one, so the request never names an empty selection.
                 catch (Exception ex) when (!(ex is OperationCanceledException)) { }
@@ -71,12 +74,23 @@ namespace Pomp.VisualStudio.Editor
             view.Selection.Select(new SnapshotSpan(snapshot, scope.Value), isReversed: false);
         }
 
-        private static async Task<Span?> FindMemberAsync(Solution? solution, string path, string text, int position, bool blankLine, CancellationToken token)
+        private static async Task<Span?> FindMemberAsync(Solution? solution, string path, string text, int position, bool blankLine, ITextSnapshot snapshot,
+            IComponentModel components, JoinableTaskFactory jtf, CancellationToken token)
         {
             await TaskScheduler.Default;
             if (string.IsNullOrEmpty(path)) return null;
             var document = solution == null ? null : solution.GetDocumentIdsWithFilePath(path).Select(solution.GetDocument).FirstOrDefault(d => d?.SupportsSyntaxTree == true);
-            if (document == null) return LexicalMember(path, text, position);
+            if (document == null)
+            {
+                var declarations = SourceDeclarations.Find(path, text);
+                if (declarations == null)
+                {
+                    await jtf.SwitchToMainThreadAsync(token);
+                    declarations = EditorStructureDeclarations.Find(components.GetService<IBufferTagAggregatorFactoryService>(), snapshot);
+                }
+
+                return LexicalMember(declarations, text, position);
+            }
             var source = await document.GetTextAsync(token).ConfigureAwait(false);
             // The workspace can trail the editor buffer by a moment; positions would not match, so the caret's line is used.
             if (!string.Equals(source.ToString(), text, StringComparison.Ordinal)) return null;
@@ -90,13 +104,11 @@ namespace Pomp.VisualStudio.Editor
         }
 
         /// <summary>
-        /// The innermost member declaration around <paramref name="position"/> by the lexical scanner, from the start of its first line (its
-        /// indentation and the caret there belong to it, as Roslyn's leading trivia does) through its closing brace; null outside every member.
+        /// The innermost member declaration around <paramref name="position"/> among <paramref name="declarations"/>, from the start of its first
+        /// line (its indentation and the caret there belong to it, as Roslyn's leading trivia does) through its end; null outside every member.
         /// </summary>
-        private static Span? LexicalMember(string path, string text, int position)
+        private static Span? LexicalMember(IReadOnlyList<SourceDeclaration> declarations, string text, int position)
         {
-            var declarations = SourceDeclarations.Find(path, text);
-            if (declarations == null) return null;
             SourceDeclaration? member = null;
             foreach (var declaration in declarations)
             {

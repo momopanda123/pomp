@@ -12,10 +12,11 @@ import { send, APPROVAL_MODES, DEFAULT_SHORTCUTS, MAIN_TARGET, type AgentsStateP
 import type { EditorFollowState, UiToHost } from '../protocol';
 import { matchesShortcut } from '../shortcuts';
 import { useComposerPrediction } from '../useComposerPrediction';
+import { useWordCompletion } from '../useWordCompletion';
 import { ComposerGhost } from './ComposerGhost';
 import { commandCatalog, isBuiltinCommand, LEGACY_COMMANDS, slashMatches, slashTakesReferences, type BuiltinCommand, type SlashMatch } from '../slashCommands';
 import type { SetupReply, SetupState } from '../setup';
-import type { Action } from '../state';
+import type { Action, TranscriptItem } from '../state';
 import { effectiveRoles, isRunnableTeam, targetKey, targetPayload } from '../teamsCache';
 import { useWorkState } from '../work/store';
 import { ConfirmPopover } from './ConfirmPopover';
@@ -49,6 +50,10 @@ interface ComposerProps {
   inputRef: RefObject<HTMLTextAreaElement | null>;
   connected: boolean;
   composerPredictions?: boolean;
+  /** Word completion (Tools > Options > Pomp > Chat): the rest of the word being typed, from this workspace's words. */
+  wordCompletion?: boolean;
+  /** The conversation: its words feed word completion. */
+  transcript: readonly TranscriptItem[];
   busy: boolean;
   queueBlocked?: boolean;
   insertSkill?: { name: string; seq: number };
@@ -168,7 +173,7 @@ function LiveEditorControls({ state, disabled, shortcuts, inputRef, t }: { state
   </span>;
 }
 
-export function Composer({ locale, workspaceKey, sessionId, model, session, setup, setupReplies, onManageAccounts, inputRef, connected, composerPredictions = false, busy, queueBlocked = false, insertSkill, insertText, basketRequest = 0, basketTokens, requestPending, newSessionPending, includeEditorContext, onIncludeEditorContextChange, draft, dispatch, onSend, onStop, commands, commandsHidden, onCommand, onGoal, skillsOff, prefill, agents, shortcuts = DEFAULT_SHORTCUTS, approvalMode, permissionModeReply, editorFollow, selectedTarget, onSelectTarget, partnerName, partner, onOpenPartner }: ComposerProps) {
+export function Composer({ locale, workspaceKey, sessionId, model, session, setup, setupReplies, onManageAccounts, inputRef, connected, composerPredictions = false, wordCompletion = false, transcript, busy, queueBlocked = false, insertSkill, insertText, basketRequest = 0, basketTokens, requestPending, newSessionPending, includeEditorContext, onIncludeEditorContextChange, draft, dispatch, onSend, onStop, commands, commandsHidden, onCommand, onGoal, skillsOff, prefill, agents, shortcuts = DEFAULT_SHORTCUTS, approvalMode, permissionModeReply, editorFollow, selectedTarget, onSelectTarget, partnerName, partner, onOpenPartner }: ComposerProps) {
   const t = useT();
   const focusInput = useCallback(() => inputRef.current?.focus(), [inputRef]);
   const [failure, setFailure] = useState<SendFailure | null>(null);
@@ -420,6 +425,10 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   const { prediction, discard: discardPrediction } = useComposerPrediction({
     inputRef, enabled: composerPredictions, sessionId, text: draft.text, caret, focused: inputFocused,
     suppressed: !connected || requestPending || newSessionPending || queueBlocked || draft.composing || slash !== null || mention !== null,
+  });
+  const { completion: word, dismiss: dismissWord, accepted: acceptedWord } = useWordCompletion({
+    enabled: wordCompletion, workspaceKey: workspaceKey ?? '', sessionId, items: transcript, text: draft.text, caret, focused: inputFocused,
+    suppressed: requestPending || draft.composing || slash !== null || mention !== null,
   });
   const mentionTargets = useMemo(() => {
     if (!mention) return [];
@@ -726,6 +735,26 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     // React/native composition and the legacy IME keyCode must all be checked before handling popup or send keys.
     if (composing.current || draft.composing || event.nativeEvent.isComposing || event.keyCode === 229) { discardPrediction(); return; }
+    // A word completion takes Tab before a sentence prediction; Esc clears both.
+    if (word && !slash && !mention) {
+      if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        const el = event.currentTarget;
+        if (el.value === draft.text && el.selectionStart === word.at && el.selectionEnd === word.at) {
+          event.preventDefault();
+          const value = draft.text.slice(0, word.at) + word.rest + draft.text.slice(word.at);
+          const position = word.at + word.rest.length;
+          discardPrediction();
+          acceptedWord(word.prefix + word.rest);
+          setCaret({ start: position, end: position });
+          dispatch({ type: 'composerEdit', text: value, caret: position, selectionEnd: position });
+          if (failure) setFailure(null);
+          if (targetError) setTargetError(null);
+          window.requestAnimationFrame(() => el.setSelectionRange(position, position));
+          return;
+        }
+      }
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); dismissWord(); discardPrediction(); return; }
+    }
     if (prediction && !slash && !mention) {
       if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
         const el = event.currentTarget;
@@ -951,7 +980,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
             // Options and the "/" button keep the focus (preventDefault on mousedown), so a blur means "clicked elsewhere".
             if (slash) { setHelpOpen(false); setSlashDismissed(draft.text); }
           }} onKeyDown={onKeyDown} />
-        {prediction && <ComposerGhost inputRef={inputRef} text={draft.text} prediction={prediction} />}
+        {word ? <ComposerGhost inputRef={inputRef} text={draft.text.slice(0, word.at)} prediction={word.rest} testId="composer-word-ghost" />
+          : prediction && <ComposerGhost inputRef={inputRef} text={draft.text} prediction={prediction} />}
         </div>
         {/* Send (Enter) sits next to the text it sends; Stop joins it while a reply runs. */}
         <div className="composer-send">

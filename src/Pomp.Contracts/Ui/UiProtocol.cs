@@ -238,6 +238,9 @@ namespace Pomp.Ui
 
         public bool ComposerPredictions { get; set; }
 
+        /// <summary>Word completion in the chat input (Tools > Options > Pomp > Chat); absent from an older host = on.</summary>
+        public bool WordCompletion { get; set; } = true;
+
         /// <summary>omp's approval mode in effect (Tools > Options > Pomp > Agent, or the composer's permission-mode chip).</summary>
         public Pomp.Protocol.OmpApprovalMode ApprovalMode { get; set; }
 

@@ -150,6 +150,7 @@ namespace Pomp.VisualStudio.Composition
                 Locale = PompLanguage.Locale,
                 IncludeEditorContextByDefault = settings.IncludeEditorContextByDefault,
                 ComposerPredictions = settings.ComposerPredictions,
+                WordCompletion = settings.WordCompletion,
             }));
 
             Post(new UiMessage(UiMessageTypes.BridgeState, new BridgeStatePayload

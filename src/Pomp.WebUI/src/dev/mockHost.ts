@@ -1825,7 +1825,7 @@ export function installMockHost(): void {
   let approvalMode: ApprovalMode = 'alwaysAsk';
   let editorFollow: HostToUi['host/editorFollow'] = { live: false, bookmarks: false };
   const postHello = (): void => {
-    post('host/hello', { version: '0.3.0-mock', vsVersion: '17.12 (mock)', locale: opts.locale, includeEditorContextByDefault: true, composerPredictions: new URLSearchParams(window.location.search).get('composerPredictions') === '1', approvalMode, shortcuts: { ...DEFAULT_SHORTCUTS } });
+    post('host/hello', { version: '0.3.0-mock', vsVersion: '17.12 (mock)', locale: opts.locale, includeEditorContextByDefault: true, composerPredictions: new URLSearchParams(window.location.search).get('composerPredictions') === '1', wordCompletion: new URLSearchParams(window.location.search).get('wordCompletion') !== '0', approvalMode, shortcuts: { ...DEFAULT_SHORTCUTS } });
   };
 
   const sent: unknown[] = [];

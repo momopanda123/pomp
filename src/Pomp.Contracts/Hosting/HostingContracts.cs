@@ -56,6 +56,9 @@ namespace Pomp.Hosting
 
         bool ComposerPredictions { get; }
 
+        /// <summary>Word completion in the chat input (local, from this workspace's words): a grey rest of the word Tab inserts.</summary>
+        bool WordCompletion { get; }
+
         /// <summary>Persisted "always allow" policy keys (see <see cref="Permissions.PermissionRequest.PolicyKey"/>).</summary>
         IReadOnlyCollection<string> AlwaysAllowedPolicyKeys { get; }
 

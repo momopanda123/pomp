@@ -5,7 +5,7 @@ const MIRROR_PROPERTIES = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 
   'tabSize', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'whiteSpace', 'overflowWrap', 'wordBreak'] as const;
 
 /** A clipped mirror follows the textarea's viewport without adding any height or scrollbars. */
-export function ComposerGhost({ inputRef, text, prediction }: { inputRef: RefObject<HTMLTextAreaElement | null>; text: string; prediction: string }) {
+export function ComposerGhost({ inputRef, text, prediction, testId = 'composer-ghost' }: { inputRef: RefObject<HTMLTextAreaElement | null>; text: string; prediction: string; testId?: string }) {
   const viewport = useRef<HTMLDivElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -31,7 +31,7 @@ export function ComposerGhost({ inputRef, text, prediction }: { inputRef: RefObj
     theme.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'data-theme'] });
     return () => { input.removeEventListener('scroll', sync); resize?.disconnect(); theme.disconnect(); };
   }, [inputRef, text, prediction]);
-  return <div ref={viewport} className="composer-ghost" aria-hidden="true" data-testid="composer-ghost">
+  return <div ref={viewport} className="composer-ghost" aria-hidden="true" data-testid={testId}>
     <div ref={mirror} className="composer-ghost-mirror"><span className="composer-ghost-prefix">{text}</span><wbr /><span className="composer-ghost-text">{prediction}</span></div>
   </div>;
 }

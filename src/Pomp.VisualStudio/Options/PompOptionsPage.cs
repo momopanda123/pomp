@@ -452,6 +452,11 @@ namespace Pomp.VisualStudio.Options
         [Description("")]
         public bool ComposerPredictions { get; set; } = false;
 
+        [PompCategory("채팅", "Chat")]
+        [PompDisplayName("입력 단어 완성", "Word completion")]
+        [Description("")]
+        public bool WordCompletion { get; set; } = true;
+
         // ---- Permissions -----------------------------------------------------------------------------
 
         // ---- Shortcuts (docs/settings.md "단축키") -------------------------------------------------------
@@ -648,6 +653,8 @@ namespace Pomp.VisualStudio.Options
         bool IPompSettings.IncludeEditorContextByDefault => Applied.IncludeEditorContextByDefault;
 
         bool IPompSettings.ComposerPredictions => Applied.ComposerPredictions;
+
+        bool IPompSettings.WordCompletion => Applied.WordCompletion;
 
         IReadOnlyCollection<string> IPompSettings.AlwaysAllowedPolicyKeys => Applied.AlwaysAllowedPolicyKeys;
 
@@ -1069,6 +1076,7 @@ namespace Pomp.VisualStudio.Options
                 EditorContextLimits = new EditorContextLimits(page.EditorContextLines, page.EditorContextLargeFileLines, page.EditorContextLargeFileThreshold,
                     page.EditorContextSelectedChars, page.EditorContextLineChars, page.EditorContextWindowChars, page.EditorContextErrors, page.EditorContextTimeoutSeconds);
                 ComposerPredictions = page.ComposerPredictions;
+                WordCompletion = page.WordCompletion;
                 EnableCodeCaptions = page.EnableCodeCaptions;
                 LiveFollowEnabled = page.LiveFollowEnabled;
                 LiveBookmarksEnabled = page.LiveBookmarksEnabled;
@@ -1133,6 +1141,7 @@ namespace Pomp.VisualStudio.Options
                 IncludeEditorContextByDefault = source.IncludeEditorContextByDefault;
                 EditorContextLimits = source.EditorContextLimits;
                 ComposerPredictions = source.ComposerPredictions;
+                WordCompletion = source.WordCompletion;
                 EnableCodeCaptions = source.EnableCodeCaptions;
                 LiveFollowEnabled = source.LiveFollowEnabled;
                 LiveBookmarksEnabled = source.LiveBookmarksEnabled;
@@ -1210,6 +1219,8 @@ namespace Pomp.VisualStudio.Options
             public EditorContextLimits EditorContextLimits { get; }
 
             public bool ComposerPredictions { get; }
+
+            public bool WordCompletion { get; }
 
             public bool EnableCodeCaptions { get; private set; }
             public bool LiveFollowEnabled { get; private set; }
