@@ -157,6 +157,13 @@ namespace Pomp.VisualStudio.Options
         public bool InlineCompletionsEnabled => Applied.EnableInlineCompletions;
 
         [PompCategory("편집기", "Editor")]
+        [PompDisplayName("자동완성 제한 시간(초)", "Inline completion time limit (seconds)")]
+        [Description("")]
+        public int InlineCompletionTimeoutSeconds { get; set; } = InlineCompletionLimits.DefaultSeconds;
+
+        int IInlineModelSettings.InlineCompletionTimeoutSeconds => Applied.InlineCompletionTimeoutSeconds;
+
+        [PompCategory("편집기", "Editor")]
         [PompDisplayName("Live 수정 따라가기", "Follow Live edits")]
         [Description("")]
         public bool LiveFollowEnabled { get; set; } = false;
@@ -1094,6 +1101,7 @@ namespace Pomp.VisualStudio.Options
                 LocalEmbeddingEndpoint = page.LocalEmbeddingEndpoint?.Trim() ?? "";
                 LocalEmbeddingModel = page.LocalEmbeddingModel?.Trim() ?? "";
                 EnableInlineCompletions = page.EnableInlineCompletions;
+                InlineCompletionTimeoutSeconds = Math.Max(InlineCompletionLimits.MinSeconds, Math.Min(InlineCompletionLimits.MaxSeconds, page.InlineCompletionTimeoutSeconds));
                 InlineAssistantModel = NullIfBlank(page.InlineAssistantModel);
                 ComputerUseMode = page.ComputerUseMode;
                 BrowserControl = page.BrowserControl;
@@ -1159,6 +1167,7 @@ namespace Pomp.VisualStudio.Options
                 LocalEmbeddingEndpoint = source.LocalEmbeddingEndpoint;
                 LocalEmbeddingModel = source.LocalEmbeddingModel;
                 EnableInlineCompletions = source.EnableInlineCompletions;
+                InlineCompletionTimeoutSeconds = source.InlineCompletionTimeoutSeconds;
                 InlineAssistantModel = source.InlineAssistantModel;
                 ComputerUseMode = source.ComputerUseMode;
                 BrowserControl = source.BrowserControl;
@@ -1240,6 +1249,8 @@ namespace Pomp.VisualStudio.Options
             public string LocalEmbeddingModel { get; }
 
             public bool EnableInlineCompletions { get; private set; }
+
+            public int InlineCompletionTimeoutSeconds { get; }
 
             public string? InlineAssistantModel { get; private set; }
 

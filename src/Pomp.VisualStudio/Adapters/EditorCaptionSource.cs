@@ -24,7 +24,8 @@ namespace Pomp.VisualStudio.Adapters
         private static readonly HashSet<string> Kinds = new HashSet<string>(StringComparer.Ordinal) {
             "MethodDeclarationSyntax", "ConstructorDeclarationSyntax", "PropertyDeclarationSyntax", "ClassDeclarationSyntax", "StructDeclarationSyntax", "InterfaceDeclarationSyntax", "RecordDeclarationSyntax", "EnumDeclarationSyntax", "LocalFunctionStatementSyntax",
             "MethodBlockSyntax", "PropertyBlockSyntax", "ClassBlockSyntax", "StructureBlockSyntax", "InterfaceBlockSyntax", "ModuleBlockSyntax" };
-        private const int MaxTargets = 12;
+        // A query covers the whole file up to 3000 lines (else three screens around the visible one, see CodeCaptionFeature), every declaration of it.
+        private const int MaxTargets = 1000;
         private readonly VsAdapterContext context;
         public EditorCaptionSource(VsAdapterContext context) { this.context = context; }
         public Task<EditorCaptionSnapshot> CaptureAsync(string root, string path, string exactText, int firstLine, int lastLine, CancellationToken token)

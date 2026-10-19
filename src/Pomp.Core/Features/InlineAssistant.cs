@@ -16,6 +16,14 @@ namespace Pomp.Features
     {
         /// <summary>The editor model: empty = automatic (omp's fast model), <c>@chat</c> = the chat model, else a model string (<c>provider/id</c>).</summary>
         string? InlineModel { get; }
+        /// <summary>How long one automatic completion may take, in seconds (<see cref="InlineCompletionLimits"/>).</summary>
+        int InlineCompletionTimeoutSeconds { get; }
+    }
+
+    /// <summary>Bounds of the completion time limit option; a value outside them is clamped.</summary>
+    public static class InlineCompletionLimits
+    {
+        public const int DefaultSeconds = 10, MinSeconds = 2, MaxSeconds = 60;
     }
 
     /// <summary>Saves the editor model chosen in the chat window (the same options value as <see cref="IInlineModelSettings.InlineModel"/>).</summary>

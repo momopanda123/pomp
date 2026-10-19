@@ -44,6 +44,8 @@ namespace Pomp.VisualStudio.Editor
         private sealed class Controller : ILineTransformSource
         {
             private const double Height = 18;
+            /// <summary>Files up to this many lines get every caption at once (see <c>OnTimer</c>); EditorCaptionSource's target cap fits them.</summary>
+            private const int WholeFileLines = 3000;
             private readonly IWpfTextView view;
             private readonly ITextDocumentFactoryService documents;
             private readonly IAdornmentLayer layer;
@@ -134,8 +136,13 @@ namespace Pomp.VisualStudio.Editor
                 debounce.Stop(); var services = PompServices.Current;
                 if (closed || !Enabled || services == null || view.InLayout || view.TextViewLines == null || !view.VisualElement.IsVisible || view.TextSnapshot.Length > 500000 || !documents.TryGetTextDocument(view.TextBuffer, out var document)) return;
                 var snapshot = view.TextSnapshot;
-                var first = view.TextViewLines.FirstVisibleLine.Start.GetContainingLine().LineNumber + 1;
-                var last = view.TextViewLines.LastVisibleLine.End.GetContainingLine().LineNumber + 1;
+                // The whole file up to WholeFileLines lines, else one screen above and one below the visible lines as well: a declaration
+                // scrolled into view (moving the caret past the edge) already has its caption row, instead of getting it a moment later and
+                // pushing the code under it down.
+                var top = view.TextViewLines.FirstVisibleLine.Start.GetContainingLine().LineNumber + 1;
+                var bottom = view.TextViewLines.LastVisibleLine.End.GetContainingLine().LineNumber + 1;
+                var whole = snapshot.LineCount <= WholeFileLines;
+                var first = whole ? 1 : Math.Max(1, top - (bottom - top + 1)); var last = whole ? snapshot.LineCount : Math.Min(snapshot.LineCount, bottom + (bottom - top + 1));
                 if (snapshot == queriedSnapshot && first == queriedFirst && last == queriedLast) return;
                 var exactText = snapshot.GetText(); var path = document.FilePath;
                 Cancel(ref capture); var pending = new CancellationTokenSource(); capture = pending; var token = pending.Token;

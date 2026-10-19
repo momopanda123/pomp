@@ -3,7 +3,9 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { isPompHost } from "../lib/vs-state.ts";
 
 /** How long one request may take: completions must be quick to be useful, an edit or a knowledge rewrite may take longer. */
-const TIMEOUT_MS: Record<string, number> = { complete: 8000, caption: 12000, edit: 45000, knowledge: 60000, prompt: 6000 };
+const TIMEOUT_MS: Record<string, number> = { complete: 10000, caption: 12000, edit: 45000, knowledge: 60000, prompt: 6000 };
+/** Bounds of the completion limit the host sends (VS option "자동완성 제한 시간(초)", 2–60 s). */
+const COMPLETE_TIMEOUT_RANGE = { min: 2000, max: 60000 } as const;
 
 /**
  * Output tokens a reasoning model may spend on thinking that cannot be switched off. The output limit counts reasoning, and
@@ -29,7 +31,7 @@ export default function inlineAssistant(pi: ExtensionAPI): void {
   pi.registerCommand("pomp-inline", {
     description: "POMP editor assistance transport (invoked by the VS host)",
     handler: async (args, ctx) => {
-      let request: { id: string; mode: string; prefix: string; selection: string; suffix: string; instruction: string; language: string; model?: string; sessionId?: string };
+      let request: { id: string; mode: string; prefix: string; selection: string; suffix: string; instruction: string; language: string; model?: string; sessionId?: string; timeoutMs?: number };
       try {
         if (args.length > 100000) return;
         request = JSON.parse(Buffer.from(args.trim(), "base64").toString("utf8"));
@@ -50,7 +52,11 @@ export default function inlineAssistant(pi: ExtensionAPI): void {
       // "resolve" only says which model the choice means now (shown in POMP); it calls no model.
       if (request.mode === "resolve") { respond({ text: "", model: used }); return; }
       const abort = new AbortController();
-      const timeout = setTimeout(() => abort.abort(), TIMEOUT_MS[request.mode] ?? 8000);
+      // A completion uses the host's option when it sends one (whole milliseconds, within the option's bounds).
+      const limit = request.mode === "complete" && Number.isInteger(request.timeoutMs)
+        ? Math.min(COMPLETE_TIMEOUT_RANGE.max, Math.max(COMPLETE_TIMEOUT_RANGE.min, request.timeoutMs as number))
+        : TIMEOUT_MS[request.mode] ?? 8000;
+      const timeout = setTimeout(() => abort.abort(), limit);
       try {
         const apiKey = await ctx.modelRegistry.getApiKey(model);
         const editing = request.mode === "edit";

@@ -24,12 +24,14 @@ namespace Pomp.Hosting
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
             var mode = request.IsCaption ? "caption" : request.IsEdit ? "edit" : "complete";
-            // The engine side gives up first (8 s / 12 s / 45 s); the host waits a little longer for its answer.
-            var wait = TimeSpan.FromSeconds(mode == "edit" ? 50 : mode == "caption" ? 16 : 12);
+            // The engine side gives up first (completion: the option, default 10 s; caption 12 s; edit 45 s); the host waits a little longer for its answer.
+            var completionSeconds = Math.Max(InlineCompletionLimits.MinSeconds, Math.Min(InlineCompletionLimits.MaxSeconds,
+                (_settings as IInlineModelSettings)?.InlineCompletionTimeoutSeconds ?? InlineCompletionLimits.DefaultSeconds));
+            var wait = TimeSpan.FromSeconds(mode == "edit" ? 50 : mode == "caption" ? 16 : completionSeconds + 4);
             var spec = EditorModelSetting.EngineSpec((_settings as IInlineModelSettings)?.InlineModel);
             // A request that finds another one running waits for it: the editor cancels the older waiting ones as the user types, so
             // the newest suggestion is asked as soon as the engine is free (the running one cannot be stopped, it ends within its limit).
-            var reply = await SendInlineAsync(mode, request, spec, wait, waitForSlot: true, cancellationToken).ConfigureAwait(false);
+            var reply = await SendInlineAsync(mode, request, spec, wait, waitForSlot: true, cancellationToken, engineTimeoutMs: mode == "complete" ? completionSeconds * 1000 : (int?)null).ConfigureAwait(false);
             return reply?.Text ?? string.Empty;
         }
 
@@ -41,7 +43,7 @@ namespace Pomp.Hosting
         }
 
         /// <summary>One <c>/pomp-inline</c> request; null when another one is running and <paramref name="waitForSlot"/> is false.</summary>
-        private async Task<InlineReply?> SendInlineAsync(string mode, InlineRequest request, string? model, TimeSpan resultTimeout, bool waitForSlot, CancellationToken cancellationToken, string? expectedSession = null)
+        private async Task<InlineReply?> SendInlineAsync(string mode, InlineRequest request, string? model, TimeSpan resultTimeout, bool waitForSlot, CancellationToken cancellationToken, string? expectedSession = null, int? engineTimeoutMs = null)
         {
             cancellationToken.ThrowIfCancellationRequested();
             CheckInlineAdmission();
@@ -92,6 +94,7 @@ namespace Pomp.Hosting
                     ["suffix"] = Bound(request.Suffix, 4000), ["instruction"] = Bound(request.Instruction, 2000),
                     ["language"] = Bound(request.Language, 100) };
                 if (!string.IsNullOrWhiteSpace(model)) payload["model"] = Bound(model!, 512);
+                if (engineTimeoutMs != null) payload["timeoutMs"] = engineTimeoutMs.Value;
                 var message = "/pomp-inline " + Convert.ToBase64String(Encoding.UTF8.GetBytes(payload.ToString(Formatting.None)));
                 // This registered extension command calls the editor model directly without agent tools.
                 // Do not abort the main agent when a suggestion becomes stale. Keep the one-request slot
