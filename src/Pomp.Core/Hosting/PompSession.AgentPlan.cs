@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
@@ -23,6 +24,7 @@ namespace Pomp.Hosting
         private const int MaxPlanNameChars = 200;
         private const int MaxPlanContentChars = 600;
         private const int MaxPlanBlockerChars = 300;
+        private const string PlanNoteCommand = "pomp-plan-note";
 
         private static readonly HashSet<string> PlanStatuses = new HashSet<string>(StringComparer.Ordinal) { "pending", "in_progress", "completed", "abandoned", "blocked" };
 
@@ -39,7 +41,7 @@ namespace Pomp.Hosting
                 var epoch = CurrentEpochToken();
 
                 // Only an exact copy of the plan the page showed may be replaced: the model could have updated it since.
-                var state = await ReadIdlePlanStateAsync(connection, epoch, session).ConfigureAwait(false);
+                var state = await ReadPlanStateAsync(connection, epoch, session).ConfigureAwait(false);
                 JArray engine;
                 try { engine = PlanJson(ReadPlan(state["todoPhases"] ?? new JArray(), userEdit: false)); }
                 catch (ArgumentException) { throw new InvalidOperationException(PompLanguage.Pick("현재 계획에 화면에서 그대로 편집할 수 없는 항목이 있어요.", "The current plan has entries this editor cannot keep intact.")); }
@@ -48,6 +50,7 @@ namespace Pomp.Hosting
                 await SetPlanAsync(session, connection, epoch, PlanJson(phases)).ConfigureAwait(false);
                 _logger.Info("Agent plan edited by the user: " + phases.Count + " phase(s), " + phases.Sum(phase => phase.Tasks.Count) + " task(s).");
                 await RefreshAfterPlanSetAsync(connection, epoch).ConfigureAwait(false);
+                await TellModelAboutPlanEditAsync(connection, epoch, session, "replaced the whole plan (" + phases.Count + " phase(s), " + phases.Sum(phase => phase.Tasks.Count) + " task(s))").ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
             {
@@ -64,7 +67,9 @@ namespace Pomp.Hosting
         /// <summary>
         /// One change to the whole plan (workspace/agentPlanEdit): the page names the revision of the plan it showed; any other plan
         /// is refused. Then like <see cref="HandleAgentPlanAsync"/>: the engine's plan is read strictly (no count caps here), changed
-        /// and set back, and the new state is applied before the answer.
+        /// and set back, and the new state is applied before the answer. While the agent works only a change that leaves the task in
+        /// progress alone is taken (<see cref="PlanEdit.SafeWhileWorking"/>): the model names its tasks by their text, and the one it
+        /// works on must stay as it knows it.
         /// </summary>
         private async Task HandleAgentPlanEditAsync(JObject args)
         {
@@ -74,21 +79,30 @@ namespace Pomp.Hosting
             {
                 var session = args.GetString("sessionId") ?? "";
                 var edit = PlanEdit.Parse(args);
-                var connection = RequirePlanEditable(session);
+                var working = PlanEditBlock(session, null, out _) != null;
+                var connection = RequirePlanEditable(session, whileWorking: true);
                 var epoch = CurrentEpochToken();
 
-                var state = await ReadIdlePlanStateAsync(connection, epoch, session).ConfigureAwait(false);
+                var state = await ReadPlanStateAsync(connection, epoch, session, idle: false).ConfigureAwait(false);
+                working |= PlanStateWorking(state);
                 var engine = state["todoPhases"] as JArray ?? new JArray();
                 var seen = args.GetString("revision");
                 if (PlanRevisionOf(engine) != (string.IsNullOrEmpty(seen) ? null : seen)) throw new InvalidOperationException(PompLanguage.Pick("그 사이 계획이 바뀌었어요.", "The plan changed meanwhile."));
                 List<AgentPlanPhasePayload> phases;
                 try { phases = ReadPlan(engine, userEdit: false, capped: false); }
                 catch (ArgumentException) { throw new InvalidOperationException(PompLanguage.Pick("현재 계획에 화면에서 그대로 편집할 수 없는 항목이 있어요.", "The current plan has entries this editor cannot keep intact.")); }
+                if (working && !edit.SafeWhileWorking(phases))
+                    throw new InvalidOperationException(PompLanguage.Pick("에이전트가 작업 중이에요. 진행 중인 작업과 그 단계는 작업이 끝난 뒤 바꿀 수 있어요.", "The agent is working. The task in progress and its phase can be changed when it stops."));
+                var change = edit.Describe(phases);
                 edit.Apply(phases);
+                // The model may update its plan at any moment while it works: the plan is read once more just before it is replaced.
+                if (working && PlanRevisionOf((await ReadPlanStateAsync(connection, epoch, session, idle: false).ConfigureAwait(false))["todoPhases"]) != PlanRevisionOf(engine))
+                    throw new InvalidOperationException(PompLanguage.Pick("그 사이 계획이 바뀌었어요.", "The plan changed meanwhile."));
 
-                await SetPlanAsync(session, connection, epoch, PlanJson(phases)).ConfigureAwait(false);
-                _logger.Info("Agent plan edited by the user: " + edit.Op + ", " + phases.Count + " phase(s), " + phases.Sum(phase => phase.Tasks.Count) + " task(s).");
+                await SetPlanAsync(session, connection, epoch, PlanJson(phases), whileWorking: working).ConfigureAwait(false);
+                _logger.Info("Agent plan edited by the user" + (working ? " while the agent works" : "") + ": " + edit.Op + ", " + phases.Count + " phase(s), " + phases.Sum(phase => phase.Tasks.Count) + " task(s).");
                 await RefreshAfterPlanSetAsync(connection, epoch).ConfigureAwait(false);
+                await TellModelAboutPlanEditAsync(connection, epoch, session, change).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
             {
@@ -112,24 +126,43 @@ namespace Pomp.Hosting
             _ui.Post(UiMessageTypes.AgentPlanResult, reply, UiDelivery.State);
         }
 
-        /// <summary>The engine's state for a plan edit; refused while the agent is working or when it is another conversation.</summary>
-        private static async Task<JObject> ReadIdlePlanStateAsync(OmpConnection connection, CancellationToken epoch, string session)
+        /// <summary>
+        /// Tells the model what the user changed in its plan (the extension's <c>pomp-plan-note</c>, see plan-edits.ts): it remembers the
+        /// plan it wrote and would otherwise write it back. The note reaches it with its next tool result, or before its next run.
+        /// The edit itself is done; a note that cannot be sent is logged, not reported as a failed edit.
+        /// </summary>
+        private async Task TellModelAboutPlanEditAsync(OmpConnection connection, CancellationToken epoch, string session, string change)
+        {
+            try
+            {
+                await RequireEngineCommandsAsync(connection, epoch, PlanNoteCommand).ConfigureAwait(false);
+                var note = Convert.ToBase64String(Encoding.UTF8.GetBytes(new JObject { ["sessionId"] = session, ["change"] = TextUtil.Truncate(change, 3000) }.ToString(Newtonsoft.Json.Formatting.None)));
+                // An extension command runs at once, also while the main turn streams; it starts no turn of its own.
+                var response = await connection.SendCommandAsync(OmpCommands.Prompt("/" + PlanNoteCommand + " " + note), TimeSpan.FromSeconds(10), epoch).ConfigureAwait(false);
+                if (!response.Success) _logger.Warn("The plan edit note was not taken: " + response.Error);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException && _disposeCts.IsCancellationRequested)) { _logger.Warn("The plan edit note was not sent: " + ex.Message); }
+        }
+
+        /// <summary>The engine's state for a plan edit; refused when it is another conversation and, with <paramref name="idle"/>, while the agent is working.</summary>
+        private static async Task<JObject> ReadPlanStateAsync(OmpConnection connection, CancellationToken epoch, string session, bool idle = true)
         {
             var current = await connection.SendCommandAsync(OmpCommands.GetState(), TimeSpan.FromSeconds(10), epoch).ConfigureAwait(false);
             if (!current.Success || current.Data is not JObject state) throw new InvalidOperationException(PompLanguage.Pick("현재 작업 계획을 읽지 못했어요.", "Could not read the current work plan."));
-            if (state.GetBool("isStreaming") == true || state.GetBool("hasPendingAsyncWork") == true || state.GetBool("isSettled") == false)
-                throw new InvalidOperationException(PompLanguage.Pick("에이전트가 작업 중이에요.", "The agent is working."));
+            if (idle && PlanStateWorking(state)) throw new InvalidOperationException(PompLanguage.Pick("에이전트가 작업 중이에요.", "The agent is working."));
             if (state.GetString("sessionId") != session) throw new InvalidOperationException(PompLanguage.Pick("대화가 바뀌었어요.", "The conversation changed."));
             return state;
         }
 
+        private static bool PlanStateWorking(JObject state) => state.GetBool("isStreaming") == true || state.GetBool("hasPendingAsyncWork") == true || state.GetBool("isSettled") == false;
+
         /// <summary>set_todos with <paramref name="plan"/>, only while the plan is still editable through <paramref name="connection"/>.</summary>
-        private async Task SetPlanAsync(string session, OmpConnection connection, CancellationToken epoch, JArray plan)
+        private async Task SetPlanAsync(string session, OmpConnection connection, CancellationToken epoch, JArray plan, bool whileWorking = false)
         {
             // The engine's RPC transport asks for one inbound command within about 1 MiB: a bigger plan is not sent at all.
             var command = OmpCommands.SetTodos(plan);
             if (Pomp.Transport.NdjsonWriter.Encode(command).Length > MaxPromptFrameBytes) throw new InvalidOperationException(PompLanguage.Pick("계획이 너무 커서 저장할 수 없어요.", "The plan is too large to save."));
-            RequirePlanEditable(session, connection);
+            RequirePlanEditable(session, connection, whileWorking);
             var response = await connection.SendCommandAsync(command, TimeSpan.FromSeconds(10), epoch).ConfigureAwait(false);
             if (!response.Success) throw new InvalidOperationException(PompLanguage.Pick("계획 변경이 적용되지 않았어요: ", "The plan change was not applied: ") + TextUtil.Truncate(response.Error ?? "", 300));
         }
@@ -145,29 +178,32 @@ namespace Pomp.Hosting
         }
 
         /// <summary>The current connection when the plan may be edited now; otherwise why not.</summary>
-        private OmpConnection RequirePlanEditable(string session, OmpConnection? expected = null)
+        private OmpConnection RequirePlanEditable(string session, OmpConnection? expected = null, bool whileWorking = false)
         {
-            var reason = PlanEditBlock(session, expected, out var connection);
+            var reason = PlanEditBlock(session, expected, out var connection, whileWorking);
             if (reason != null) throw new InvalidOperationException(reason);
             return connection!;
         }
 
-        /// <summary>Why the plan cannot be edited now, or null (then <paramref name="connection"/> is the one to edit through).</summary>
-        private string? PlanEditBlock(string session, OmpConnection? expected, out OmpConnection? connection)
+        /// <summary>
+        /// Why the plan cannot be edited now, or null (then <paramref name="connection"/> is the one to edit through). With
+        /// <paramref name="whileWorking"/> only the conversation and the connection count: the agent's work does not block the edit.
+        /// </summary>
+        private string? PlanEditBlock(string session, OmpConnection? expected, out OmpConnection? connection, bool whileWorking = false)
         {
             connection = null;
             // Read before the state lock: the hub's lock is never taken inside it.
-            if (_ui.PendingRequestCount > 0) return PompLanguage.Pick("대기 중인 승인이나 질문이 있어요.", "An approval or question is pending.");
-            if (_dispatcher.ActiveCount > 0) return PompLanguage.Pick("도구가 실행 중이에요.", "A tool is running.");
+            if (!whileWorking && _ui.PendingRequestCount > 0) return PompLanguage.Pick("대기 중인 승인이나 질문이 있어요.", "An approval or question is pending.");
+            if (!whileWorking && _dispatcher.ActiveCount > 0) return PompLanguage.Pick("도구가 실행 중이에요.", "A tool is running.");
             lock (_stateLock)
             {
                 if (string.IsNullOrEmpty(session) || session != _info.SessionId || _sessionSwitchUncertain || _recoveryStatus != "ready")
                     return PompLanguage.Pick("대화가 바뀌었거나 복원 중이에요.", "The conversation changed or is recovering.");
                 if (_bridge.State != BridgeState.Running || _epochConnection == null || (expected != null && !ReferenceEquals(expected, _epochConnection)))
                     return PompLanguage.Pick("POMP가 연결되지 않았어요.", "POMP is not connected.");
-                if (_turns.Count > 0 || _info.IsStreaming || _info.HasPendingAsyncWork)
+                if (!whileWorking && (_turns.Count > 0 || _info.IsStreaming || _info.HasPendingAsyncWork))
                     return PompLanguage.Pick("에이전트가 작업 중이에요.", "The agent is working.");
-                if (_chatQueue.Count > 0 && !_queuePaused)
+                if (!whileWorking && _chatQueue.Count > 0 && !_queuePaused)
                     return PompLanguage.Pick("대기열의 메시지가 곧 실행돼요.", "Queued messages are about to run.");
                 connection = _epochConnection;
                 return null;

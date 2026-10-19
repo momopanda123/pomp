@@ -138,7 +138,7 @@ export function createMockWork(post: Post, root: string, session: () => string, 
         const rows = plan.flatMap((phase, p) => phase.tasks.map((task, t) => ({ phase: p, task: t, content: task.content, status: task.status, ...(task.blocker ? { blocker: task.blocker } : {}) })))
           .filter(row => !q || row.content.toLowerCase().includes(q) || (row.blocker ?? '').toLowerCase().includes(q) || plan[row.phase].name.toLowerCase().includes(q));
         const size = Math.min(100, Math.max(1, command.size)); const page = Math.min(Math.max(0, command.page), Math.max(0, Math.ceil(rows.length / size) - 1));
-        window.setTimeout(() => post('workspace/agentPlanPageResult', { requestId: command.requestId, ok: true, revision: 'r' + planRevision, editable: true, page, size, total: rows.length,
+        window.setTimeout(() => post('workspace/agentPlanPageResult', { requestId: command.requestId, ok: true, revision: 'r' + planRevision, editable: true, editableWhileWorking: true, page, size, total: rows.length,
           phases: plan.map((phase, index) => ({ index, name: phase.name, taskCount: phase.tasks.length })), rows: rows.slice(page * size, page * size + size) }), 60);
         return true;
       }

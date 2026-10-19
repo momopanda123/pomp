@@ -183,7 +183,7 @@ namespace Pomp.VisualStudio.Editor
                     panel.Children.Add(summary);
                     var left = line.TextRight + Gap;
                     if (summaries.TryGetValue(target.Start, out var text))
-                        panel.Children.Add(new TextBlock { Text = "AI: " + text, Foreground = foreground, Opacity = .65, FontSize = 10, FontStyle = FontStyles.Italic, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0),
+                        panel.Children.Add(new TextBlock { Text = text, Foreground = foreground, Opacity = .65, FontSize = 10, FontStyle = FontStyles.Italic, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0),
                             MaxWidth = Math.Max(160, view.ViewportRight - left - 70), TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = text });
                     Canvas.SetLeft(panel, left); Canvas.SetTop(panel, line.TextTop);
                     layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, new SnapshotSpan(line.Start, 0), target, panel, null);

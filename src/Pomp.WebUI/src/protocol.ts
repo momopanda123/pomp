@@ -413,7 +413,9 @@ export interface AgentPlanTask { content: string; status: string; blocker?: stri
 export interface AgentPlanPhase { name: string; tasks: AgentPlanTask[] }
 /** One page of the whole plan; phase/task are indexes into the whole plan. */
 export interface AgentPlanPage {
-  requestId: string; ok: boolean; error?: string; revision?: string; editable?: boolean; page: number; size: number; total: number;
+  requestId: string; ok: boolean; error?: string; revision?: string; editable?: boolean;
+  /** While the agent works: the tasks not in progress may be edited (added, changed, deleted) and phases renamed. */
+  editableWhileWorking?: boolean; page: number; size: number; total: number;
   phases: { index: number; name: string; taskCount: number }[];
   rows: { phase: number; task: number; content: string; status: string; blocker?: string }[];
 }

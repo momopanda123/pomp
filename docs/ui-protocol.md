@@ -798,7 +798,7 @@ Payload:
 - Answered by `workspace/agentPlanPageResult`:
 
 ```
-{ requestId, ok, error?, revision, editable, page, size, total,
+{ requestId, ok, error?, revision, editable, editableWhileWorking, page, size, total,
   phases: [{ index, name, taskCount }],
   rows: [{ phase, task, content, status, blocker? }] }
 ```
@@ -857,7 +857,13 @@ Payload:
 - `planRevision` is a hash of the whole plan.
 - `todoPhases` holds the first 20 phases / 200 tasks.
 - The page asks `workspace/agentPlanPage` again whenever the revision changes.
-- Each row is edited or deleted with `workspace/agentPlanEdit`, under the same guards as above.
+- Each row is edited or deleted with `workspace/agentPlanEdit`, under the same guards as above, except while the agent works:
+  - `editable` says the guards above pass; `editableWhileWorking` says only the conversation and the connection are right.
+  - While a turn, a tool, an approval/question or background work is active, or queued messages are about to run, an edit is taken only when it leaves the task in progress alone: changing or deleting a task that is not in progress, adding a task, adding or renaming a phase. No edit may set `in_progress`. A phase holding the task in progress is not deleted.
+  - The reason: the model names its tasks by their text in its todo calls; the task it works on must stay as it knows it.
+  - The host reads the plan once more just before `set_todos` and refuses the edit when the model changed it meanwhile.
+  - The page asks for the page again when the work starts or ends, so both flags are current.
+- After every saved edit the host sends `/pomp-plan-note` (extension `plan-edits.ts`) with the change in words. The model gets it once: with its next tool result while it works, else before its next run. It says the plan as it is now is the user's, so the model does not write back the plan it remembers.
 - Tasks and phases are added, and phases renamed or deleted, the same way.
 - There is no limit on the number of phases or tasks.
 - Text limits still apply: names ≤ 200, content ≤ 600, blocker ≤ 300 characters.
@@ -1810,7 +1816,7 @@ The palette lists the plain name; the host sends the registered one.
 - A short name the user defined is kept; the POMP counterpart is then not listed under that name.
 - The registered names, such as `/pomp-workflow`, keep working when typed, and are not listed.
 - POMP's plumbing commands are never listed; typing them still sends them.
-  They are `pomp-tools`, `pomp-inline`, `pomp-stop`, `pomp-feedback-guard`, `pomp-agent`, `pomp-dm` and `pomp-team`.
+  They are `pomp-tools`, `pomp-inline`, `pomp-stop`, `pomp-feedback-guard`, `pomp-agent`, `pomp-dm`, `pomp-team` and `pomp-plan-note`.
 - `/pomp-compact` no longer exists.
   - The engine's `compact` is dispatchable over RPC.
   - POMP's compaction hook (`session.compacting`) already adds the Visual Studio facts to every compaction.

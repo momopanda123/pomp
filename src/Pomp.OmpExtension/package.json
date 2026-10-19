@@ -29,6 +29,7 @@
       "./extensions/verify-gate.ts",
       "./extensions/time-context.ts",
       "./extensions/plan-guard.ts",
+      "./extensions/plan-edits.ts",
       "./extensions/features-guidance.ts",
       "./extensions/reply-style.ts",
       "./extensions/local-models.ts"

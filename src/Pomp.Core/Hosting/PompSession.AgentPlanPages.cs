@@ -133,6 +133,8 @@ namespace Pomp.Hosting
                 ["requestId"] = requestId, ["ok"] = true, ["revision"] = plan.Revision,
                 // Read outside the state lock: the hub's lock is never taken inside it.
                 ["editable"] = plan.Editable.Value && PlanEditBlock(session, null, out _) == null,
+                // While the agent works: the tasks not in progress (PlanEdit.SafeWhileWorking).
+                ["editableWhileWorking"] = plan.Editable.Value && PlanEditBlock(session, null, out _, whileWorking: true) == null,
                 ["page"] = page, ["size"] = size, ["total"] = rows.Count,
                 ["phases"] = new JArray(plan.Phases.Select(phase => new JObject { ["index"] = phase.Index, ["name"] = phase.Name, ["taskCount"] = phase.TaskCount })),
                 ["rows"] = new JArray(rows.Skip(page * size).Take(size).Select(row =>
@@ -221,6 +223,42 @@ namespace Pomp.Hosting
                         if (Status != null) task.Status = Status;
                         if (BlockerGiven) task.Blocker = Blocker;
                         break;
+                }
+            }
+
+            /// <summary>
+            /// Whether the change may be made while the agent works: it leaves every task in progress (and the phase holding one) as
+            /// it is and makes no task in progress. The model names its tasks by their text, so the one it works on must not change
+            /// under it; a pending task it has not reached yet may.
+            /// </summary>
+            public bool SafeWhileWorking(List<AgentPlanPhasePayload> phases)
+            {
+                if (Status == "in_progress") return false;
+                if (Op == "addPhase" || Op == "addTask" || Op == "renamePhase") return true;
+                if (PhaseIndex >= phases.Count) return true; // Apply reports the missing phase.
+                var phase = phases[PhaseIndex];
+                if (Op == "deletePhase") return !phase.Tasks.Any(task => task.Status == "in_progress");
+                return TaskIndex >= phase.Tasks.Count || phase.Tasks[TaskIndex].Status != "in_progress";
+            }
+
+            /// <summary>The change in words for the model (English, like POMP's other notes to it), before <see cref="Apply"/>, from the plan it changes.</summary>
+            public string Describe(List<AgentPlanPhasePayload> phases)
+            {
+                var phase = PhaseIndex < phases.Count ? phases[PhaseIndex] : null;
+                var task = phase != null && TaskIndex < phase.Tasks.Count ? phase.Tasks[TaskIndex] : null;
+                switch (Op)
+                {
+                    case "addPhase": return $"added the phase \"{Name}\" with the task \"{Content}\" ({Status ?? "pending"})";
+                    case "addTask": return $"added the task \"{Content}\" ({Status ?? "pending"}) to the phase \"{phase?.Name}\"";
+                    case "renamePhase": return $"renamed the phase \"{phase?.Name}\" to \"{Name}\"";
+                    case "deletePhase": return $"deleted the phase \"{phase?.Name}\" with its tasks";
+                    case "deleteTask": return $"deleted the task \"{task?.Content}\"";
+                    default:
+                        var parts = new List<string>();
+                        if (Content != null && Content != task?.Content) parts.Add($"its text to \"{Content}\"");
+                        if (Status != null && Status != task?.Status) parts.Add($"its status to {Status}");
+                        if (BlockerGiven && Blocker != task?.Blocker) parts.Add(Blocker == null ? "removed its blocker" : $"its blocker to \"{Blocker}\"");
+                        return $"changed the task \"{task?.Content}\": " + (parts.Count == 0 ? "no difference" : string.Join(", ", parts));
                 }
             }
 

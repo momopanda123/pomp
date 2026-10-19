@@ -43,7 +43,8 @@ export function AgentPlan({ session, sessionId, locale, disabled, busy, onContin
     if (inert || !sessionId) return;
     const id = newId(); pageRequest.current = id;
     if (!send('workspace/agentPlanPage', { requestId: id, sessionId, page, size: PAGE_SIZE, ...(search ? { query: search } : {}) })) pageRequest.current = undefined;
-  }, [inert, sessionId, page, search, revision]);
+    // The work starting or ending changes what may be edited (editable, editableWhileWorking): the page is asked again.
+  }, [inert, sessionId, page, search, revision, busy, session?.hasPendingAsyncWork]);
   useEffect(() => onMessage(message => {
     if (message.type === 'workspace/agentPlanPageResult') {
       if (message.payload.requestId !== pageRequest.current) return;
@@ -70,9 +71,16 @@ export function AgentPlan({ session, sessionId, locale, disabled, busy, onContin
 
   const rows = data?.rows ?? []; const matching = data?.total ?? 0; const pages = Math.max(1, Math.ceil(matching / PAGE_SIZE));
   const pagedTasks = { page, pages, total: matching, from: matching ? page * PAGE_SIZE + 1 : 0, to: Math.min(matching, page * PAGE_SIZE + PAGE_SIZE), setPage };
-  const canEdit = !disabled && !busy && !inert && !pending && !session?.hasPendingAsyncWork && !!sessionId && data?.editable === true;
+  const working = busy || !!session?.hasPendingAsyncWork;
+  const usable = !disabled && !inert && !pending && !!sessionId;
+  const canEdit = usable && !working && data?.editable === true;
+  // While the agent works, only what leaves its task in progress alone (the host checks again): the other tasks, new tasks, phase names.
+  const canEditWorking = usable && data?.editableWhileWorking === true;
+  const inProgress = (status: string) => ['in_progress', 'inProgress', 'running'].includes(status);
+  const canEditRow = (row: PlanRow) => canEdit || (canEditWorking && !inProgress(row.status));
+  const canAdd = canEdit || canEditWorking;
   const edit = (op: EditOp) => {
-    if (!canEdit || !sessionId || !data) return;
+    if (!canAdd || !sessionId || !data) return;
     const id = newId(); editRequest.current = id; setPending(true); setError('');
     if (!send('workspace/agentPlanEdit', { ...op, requestId: id, sessionId, revision: data.revision ?? '' } as AgentPlanEdit)) { editRequest.current = undefined; setPending(false); setError(t('error.hostUnavailable')); }
   };
@@ -93,20 +101,20 @@ export function AgentPlan({ session, sessionId, locale, disabled, busy, onContin
     else if (draft.phase === 'new') edit({ op: 'addPhase', name: draft.phaseName.trim(), content, status: draft.status });
     else edit({ op: 'addTask', phase: draft.phase, content, status: draft.status, ...(blocker ? { blocker } : {}) });
   };
-  const statusOptions = planStatuses.map(status => <option key={status} value={status}>{stateLabel(status, locale)}</option>);
+  const statusOptions = planStatuses.filter(status => canEdit || status !== 'in_progress').map(status => <option key={status} value={status}>{stateLabel(status, locale)}</option>);
   const running = busy || !!session?.hasPendingAsyncWork || rows.some(row => ['inProgress', 'in_progress', 'running'].includes(row.status));
   const icon = (status: string) => status === 'completed' ? <Icon name="check" size={14} className="ui-ok" /> : ['in_progress', 'inProgress', 'running'].includes(status) ? <Icon name="dot" size={14} className="ui-info" />
     : status === 'blocked' ? <Icon name="warning" size={14} className="ui-warn" /> : status === 'abandoned' ? <Icon name="x" size={14} className="ui-muted" /> : <Icon name="circle" size={14} className="ui-muted" />;
   const tone = (status: string): BadgeTone => status === 'completed' ? 'ok' : ['in_progress', 'inProgress', 'running'].includes(status) ? 'info' : status === 'blocked' ? 'warn' : 'neutral';
-  const deleteButton = (key: string, label: string, run: () => void) => armed === key
-    ? <button type="button" className="btn small subtle ui-danger-confirm" data-testid={`plan-delete-confirm-${key}`} disabled={!canEdit} onClick={() => arm(key, run)}>{ko ? '삭제 확인' : 'Confirm'}</button>
-    : <IconButton icon="trash" tone="danger" label={label} disabled={!canEdit} onClick={() => arm(key, run)} testId={`plan-delete-${key}`} />;
+  const deleteButton = (key: string, label: string, enabled: boolean, run: () => void) => armed === key
+    ? <button type="button" className="btn small subtle ui-danger-confirm" data-testid={`plan-delete-confirm-${key}`} disabled={!enabled} onClick={() => arm(key, run)}>{ko ? '삭제 확인' : 'Confirm'}</button>
+    : <IconButton icon="trash" tone="danger" label={label} disabled={!enabled} onClick={() => arm(key, run)} testId={`plan-delete-${key}`} />;
   return <ViewSection sectionKey="work-plan" className="agent-plan" headingLevel="h2" active={running} inert={inert || undefined} bodyClassName="ui-flush"
     title={ko ? '작업 계획' : 'Work plan'} status={total ? `${total - open}/${total}` : 0}
     actions={<>
       <button type="button" className="btn small subtle" data-testid="plan-continue" disabled={disabled || busy || !total || session?.hasPendingAsyncWork} onClick={() => onContinue()}><Icon name="play" size={12} />{ko ? '이어가기' : 'Continue'}</button>
       <button type="button" className="btn small subtle" disabled={disabled || !busy} onClick={onStop}><Icon name="stop" size={11} />{ko ? '중단' : 'Stop'}</button>
-      <button type="button" className="btn small" data-testid="plan-add" disabled={!canEdit} onClick={startAdd}><Icon name="plus" size={12} />{ko ? '작업 추가' : 'Add task'}</button>
+      <button type="button" className="btn small" data-testid="plan-add" disabled={!canAdd} onClick={startAdd}><Icon name="plus" size={12} />{ko ? '작업 추가' : 'Add task'}</button>
     </>}>
     {total > 0 && <div className="ui-note"><div className="ui-progress" aria-hidden="true"><i style={{ width: `${Math.round((total - open) / total * 100)}%` }} /></div></div>}
     <Toolbar>
@@ -125,8 +133,8 @@ export function AgentPlan({ session, sessionId, locale, disabled, busy, onContin
             <Cell className="ui-muted" title={name}>{revealControls(name)}</Cell>
             <Cell><Badge tone={tone(row.status)}>{revealControls(stateLabel(row.status, locale))}</Badge></Cell>
             <Actions>
-              <IconButton icon="edit" label={ko ? '작업 편집' : 'Edit task'} disabled={!canEdit} onClick={() => startEdit(row)} testId={`plan-edit-${key}`} />
-              {deleteButton(key, ko ? '작업 삭제' : 'Delete task', () => edit({ op: 'deleteTask', phase: row.phase, task: row.task }))}
+              <IconButton icon="edit" label={ko ? '작업 편집' : 'Edit task'} disabled={!canEditRow(row)} onClick={() => startEdit(row)} testId={`plan-edit-${key}`} />
+              {deleteButton(key, ko ? '작업 삭제' : 'Delete task', canEditRow(row), () => edit({ op: 'deleteTask', phase: row.phase, task: row.task }))}
             </Actions>
           </Row>;
         })}
@@ -139,8 +147,8 @@ export function AgentPlan({ session, sessionId, locale, disabled, busy, onContin
           <Cell title={phase.name}>{revealControls(phase.name)}</Cell>
           <Cell className="ui-mono">{phase.taskCount}</Cell>
           <Actions>
-            <IconButton icon="edit" label={ko ? '단계 이름 변경' : 'Rename phase'} disabled={!canEdit} onClick={() => { setDraft(null); setError(''); setRenaming({ phase: phase.index, name: phase.name }); }} testId={`plan-rename-${phase.index}`} />
-            {deleteButton(`phase-${phase.index}`, ko ? '단계 삭제' : 'Delete phase', () => edit({ op: 'deletePhase', phase: phase.index }))}
+            <IconButton icon="edit" label={ko ? '단계 이름 변경' : 'Rename phase'} disabled={!canAdd} onClick={() => { setDraft(null); setError(''); setRenaming({ phase: phase.index, name: phase.name }); }} testId={`plan-rename-${phase.index}`} />
+            {deleteButton(`phase-${phase.index}`, ko ? '단계 삭제' : 'Delete phase', canEdit, () => edit({ op: 'deletePhase', phase: phase.index }))}
           </Actions>
         </Row>)}
       </DataTable>
@@ -158,14 +166,14 @@ export function AgentPlan({ session, sessionId, locale, disabled, busy, onContin
       {draft.status === 'blocked' && draft.phase !== 'new' && <Field label={ko ? '대기 사유' : 'Blocker'}>{id => <input id={id} type="text" value={draft.blocker} maxLength={limits.blocker} disabled={pending} onChange={event => setDraft({ ...draft, blocker: event.target.value })} />}</Field>}
       <FormActions>
         <button type="button" className="btn" disabled={pending} onClick={() => { setDraft(null); setError(''); }}>{ko ? '취소' : 'Cancel'}</button>
-        <button type="button" className="btn primary" data-testid="plan-task-save" disabled={!canEdit || !draftValid} onClick={saveDraft}>{ko ? '저장' : 'Save'}</button>
+        <button type="button" className="btn primary" data-testid="plan-task-save" disabled={!(canEdit || (canEditWorking && !inProgress(draft.status))) || !draftValid} onClick={saveDraft}>{ko ? '저장' : 'Save'}</button>
       </FormActions>
     </Form>}
     {renaming && <Form testId="plan-rename-form" className="plan-task-form">
       <Field label={ko ? '단계 이름' : 'Phase name'}>{id => <input id={id} type="text" value={renaming.name} maxLength={limits.name} disabled={pending} onChange={event => setRenaming({ ...renaming, name: event.target.value })} />}</Field>
       <FormActions>
         <button type="button" className="btn" disabled={pending} onClick={() => { setRenaming(null); setError(''); }}>{ko ? '취소' : 'Cancel'}</button>
-        <button type="button" className="btn primary" data-testid="plan-rename-save" disabled={!canEdit || !renaming.name.trim() || !fits(renaming.name, limits.name)}
+        <button type="button" className="btn primary" data-testid="plan-rename-save" disabled={!canAdd || !renaming.name.trim() || !fits(renaming.name, limits.name)}
           onClick={() => edit({ op: 'renamePhase', phase: renaming.phase, name: renaming.name.trim() })}>{ko ? '저장' : 'Save'}</button>
       </FormActions>
     </Form>}
