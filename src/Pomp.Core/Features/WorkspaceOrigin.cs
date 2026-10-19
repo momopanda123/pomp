@@ -16,17 +16,12 @@ namespace Pomp.Features
 {
     /// <summary>
     /// Which workspace a <c>.pomp/local</c> belongs to (<c>.pomp/local/workspace.json</c>), and what happens when it is opened at
-    /// another root. Root-stamped stores refuse data of another root and omp sessions record their cwd, so a <c>.pomp</c> copied
-    /// from another project would break those stores and could even resume a conversation in the other project.
-    /// <list type="bullet">
-    /// <item>Copied (the recorded root still has its own <c>.pomp/local</c>): the records of work done there (conversations,
-    /// checkpoints, caches, isolation copies, ...) go to the Recycle Bin. Settings the user made stay: the shared
-    /// <c>.pomp</c> files, knowledge, role pictures and automation rules.</item>
-    /// <item>Moved or renamed (the recorded root has no <c>.pomp/local</c> any more, or is this very folder by another path):
-    /// root stamps and paths under the old root are rewritten to the new one, so the history stays. omp's own session files
-    /// are left alone: omp adopts a recorded cwd only while it exists, so it runs in the new root. The old root is remembered
-    /// (<see cref="IsCurrentOrPrevious"/>) for the checks that compare a session's cwd with the workspace.</item>
-    /// </list>
+    /// another root, because the folder was moved, renamed or copied. The history comes along either way: root stamps and paths
+    /// under the old root are rewritten to the new one, in POMP's stores and in the header of each omp session file (its <c>cwd</c>
+    /// and paths), so every conversation lists and resumes in the new root. The header must be rewritten: omp adopts a session's
+    /// recorded cwd whenever that folder exists, so a copied conversation would otherwise run in the original project. The old root
+    /// is remembered (<see cref="IsCurrentOrPrevious"/>) for the checks that compare a session's cwd with the workspace. omp's
+    /// isolation copies (<c>wt</c>) borrow the original repository's objects by absolute path and go to the Recycle Bin.
     /// </summary>
     internal static class WorkspaceOrigin
     {
@@ -34,9 +29,9 @@ namespace Pomp.Features
         private const int MaxPreviousRoots = 8;
         private const long MaxRebaseBytes = 16L * 1024 * 1024;
 
-        // Settings the user made: they make sense in any workspace. Everything else in .pomp/local is a record of work in the
-        // workspace it was made in, so a store added later is dropped on copy unless it is listed here.
-        private static readonly string[] KeptOnCopy = { ".gitignore", MarkerName, "knowledge.json", "avatars.json", "agent-hooks.json", "engine-plugin" };
+        private const string SessionsFolder = "sessions";
+        /// <summary>The omp session header sits in the first lines of a session file (after its title line).</summary>
+        private const int SessionHeaderLines = 8;
 
         // Stores that stamp the workspace root or hold absolute paths under it.
         private static readonly string[] RebasedFiles = { "recent-sessions.json", "reviews.json", "background-agents.json",
@@ -89,23 +84,15 @@ namespace Pomp.Features
                     if (recorded == null || !File.Exists(marker)) WriteMarker(marker, root, previous);
                     return new Outcome(Change.None, null);
                 }
-                if (Directory.Exists(ProjectData.LocalFolder(recorded)) && !SameFolder(local, ProjectData.LocalFolder(recorded)))
-                {
-                    quarantine = Gather(local, recorded, name => !KeptOnCopy.Contains(name, StringComparer.OrdinalIgnoreCase) && !IsKeptLock(name));
-                    // The copy's earlier roots are the other project's history, not this one's.
-                    WriteMarker(marker, root, Array.Empty<string>());
-                    outcome = new Outcome(Change.Copied, recorded, quarantine);
-                }
-                else
-                {
-                    Rebase(local, recorded, root, logger);
-                    // omp's isolation copies borrow the repository's objects by absolute path; they are transient leftovers anyway.
-                    quarantine = Gather(local, recorded, name => string.Equals(name, IsolationFolder, StringComparison.OrdinalIgnoreCase));
-                    var roots = new List<string> { Normalize(recorded) };
-                    roots.AddRange(previous.Where(p => !roots.Any(r => SamePath(r, p)) && !SamePath(p, root)));
-                    WriteMarker(marker, root, roots.Take(MaxPreviousRoots));
-                    outcome = new Outcome(Change.Moved, recorded, quarantine);
-                }
+                var copied = Directory.Exists(ProjectData.LocalFolder(recorded)) && !SameFolder(local, ProjectData.LocalFolder(recorded));
+                Rebase(local, recorded, root, logger);
+                RebaseSessions(Path.Combine(local, SessionsFolder), recorded, root, logger);
+                // omp's isolation copies borrow the repository's objects by absolute path; they are transient leftovers anyway.
+                quarantine = Gather(local, recorded, name => string.Equals(name, IsolationFolder, StringComparison.OrdinalIgnoreCase));
+                var roots = new List<string> { Normalize(recorded) };
+                roots.AddRange(previous.Where(p => !roots.Any(r => SamePath(r, p)) && !SamePath(p, root)));
+                WriteMarker(marker, root, roots.Take(MaxPreviousRoots));
+                outcome = new Outcome(copied ? Change.Copied : Change.Moved, recorded, quarantine);
             }
             if (quarantine == null || recycleBin == null) return outcome;
             try
@@ -198,9 +185,6 @@ namespace Pomp.Features
             }
         }
 
-        private static bool IsKeptLock(string name) =>
-            name.EndsWith(".lock", StringComparison.OrdinalIgnoreCase) && KeptOnCopy.Contains(name.Substring(0, name.Length - ".lock".Length), StringComparer.OrdinalIgnoreCase);
-
         /// <summary>Moves the matching entries of <paramref name="local"/> into one new folder there; null when nothing matched.</summary>
         private static string? Gather(string local, string recorded, Func<string, bool> drop)
         {
@@ -243,6 +227,95 @@ namespace Pomp.Features
                 {
                     logger.Warn("Could not move " + file + " to the new workspace root: " + ex.Message);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Rewrites the old root in the session header (<c>{"type":"session",...}</c>: <c>cwd</c>, a parent session's path, extra
+        /// directories) of every omp session file under <paramref name="sessions"/>, subagent sessions included. Only the header line
+        /// changes; the rest of the file is copied byte for byte.
+        /// </summary>
+        private static void RebaseSessions(string sessions, string from, string to, IPompLogger logger)
+        {
+            if (!Directory.Exists(sessions)) return;
+            var old = Normalize(from);
+            foreach (var file in Directory.EnumerateFiles(sessions, "*.jsonl", SearchOption.AllDirectories))
+            {
+                try { RebaseSessionHeader(file, old, to); }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is JsonException || ex is InvalidOperationException)
+                {
+                    logger.Warn("Could not move the conversation " + file + " to the new workspace root: " + ex.Message);
+                }
+            }
+        }
+
+        private static void RebaseSessionHeader(string file, string old, string root)
+        {
+            CheckpointStore.CheckDirectPath(file);
+            string? replaced = null; var prefix = 0L; var headerBytes = 0;
+            using (var input = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            {
+                var reader = new LineScanner(input);
+                for (var index = 0; index < SessionHeaderLines && reader.Next(out var start, out var line, out var length); index++)
+                {
+                    if (line.IndexOf("\"session\"", StringComparison.Ordinal) < 0) continue;
+                    var header = JObject.Parse(line);
+                    if ((string?)header["type"] != "session") continue;
+                    if (!RebaseValues(header, old, root)) return;
+                    replaced = header.ToString(Formatting.None); prefix = start; headerBytes = length;
+                    break;
+                }
+            }
+            if (replaced == null) return;
+            var temp = file + ".rebase";
+            using (var input = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var output = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                CopyBytes(input, output, prefix);
+                var bytes = new System.Text.UTF8Encoding(false).GetBytes(replaced);
+                output.Write(bytes, 0, bytes.Length);
+                input.Seek(prefix + headerBytes, SeekOrigin.Begin);
+                input.CopyTo(output);
+            }
+            File.Copy(temp, file, overwrite: true);
+            File.Delete(temp);
+        }
+
+        private static void CopyBytes(Stream input, Stream output, long count)
+        {
+            var buffer = new byte[81920];
+            while (count > 0)
+            {
+                var read = input.Read(buffer, 0, (int)Math.Min(buffer.Length, count));
+                if (read <= 0) throw new IOException("The file ended early.");
+                output.Write(buffer, 0, read); count -= read;
+            }
+        }
+
+        /// <summary>Reads UTF-8 lines with their byte offset and length (without the line break) from the start of a stream.</summary>
+        private sealed class LineScanner
+        {
+            private const int MaxLineBytes = 1024 * 1024;
+            private readonly Stream _stream;
+            private long _position;
+            public LineScanner(Stream stream) { _stream = stream; }
+            public bool Next(out long start, out string line, out int length)
+            {
+                start = _position; line = string.Empty; length = 0;
+                var bytes = new List<byte>();
+                int value;
+                while ((value = _stream.ReadByte()) >= 0)
+                {
+                    _position++;
+                    if (value == '\n') break;
+                    if (bytes.Count >= MaxLineBytes) throw new InvalidOperationException("A session header line is too long.");
+                    bytes.Add((byte)value);
+                }
+                if (value < 0 && bytes.Count == 0) return false;
+                length = bytes.Count;
+                if (length > 0 && bytes[length - 1] == '\r') length--;
+                line = System.Text.Encoding.UTF8.GetString(bytes.ToArray(), 0, length);
+                return true;
             }
         }
 
