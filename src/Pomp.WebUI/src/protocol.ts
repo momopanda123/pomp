@@ -524,6 +524,21 @@ export interface TurnStartedPayload {
   main?: boolean | null;
 }
 
+/** A message the user steered into the running agent (`chat/steered`): shown as a user bubble inside the running turn. */
+export interface SteeredPayload {
+  steerId: string;
+  clientMessageId?: string;
+  text: string;
+  attachments?: { path: string }[];
+  editorContext?: TurnStartedPayload['editorContext'];
+}
+
+/** omp's side question (`/btw`) lifecycle; `interrupted`: the process ended while it ran. */
+export type BtwStatus = 'running' | 'complete' | 'cancelled' | 'error' | 'interrupted';
+export interface BtwTurn { question: string; answer: string; status: BtwStatus; createdAt: number; updatedAt: number; error?: string }
+/** A side-question topic: its first turn, then its follow-ups; the latest turn is the last follow-up, else the record itself. */
+export interface BtwRecord extends BtwTurn { id: string; leafId: string | null; followUps?: BtwTurn[] }
+
 export interface WorkspaceFile {
   kind?: string; symbol?: string; line?: number;
   /** Workspace-relative display path, or the full path for a file outside the workspace. */
@@ -1215,6 +1230,10 @@ export interface HostToUi extends ConversationHostToUi, ToolsHostToUi {
   'chat/advisorNotes': { notes: AdvisorNote[] };
   'chat/replayBegin': { truncated: boolean };
   'chat/replayEnd': Record<string, never>;
+  'chat/steered': SteeredPayload;
+  'btw/record': { record: BtwRecord };
+  'btw/delta': { recordId: string; delta: string };
+  'btw/reply': { requestId: string; ok: boolean; error?: string; record?: BtwRecord };
   'workspace/files': WorkspaceFilesPayload;
   'workspace/composerState': ComposerWorkflowState;
   'workspace/agentPlanResult': { requestId: string; ok: boolean; error?: string };
@@ -1290,6 +1309,12 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
     main?: true;
   };
   'chat/stop': Empty;
+  /** Same shape as `chat/send`: to the running agent now (omp `steer`); with nothing running it is sent like `chat/send`. */
+  'chat/steer': UiToHost['chat/send'];
+  /** A side question about this conversation; `recordId` follows up that topic. Answered by `btw/reply`, then `btw/record`/`btw/delta`. */
+  'btw/ask': { requestId: string; question: string; recordId?: string };
+  /** Cancels the running side question (of that topic only, when given). */
+  'btw/cancel': { recordId?: string };
   /** start: begin a new run from a saved workflow's task/steps (no active run; unpaused; sends no model request — the page sends the chat message). */
   'workspace/composer': { action: 'refresh' | 'pause' | 'resume' | 'cancel' | 'save' | 'start'; requestId: string; root?: string; sessionId?: string; id?: string; revision?: number; task?: string; steps?: string[] };
   'workspace/agentPlan': { requestId: string; sessionId: string; base: AgentPlanPhase[]; phases: AgentPlanPhase[] };
@@ -1423,6 +1448,10 @@ const HOST_TYPES: Record<HostMessageType, true> = {
   'computer/reply': true,
   'chat/replayBegin': true,
   'chat/replayEnd': true,
+  'chat/steered': true,
+  'btw/record': true,
+  'btw/delta': true,
+  'btw/reply': true,
   'workspace/files': true,
   'workspace/composerState': true,
   'workspace/agentPlanResult': true,

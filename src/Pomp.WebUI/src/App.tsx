@@ -12,6 +12,7 @@ import { SessionHeader } from './components/SessionHeader';
 import { PartnerPicker, type TabSwitch } from './components/PartnerPicker';
 import { ChatQueue } from './components/ChatQueue';
 import { LiveAgentProgress } from './components/LiveAgentProgress';
+import { BtwPanel } from './components/BtwPanel';
 import { TabBar, type ShellTab } from './components/TabBar';
 import { SetupPanel } from './components/SetupPanel';
 import { AgentsPanel, type AgentsView } from './components/AgentsPanel';
@@ -31,7 +32,7 @@ import { KnowledgeProvider } from './knowledgeState';
 import { useSessionHistory } from './sessionHistory';
 import { isSetupRequired } from './setup';
 import type { BuiltinCommand } from './slashCommands';
-import { initialState, isBusy, reducer, type RequestOutcome, type TurnErrorItem } from './state';
+import { btwTurns, initialState, isBusy, reducer, type RequestOutcome, type TurnErrorItem } from './state';
 import { useWorkAttention } from './workAttention';
 import { effectiveRoles, MainRoleContext, RolesContext, targetPayload, TeamsContext } from './teamsCache';
 import { rememberPrompt } from './promptHistory';
@@ -185,6 +186,43 @@ export function App() {
     const timers = state.pendingQueued.filter(item => !item.failed).map(item => window.setTimeout(() => dispatch({ type: 'queueSendUnconfirmed', id: item.clientMessageId }), 15000));
     return () => timers.forEach(window.clearTimeout);
   }, [state.pendingQueued]);
+  /** `/steer`: while the agent works the text goes to it now (`chat/steer`), else it is an ordinary send. No bubble before the host's `chat/steered`. */
+  const steerMessage = useCallback((text: string, attachments: WorkspaceFile[] = []): SendResult => {
+    const current = latest.current;
+    if (!(current.phase === 'running' || current.session?.isStreaming === true)) return sendMessage(text, attachments, true);
+    if (current.bridge.state !== 'running') return { ok: false, reason: 'hostUnavailable' };
+    if (current.replaying || current.pendingNewSession !== undefined || current.session?.recoveryStatus === 'restoring' || current.session?.recoveryStatus === 'failed') return { ok: false, reason: 'busy' };
+    const message = { clientMessageId: newId(), text, includeEditorContext: current.includeEditorContext, ...(attachments.length > 0 ? { attachments: attachments.map(file => ({ path: file.fullPath })) } : {}) };
+    const rejection = promptRejection(text, { type: 'chat/send', payload: message }, attachments.map(file => file.fullPath));
+    if (rejection) return { ok: false, ...rejection };
+    if (!send('chat/steer', message)) return { ok: false, reason: 'hostUnavailable' };
+    dispatch({ type: 'steerSent', clearDraft: true });
+    rememberPrompt(current.session?.workingDirectory ?? '', text);
+    return { ok: true };
+  }, [sendMessage]);
+  /** Whether the side panel's topic has an answer on its way (or a question omp has not taken yet). */
+  const btwRunning = (): boolean => { const panel = latest.current.btw; return !!panel && (panel.pending !== undefined || btwTurns(panel.record).at(-1)?.status === 'running'); };
+  /** Stops only the side panel's own answer; the conversation's run is never touched. */
+  const cancelBtw = (): void => { const panel = latest.current.btw; if (panel && btwRunning()) send('btw/cancel', panel.topicId ? { recordId: panel.topicId } : {}); };
+  /** `/btw <question>`: a new topic in the side panel (an answer still running in the previous one stops). */
+  const openBtw = (question: string): SendResult => {
+    if (latest.current.bridge.state !== 'running') return { ok: false, reason: 'hostUnavailable' };
+    cancelBtw();
+    const requestId = newId();
+    if (!send('btw/ask', { requestId, question })) return { ok: false, reason: 'hostUnavailable' };
+    dispatch({ type: 'btwOpen', requestId, question, sessionId: latest.current.session?.sessionId });
+    return { ok: true };
+  };
+  /** A follow-up in the panel's topic (a new topic when the first question never started one). */
+  const askBtw = (question: string): boolean => {
+    const panel = latest.current.btw;
+    if (!panel) return false;
+    const requestId = newId();
+    if (!send('btw/ask', { requestId, question, ...(panel.topicId ? { recordId: panel.topicId } : {}) })) return false;
+    dispatch({ type: 'btwAsk', requestId, question });
+    return true;
+  };
+  const closeBtw = (): void => { cancelBtw(); dispatch({ type: 'btwClose' }); window.requestAnimationFrame(() => inputRef.current?.focus()); };
   const retryTurn = useCallback((item: TurnErrorItem) => {
     if (item.retryText === undefined) return;
     const result = sendMessage(item.retryText, item.retryAttachments, false, item.retryTarget ?? null, true);
@@ -295,7 +333,8 @@ export function App() {
       case 'rename': return history.command('rename', args) ? { ok: true } : { ok: false, reason: 'busy' };
       case 'compact': return history.command('compact', args.slice(0, 2000)) ? { ok: true } : { ok: false, reason: 'busy' };
       case 'computer': setToolsView('conversation'); setTab('tools'); setComputerRequest(previous => ({ revision: (previous?.revision ?? 0) + 1 })); return { ok: true };
-      case 'model': case 'thinking': case 'effort': case 'permissions': case 'agent': case 'team': case 'goal': case 'help': return { ok: true };
+      case 'btw': return openBtw(args);
+      case 'model': case 'thinking': case 'effort': case 'permissions': case 'agent': case 'team': case 'goal': case 'steer': case 'help': return { ok: true };
     }
   };
   const planTotal = state.session?.planTaskCount ?? 0;
@@ -331,9 +370,10 @@ export function App() {
           {/* The live progress row below names this turn's running members: the chip counts only the others (earlier turns). */}
           {(['hooks'] as const).filter(view => attention[view] > 0).map(view => <button className="activity-chip" type="button" key={view} data-testid={`activity-${view}`} onClick={() => openTools(view)}>{translate(`work.${view}`)} {attention[view]}</button>)}
         </div>}
+        {state.btw && <BtwPanel panel={state.btw} name={partnerName ?? 'POMP'} connected={conversationReady} onAsk={askBtw} onClose={closeBtw} />}
         <LiveAgentProgress disabled={!conversationReady || newSessionPending || state.replaying} sessionId={sessionId} promptId={state.activePromptId} items={state.items} />
         <ChatQueue state={state.queue} replies={state.conversationReplies} sessionId={sessionId} disabled={!conversationReady || newSessionPending || modal} pendingSends={state.pendingQueued} onRecover={item => { dispatch({ type: 'recoverQueueSend', id: item.clientMessageId }); inputRef.current?.focus(); }} />
-        <Composer locale={state.locale} workspaceKey={workspaceKey} sessionId={sessionId} model={state.session?.model} session={state.session} setup={state.setup} setupReplies={state.setupReplies} onManageAccounts={() => changeTab('accounts')} inputRef={inputRef} connected={conversationReady} busy={busy} queueBlocked={state.phase === 'sending' || state.replaying || state.pendingQueued.some(item => !item.failed)} requestPending={modal || activeTab !== 'chat'} newSessionPending={newSessionPending} draft={state.composer} dispatch={dispatch} includeEditorContext={state.includeEditorContext} onIncludeEditorContextChange={value => dispatch({ type: 'setIncludeEditorContext', value })} onSend={sendMessage} onStop={() => send('chat/stop', {})} commands={state.commands.commands} commandsHidden={state.commands.hidden} onCommand={handleCommand} onGoal={goal.open} skillsOff={goal.skillsOff} prefill={state.prefill} insertSkill={insertSkill} insertText={insertText} basketRequest={basketRequest} basketTokens={state.basketTokens} agents={state.agents} shortcuts={shortcuts} composerPredictions={state.hello?.composerPredictions === true} wordCompletion={state.hello?.wordCompletion !== false} transcript={state.items} approvalMode={state.hello?.approvalMode} permissionModeReply={state.permissionModeReply} editorFollow={state.editorFollow} selectedTarget={state.selectedTarget} onSelectTarget={target => dispatch({ type: 'selectTarget', target })} partnerName={partnerName} partner={scopedTabs?.partner} onOpenPartner={openPartner} />
+        <Composer locale={state.locale} workspaceKey={workspaceKey} sessionId={sessionId} model={state.session?.model} session={state.session} setup={state.setup} setupReplies={state.setupReplies} onManageAccounts={() => changeTab('accounts')} inputRef={inputRef} connected={conversationReady} busy={busy} queueBlocked={state.phase === 'sending' || state.replaying || state.pendingQueued.some(item => !item.failed)} requestPending={modal || activeTab !== 'chat'} newSessionPending={newSessionPending} draft={state.composer} dispatch={dispatch} includeEditorContext={state.includeEditorContext} onIncludeEditorContextChange={value => dispatch({ type: 'setIncludeEditorContext', value })} onSend={sendMessage} onSteer={steerMessage} onStop={() => send('chat/stop', {})} commands={state.commands.commands} commandsHidden={state.commands.hidden} onCommand={handleCommand} onGoal={goal.open} skillsOff={goal.skillsOff} prefill={state.prefill} insertSkill={insertSkill} insertText={insertText} basketRequest={basketRequest} basketTokens={state.basketTokens} agents={state.agents} shortcuts={shortcuts} composerPredictions={state.hello?.composerPredictions === true} wordCompletion={state.hello?.wordCompletion !== false} transcript={state.items} approvalMode={state.hello?.approvalMode} permissionModeReply={state.permissionModeReply} editorFollow={state.editorFollow} selectedTarget={state.selectedTarget} onSelectTarget={target => dispatch({ type: 'selectTarget', target })} partnerName={partnerName} partner={scopedTabs?.partner} onOpenPartner={openPartner} />
       </section>
       <section id="page-work" className="tab-page work-page" role="tabpanel" aria-labelledby="tab-work" hidden={activeTab !== 'work'} inert={activeTab !== 'work' || undefined}>
         <WorkTab locale={state.locale} session={state.session} workspaceKey={workspaceKey} sessionId={sessionId} connected={conversationReady} busy={busy} newSessionPending={newSessionPending} inert={activeTab !== 'work'} attention={attention} requestedView={workView} onViewChange={setWorkView} onStop={() => send('chat/stop', {})} onContinue={continueWork} onSolve={text => {

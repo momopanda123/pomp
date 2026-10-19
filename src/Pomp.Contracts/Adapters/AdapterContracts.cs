@@ -35,6 +35,20 @@ namespace Pomp.Adapters
         /// editor when it is not open yet.
         /// </summary>
         Task<BufferEditResult> ApplyEditsAsync(BufferEditRequest request, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// An omp built-in tool (edit, write, ast_edit, apply_patch) is about to write these files on disk: Visual Studio stops
+        /// reacting to their file changes (no reload, no "file changed outside" question) until <see cref="ShowDiskEditAsync"/> for
+        /// each of them, or two minutes at most. Only documents open in the editor are held.
+        /// </summary>
+        Task HoldDiskEditAsync(IReadOnlyList<string> paths, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// The tool call ended. When it <paramref name="applied"/>, <paramref name="path"/> changed on disk; <paramref name="before"/> is
+        /// its text right before the call (null: the file did not exist). Shows the change in the editor like a host edit (Live marks,
+        /// follow, bookmarks), whatever the language, when Live or POMP bookmarks are on. Ends the file's hold in every case.
+        /// </summary>
+        Task ShowDiskEditAsync(string path, string? before, bool applied, CancellationToken cancellationToken);
     }
 
     /// <summary>Solution/project graph and project-system mutations (design: SolutionAdapter).</summary>

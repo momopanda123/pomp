@@ -254,6 +254,7 @@ Host text the page shows says what happened, the current state or a reason.
 | `theme/changed` | `{ kind: "dark"\|"light", colors: { [cssVar]: value }, fontFamily?, fontSizePx? }` | Apply every `colors` entry. |
 | `session/info` | `{ model?, thinkingLevel?, sessionId?, sessionName?, contextUsage?, isStreaming, workingDirectory?, fastMode? }` | Session state for the composer. See "session/info" below. |
 | `chat/turnStarted` | `{ promptId, clientMessageId?, text?, attachments?, editorContext?, team?, agent?, agentInstance?, main? }` | The host took a user message as a prompt. See "chat/turnStarted" below. |
+| `chat/steered` | `{ steerId, clientMessageId?, text, attachments?, editorContext? }` | A message steered into the running agent. See "Steering" below. |
 | `chat/assistantStart` | `{ messageId }` | New assistant bubble. |
 | `chat/assistantDelta` | `{ messageId, kind: "text"\|"thinking", delta }` | Append; render markdown incrementally. |
 | `chat/assistantNarration` | `{ messageId, text }` | The ended thinking block was narration. See "chat/assistantNarration" below. |
@@ -283,6 +284,9 @@ Host text the page shows says what happened, the current state or a reason.
 | `computer/state` | `{ policy: "off"\|"perConversation", browser, confirmReads, desktop, pending, available, message? }` | Computer use of this conversation. |
 | `computer/reply` | `{ requestId, ok, error? }` | Exactly one answer per `computer/set`. |
 | `error` | `{ code, message, retryable }` | A host-level error not tied to a turn. |
+| `btw/record` | `{ record: BtwRecord }` | A side question's full record at each lifecycle change. See "Side questions (/btw)". |
+| `btw/delta` | `{ recordId, delta }` | Answer text of the running side question. |
+| `btw/reply` | `{ requestId, ok, error?, record? }` | Exactly one answer per `btw/ask`. |
 
 `kind` of a permission request: `fileWrite` `projectChange` `processExec` `debuggerControl` `breakpointChange`
 `bookmarkChange` `packageChange` `vcsWrite` `testRun` `other`.
@@ -604,6 +608,9 @@ A host-level error not tied to a turn. It is sent when:
 | `ui/log` | `{ level: "debug"\|"info"\|"warning"\|"error", message }` | Page-side diagnostics into the host log. |
 | `ui/editorFollow` | `{ requestId, action: "set", live?, bookmarks? }` | Persist the specified editor-follow toggles. |
 | `chat/send` | see [`chat/send`](#chatsend) | Send a message or queue it while busy. |
+| `chat/steer` | same as `chat/send` | Send to the running agent now; an ordinary send when nothing runs. See "Steering". |
+| `btw/ask` | `{ requestId, question, recordId? }` | Ask a side question about this conversation. See "Side questions (/btw)". |
+| `btw/cancel` | `{ recordId? }` | Cancel the running side question. |
 | `workspace/countDraftTokens` | `{ requestId, root, sessionId, modelId, provider, text, attachments?: [{ path }] }` | Count the draft, attachments and knowledge with the local tokenizer. |
 | `workspace/countBasketTokens` | `{ requestId, root, sessionId?, includeEditorContext, attachments?: [{ path }] }` | Estimate what the next message adds beyond its text. |
 | `workspace/findFiles` | `{ requestId, query, limit? }` | Files for the `@` mention list. |
@@ -932,14 +939,14 @@ Every chat tab is its own omp conversation: the Default (POMP) tab's, and one pe
 |---|---|---|
 | `chat/queued` | host → UI | `{ clientMessageId, itemId }` |
 | `chat/queueState` | host → UI | see below |
-| `chat/queue` | UI → host | `{ requestId, action: "edit"\|"remove"\|"move"\|"clear"\|"pause"\|"resume", id?, text?, index? }` |
+| `chat/queue` | UI → host | `{ requestId, action: "edit"\|"remove"\|"move"\|"clear"\|"pause"\|"resume"\|"steer", id?, text?, index? }` |
 | `chat/queueReply` | host → UI | Reply to `chat/queue`. |
 
 `chat/queueState` payload:
 
 ```
 { sessionId?,
-  items: [{ id, text, attachments?, includeEditorContext, team?, agent?, agentInstance?, createdAt }],
+  items: [{ id, text, attachments?, includeEditorContext, team?, agent?, agentInstance?, createdAt, canSteer }],
   paused, reason? }
 ```
 
@@ -952,6 +959,10 @@ Every chat tab is its own omp conversation: the Default (POMP) tab's, and one pe
 - `move` uses a zero-based final index.
 - `edit` changes only typed text.
 - `clear` removes all items but does not implicitly resume a paused queue.
+- `steer` (the item's 지금 보내기 / Send now button) takes the item out of the queue and steers it into the running agent, see "Steering".
+  With nothing running it is sent at once as an ordinary message, also from a paused queue.
+  `canSteer` is false for an item with a chosen recipient (team, agent or running member) or a slash command; the host refuses `steer` for it.
+  When the steer fails, the item goes back to the front of the queue.
 
 **Scope and dispatch**
 
@@ -968,7 +979,8 @@ Every chat tab is its own omp conversation: the Default (POMP) tab's, and one pe
 - The user must resume in the original conversation or clear the items.
 - If the queue is empty, the first fresh submission starts an unpaused queue.
 - A submission received before Stop remains paused.
-- The host never supplies omp `streamingBehavior` (`steer`/`followUp`).
+- Queued items are never queued inside omp: the host sends no `prompt` `streamingBehavior`. Only an explicit steer reaches omp's
+  steering queue (see "Steering").
 
 **Limits**
 
@@ -977,6 +989,49 @@ Every chat tab is its own omp conversation: the Default (POMP) tab's, and one pe
 - The complete queue state has a 1,800 KiB UTF-8 budget, to fit the outbound envelope.
 - Rejection is a host `error` with `code: "queue_rejected"`, `retryable: false`.
 - On rejection no turn starts.
+
+### Steering
+
+A steer is a message for the agent that is working now. omp delivers it at the agent's next step (`steer`, interrupt mode
+`immediate`); the running turn goes on with it and ends as usual.
+
+- `/steer <text>` (page command) and the queue's `steer` action send one. Without text (and without attachments) `/steer` is an
+  inline composer error.
+- The page sends `chat/steer` only while it sees a running turn or `session/info.isStreaming`; otherwise `/steer <text>` is a
+  normal `chat/send`.
+- The host composes the message like a send: the editor context when `includeEditorContext` is on, then the attached paths, then the
+  text. It goes to this conversation itself: a message with a chosen recipient or a slash command is sent normally instead.
+- On the chat command queue, right before the command, the host checks under its state lock that a turn is open or omp is streaming
+  and that Stop has not been pressed since. If not, the message is an ordinary send (queued while busy, like `chat/send`).
+- A steer never registers a turn: no `chat/turnStarted`, no `chat/turnEnd`, no second prompt id.
+- After omp accepts it, `chat/steered` shows the user's bubble where it was sent, marked 작업 중 전달 / Steered. `chat/steered` is part
+  of the replayed transcript. After a conversation switch, the restored transcript shows the steered message once, as a user message
+  of its own.
+- When the run ended before omp took the steer, the host takes it back with `remove_queued_message` (queue `steering`) and sends it
+  normally. If omp had already taken it, omp handles it and the host only logs that.
+- Stop after a steer uses `abort_and_restore_queue` instead of `abort`, so a steer omp still holds does not start a new run. A steer
+  withdrawn this way is not sent; a notice says how many.
+- Failures (omp refused it, too large, connection lost) are a `chat/notice`; nothing is resent.
+
+### Side questions (/btw)
+
+`/btw <question>` asks omp's side question (`btw`) about the current conversation, in a panel of the chat tab.
+
+- omp answers over the conversation's context, including a turn still streaming, as text with no tool use.
+  It runs beside the agent: it neither waits for nor blocks the running work.
+- Question and answer are never added to the transcript. The host does not log `btw/*` in the replayed transcript.
+- `btw/ask` without `recordId` starts a topic; with `recordId` (the id of the topic's first record) it is a follow-up, and omp replays
+  the topic's earlier turns as context.
+- `btw/reply` answers the request; `ok: false` carries omp's reason (one side question at a time, unknown topic, no model, and so on).
+- `btw/record` carries omp's `BtwHistoryRecord`: `{ id, leafId, question, answer, status, createdAt, updatedAt, error?, followUps? }`
+  with `status` `running`, `complete`, `cancelled`, `error` or `interrupted`. The last record for an id wins.
+  A topic's latest turn is its last follow-up, else the record itself.
+- `btw/delta` appends answer text to the latest turn of `recordId`.
+- The started record can arrive before `btw/reply`; the page recognizes a new topic by its question.
+- Only frames of the current omp process are forwarded.
+- `btw/cancel` cancels the running side question, only of topic `recordId` when given. The page sends it when the panel closes while
+  an answer runs, and before a new `/btw` replaces a topic. It never affects the conversation's run.
+- A conversation change (new conversation, switch, tab) cancels the side question in omp; the page closes the panel.
 
 ### Agent run history
 
@@ -1769,8 +1824,9 @@ catalog/command: { requestId, action: "refresh"|"install", id?, scope?: "project
 **One entry per function, under one plain name.** The palette shows, in this order:
 
 1. The page's own commands, which it handles itself and never sends on:
-   `/new /sessions /rename /model /thinking /effort /permissions /compact /accounts /login /usage /work /agents /computer /agent /team /goal /help`.
-   `/goal` opens the goal card, see "Goal runs".
+   `/new /sessions /rename /model /thinking /effort /permissions /compact /accounts /login /usage /work /agents /computer /agent /team /goal /steer /btw /help`.
+   `/goal` opens the goal card, see "Goal runs". `/steer` and `/btw` post `chat/steer` and `btw/ask`, see "Steering" and
+   "Side questions (/btw)".
 2. POMP's engine commands under plain names, each with a short label, and only when the engine lists the registered name.
 3. The engine's other commands, by name only, with no description and no argument syntax.
 4. The enabled skills, plain names, after a "스킬" / "Skills" heading. The heading is a row of the list, not an option.

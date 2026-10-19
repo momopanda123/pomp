@@ -78,6 +78,8 @@ interface ComposerProps {
   onCommand: (name: BuiltinCommand, args: string) => SendResult;
   /** `/goal <text>`: open the goal card for that text (nothing starts before its answer). */
   onGoal?: (text: string) => void;
+  /** `/steer <text>`: to the running agent now (with nothing running, an ordinary send) with the draft's attachments. */
+  onSteer?: (text: string, attachments: WorkspaceFile[]) => SendResult;
   /** Skills the Tools tab switched off: the command list leaves them out. */
   skillsOff?: readonly string[];
   /** The latest request of the code editor's POMP menu (composer/prefill). */
@@ -173,7 +175,7 @@ function LiveEditorControls({ state, disabled, shortcuts, inputRef, t }: { state
   </span>;
 }
 
-export function Composer({ locale, workspaceKey, sessionId, model, session, setup, setupReplies, onManageAccounts, inputRef, connected, composerPredictions = false, wordCompletion = false, transcript, busy, queueBlocked = false, insertSkill, insertText, basketRequest = 0, basketTokens, requestPending, newSessionPending, includeEditorContext, onIncludeEditorContextChange, draft, dispatch, onSend, onStop, commands, commandsHidden, onCommand, onGoal, skillsOff, prefill, agents, shortcuts = DEFAULT_SHORTCUTS, approvalMode, permissionModeReply, editorFollow, selectedTarget, onSelectTarget, partnerName, partner, onOpenPartner }: ComposerProps) {
+export function Composer({ locale, workspaceKey, sessionId, model, session, setup, setupReplies, onManageAccounts, inputRef, connected, composerPredictions = false, wordCompletion = false, transcript, busy, queueBlocked = false, insertSkill, insertText, basketRequest = 0, basketTokens, requestPending, newSessionPending, includeEditorContext, onIncludeEditorContextChange, draft, dispatch, onSend, onStop, commands, commandsHidden, onCommand, onGoal, onSteer, skillsOff, prefill, agents, shortcuts = DEFAULT_SHORTCUTS, approvalMode, permissionModeReply, editorFollow, selectedTarget, onSelectTarget, partnerName, partner, onOpenPartner }: ComposerProps) {
   const t = useT();
   const focusInput = useCallback(() => inputRef.current?.focus(), [inputRef]);
   const [failure, setFailure] = useState<SendFailure | null>(null);
@@ -632,6 +634,12 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
         // A goal runs in the main conversation: an agent or team tab has no workflow of its own.
         if (partnerTab) { setTargetError(t('composer.goalPartnerTab')); inputRef.current?.focus(); return; }
         setTargetError(null); onGoal?.(goalText); result = { ok: true };
+      }
+      else if (name === 'steer' || name === 'btw') {
+        const rest = command[2]?.trim() ?? '';
+        if (!rest && (name === 'btw' || draft.attachments.length === 0)) { setTargetError(t(name === 'btw' ? 'btw.empty' : 'steer.empty')); inputRef.current?.focus(); return; }
+        setTargetError(null);
+        result = name === 'steer' ? onSteer?.(rest, draft.attachments) ?? { ok: false, reason: 'hostUnavailable' } : onCommand(name, rest);
       }
       else if (name === 'agent' || name === 'team') {
         const args = /^(\S+)(?:\s+([\s\S]*))?$/u.exec(command[2]?.trim() ?? '');

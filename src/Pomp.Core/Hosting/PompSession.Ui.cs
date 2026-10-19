@@ -93,6 +93,24 @@ namespace Pomp.Hosting
                     }
 
                     break;
+                case UiMessageTypes.ChatSteer:
+                    var steer = message.PayloadAs<ChatSendPayload>();
+                    if (steer != null)
+                    {
+                        long steerGeneration;
+                        lock (_stateLock) steerGeneration = _chatStopGeneration;
+                        // On the chat queue like a send: a send just before it is admitted first, so its run is the one steered.
+                        _commands.Enqueue(() => HandleChatSteerAsync(steer, steerGeneration));
+                    }
+
+                    break;
+                case UiMessageTypes.BtwAsk:
+                    // Beside the chat queue: a side question never waits for (or holds up) the conversation's own commands.
+                    HandleBtwAskAsync(message.Payload ?? new JObject()).Forget(_logger, "side question");
+                    break;
+                case UiMessageTypes.BtwCancel:
+                    HandleBtwCancelAsync(message.Payload ?? new JObject()).Forget(_logger, "side question cancel");
+                    break;
                 case UiMessageTypes.ChatStop:
                     _composerAuto?.Stop(PompLanguage.Pick("사용자가 대화를 중지했어요.", "User stopped the conversation."));
                     CancellationTokenSource? sending;
@@ -683,12 +701,18 @@ namespace Pomp.Hosting
             CancelPendingOmpRequests();
             try
             {
-                var response = await _bridge.SendCommandAsync(OmpCommands.Abort(), TimeSpan.FromSeconds(15), _disposeCts.Token).ConfigureAwait(false);
+                // A steer omp still holds would start a new run after a plain abort: take it back with the rest of omp's queue.
+                var withdraw = TakeSteerSent();
+                var response = await _bridge.SendCommandAsync(withdraw ? OmpCommands.AbortAndRestoreQueue() : OmpCommands.Abort(), TimeSpan.FromSeconds(15), _disposeCts.Token).ConfigureAwait(false);
                 if (!response.Success)
                 {
                     PostNotice("warning", PompLanguage.Pick("이번 응답을 중단하지 못했어요: ", "The response could not be stopped: ") + response.Error);
                     return;
                 }
+
+                var withdrawn = (response.Data?["steering"] as JArray)?.Count ?? 0;
+                if (withdraw && withdrawn > 0)
+                    PostNotice("info", PompLanguage.Pick("작업 중인 에이전트에게 아직 전달되지 않은 메시지 " + withdrawn + "개는 보내지 않았어요.", withdrawn + " message(s) not yet delivered to the working agent were not sent."));
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {

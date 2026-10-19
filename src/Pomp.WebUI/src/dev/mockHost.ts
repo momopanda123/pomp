@@ -41,6 +41,8 @@ import type {
   AgentsCommand,
   ApprovalMode,
   AgentHookRule,
+  BtwRecord,
+  BtwStatus,
   CommandInfo,
   ContextBreakdown,
   ComputerSetCommand,
@@ -515,7 +517,7 @@ export function installMockHost(): void {
   let tokens = 12_840;
   let streaming = false;
   const mockTools = createMockToolsHandler(message => post(message.type, message.payload as never), { sessionId, busy: () => streaming });
-  const conversations = createMockConversations(post, { sessionId: () => sessionId, busy: () => streaming, start: input => startTurn(input, opts.scenario, true) });
+  const conversations = createMockConversations(post, { sessionId: () => sessionId, busy: () => streaming, start: input => startTurn(input, opts.scenario, true), steer: input => steerTurn(input) });
   for (const entry of sessions) {
     entry.partner = entry.id === currentEntry.id ? { kind: 'main' } : entry.messageCount! % 3 === 0 ? { kind: 'team', id: 'feature-dev' } : { kind: 'agent', id: 'architect' };
     if (entry.sessionId) conversations.tabs.seed(entry.sessionId, entry.partner);
@@ -937,6 +939,12 @@ export function installMockHost(): void {
     conversations.finish(run.promptId, 'aborted');
   };
 
+  /** chat/steer and the queue's "send now": a steered bubble in the running turn, or a turn of its own when nothing runs (like the host). */
+  const steerTurn = (payload: UiToHost['chat/send']): void => {
+    if (!current || current.aborted) { startTurn(payload, opts.scenario, true); return; }
+    post('chat/steered', { steerId: nextId('steer'), clientMessageId: payload.clientMessageId, text: payload.text, attachments: payload.attachments });
+  };
+
   // ---- Engine setup (accounts / login / API keys / model / usage); nobody is signed in at the start of the "setup" scenario ----
   const hasProvider = (): boolean => authenticated.size > 0 || keys.length > 0;
   let bridgeRunning = false;
@@ -960,6 +968,43 @@ export function installMockHost(): void {
   const clearLoginTimers = (): void => {
     loginTimers.forEach((timer) => window.clearTimeout(timer));
     loginTimers = [];
+  };
+
+  // ---- Side questions (/btw): one at a time per session, answered beside the running turn, never in the transcript ----
+  const btwRecords = new Map<string, BtwRecord>();
+  let btwActive: string | undefined;
+  let btwTimer: number | undefined;
+  const settleBtw = (status: BtwStatus): void => {
+    const record = btwActive ? btwRecords.get(btwActive) : undefined;
+    btwActive = undefined; window.clearTimeout(btwTimer);
+    if (!record) return;
+    const latest = record.followUps?.at(-1) ?? record;
+    latest.status = status; latest.updatedAt = Date.now();
+    post('btw/record', { record: structuredClone(record) });
+  };
+  const askBtw = ({ requestId, question, recordId }: UiToHost['btw/ask']): void => {
+    const ko = opts.locale.startsWith('ko');
+    if (btwActive) { post('btw/reply', { requestId, ok: false, error: ko ? '다른 질문에 아직 답하는 중이에요.' : 'Another side question is still running.' }); return; }
+    const topic = recordId ? btwRecords.get(recordId) : undefined;
+    if (recordId && !topic) { post('btw/reply', { requestId, ok: false, error: ko ? '알 수 없는 질문 주제예요.' : 'Unknown side question topic.' }); return; }
+    const now = Date.now();
+    const turn = { question, answer: '', status: 'running' as const, createdAt: now, updatedAt: now };
+    const record: BtwRecord = topic ? { ...topic, followUps: [...(topic.followUps ?? []), turn] } : { id: nextId('btw'), leafId: null, ...turn };
+    btwRecords.set(record.id, record); btwActive = record.id;
+    post('btw/record', { record: structuredClone(record) });
+    post('btw/reply', { requestId, ok: true, record: structuredClone(record) });
+    const words = (ko ? '지금은 계획의 두 번째 단계를 진행 중이에요. 테스트를 고친 뒤 빌드를 다시 확인할 예정이에요.' : 'The agent is on the second step of the plan: it fixes the tests, then checks the build again.').split(' ');
+    let index = 0;
+    const step = (): void => {
+      if (btwActive !== record.id) return;
+      if (index >= words.length) { settleBtw('complete'); return; }
+      const delta = (index === 0 ? '' : ' ') + words[index++];
+      const latest = record.followUps?.at(-1) ?? record;
+      latest.answer += delta;
+      post('btw/delta', { recordId: record.id, delta });
+      btwTimer = later(70, step);
+    };
+    btwTimer = later(250, step);
   };
 
   const postSetup = (requestId?: string, error?: string): void =>
@@ -1928,6 +1973,17 @@ export function installMockHost(): void {
         case 'chat/send':
           startTurn(payload as unknown as UiToHost['chat/send'], opts.scenario);
           break;
+        case 'chat/steer':
+          steerTurn(payload as unknown as UiToHost['chat/steer']);
+          break;
+        case 'btw/ask':
+          askBtw(payload as unknown as UiToHost['btw/ask']);
+          break;
+        case 'btw/cancel': {
+          const { recordId } = payload as unknown as UiToHost['btw/cancel'];
+          if (btwActive && (!recordId || recordId === btwActive)) settleBtw('cancelled');
+          break;
+        }
         case 'chat/stop':
           stopTurn();
           break;

@@ -6,6 +6,9 @@ import { normalizeSetup, recordReply, type SetupReply, type SetupState } from '.
 import type {
   AdvisorNote,
   ActiveRule,
+  BtwRecord,
+  BtwStatus,
+  BtwTurn,
   AgentsReplyPayload,
   AgentsStatePayload,
   ComposerPrefill,
@@ -47,6 +50,8 @@ export interface UserItem {
   promptId?: string;
   /** Set when the host ended this message's turn without it becoming the running turn (e.g. rejected as busy). */
   failed?: UiErrorInfo;
+  /** Steered into the running agent (`chat/steered`): sent while it worked, not a turn of its own. */
+  steered?: boolean;
 }
 
 export interface AssistantItem {
@@ -147,6 +152,18 @@ export type TranscriptItem =
 // ---- State -----------------------------------------------------------------------------------
 
 /**
+ * The side-question panel (`/btw`): one topic of the current conversation, outside the transcript. `topicId` is the id of the topic's
+ * first record once omp started it; `pending` is the question this page sent that omp has not answered yet.
+ */
+export interface BtwPanel {
+  sessionId?: string;
+  topicId?: string;
+  record?: BtwRecord;
+  pending?: { requestId: string; question: string };
+  error?: string;
+}
+
+/**
  * Turn started from this UI. idle: none; sending: message posted, waiting for `chat/turnStarted`; running: turn in progress.
  * Agent runs that were not started by `chat/send` (omp waking up for a background job) are not turns; they show up through
  * `session.isStreaming` and are folded in by {@link isBusy}.
@@ -232,6 +249,8 @@ export interface AppState {
   queue: QueueState;
   agentHistory: AgentHistoryState;
   conversationReplies: CommandReply[];
+  /** The open side-question panel; null when closed. */
+  btw: BtwPanel | null;
 }
 
 export const initialState: AppState = {
@@ -276,6 +295,7 @@ export const initialState: AppState = {
   queue: { items: [], paused: false },
   agentHistory: { entries: [], truncated: false },
   conversationReplies: [],
+  btw: null,
 };
 
 /** A host message stamped with the local receive time (used for countdowns). */
@@ -309,7 +329,39 @@ export type Action =
   | { type: 'permissionAnswered'; requestId: string; outcome: RequestOutcome; at: number }
   | { type: 'dialogAnswered'; requestId: string; outcome: RequestOutcome; at: number }
   | { type: 'selectTarget'; target?: SendTarget }
-  | { type: 'setIncludeEditorContext'; value: boolean };
+  | { type: 'setIncludeEditorContext'; value: boolean }
+  /** A message went to the running agent (`chat/steer`): the draft was used. */
+  | { type: 'steerSent'; clearDraft: boolean }
+  /** `/btw`: a new topic in the side panel with its first question (`requestId` of the `btw/ask`). */
+  | { type: 'btwOpen'; requestId: string; question: string; sessionId?: string }
+  /** A follow-up question in the panel's topic. */
+  | { type: 'btwAsk'; requestId: string; question: string }
+  | { type: 'btwFailed'; requestId: string; message: string }
+  | { type: 'btwClose' };
+
+const BTW_STATUSES: readonly BtwStatus[] = ['running', 'complete', 'cancelled', 'error', 'interrupted'];
+
+function btwTurn(value: unknown): BtwRecord | undefined {
+  const turn = value as Partial<BtwRecord> | null | undefined;
+  if (!turn || typeof turn.question !== 'string' || typeof turn.answer !== 'string' || !BTW_STATUSES.includes(turn.status as BtwStatus)) return undefined;
+  return { id: '', leafId: null, question: turn.question, answer: turn.answer, status: turn.status as BtwStatus, createdAt: Number(turn.createdAt) || 0, updatedAt: Number(turn.updatedAt) || 0, ...(typeof turn.error === 'string' && turn.error ? { error: turn.error } : {}) };
+}
+
+/** An omp side-question record as the panel keeps it, or undefined when it is not one. */
+function btwRecord(value: unknown): BtwRecord | undefined {
+  const record = value as Partial<BtwRecord> | null | undefined;
+  const first = btwTurn(record);
+  if (!first || typeof record?.id !== 'string' || !record.id) return undefined;
+  const followUps = Array.isArray(record.followUps) ? record.followUps.map(btwTurn).filter((turn): turn is BtwRecord => turn !== undefined).map(({ id: _id, leafId: _leafId, ...turn }) => turn) : [];
+  return { ...first, id: record.id, leafId: typeof record.leafId === 'string' ? record.leafId : null, ...(followUps.length ? { followUps } : {}) };
+}
+
+/** A topic's turns in order: the record's own question, then its follow-ups. */
+export function btwTurns(record: BtwRecord | undefined): BtwTurn[] {
+  if (!record) return [];
+  const { id: _id, leafId: _leafId, followUps, ...first } = record;
+  return [first, ...(followUps ?? [])];
+}
 
 /**
  * A turn of this UI is in progress, or omp reports a running agent (a reloaded page, a background-job wake-up).
@@ -545,7 +597,8 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
       const before = state.session?.sessionId;
       const restarted = before !== undefined && session.sessionId !== undefined && before !== session.sessionId;
       // isStreaming is read through isBusy(); it is never latched into `phase`.
-      const next: AppState = { ...state, session, activeRules: restarted || state.session?.workingDirectory !== session.workingDirectory ? [] : state.activeRules, selectedTarget: restarted ? undefined : state.selectedTarget, sendError: restarted ? undefined : state.sendError };
+      // A side question belongs to its conversation: omp cancels it on a session change, so the panel closes.
+      const next: AppState = { ...state, session, activeRules: restarted || state.session?.workingDirectory !== session.workingDirectory ? [] : state.activeRules, selectedTarget: restarted ? undefined : state.selectedTarget, sendError: restarted ? undefined : state.sendError, btw: restarted ? null : state.btw };
       // omp continues in another session (restart, `/new`): mark the boundary, what is above is not part of its context.
       if (restarted && state.items.length > 0 && state.items[state.items.length - 1]!.kind !== 'sessionReset') {
         return withItem(next, (key) => ({ kind: 'sessionReset', key }));
@@ -600,6 +653,52 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
       // A busy-rejected second prompt never takes over the turn represented by the first prompt.
       if (next.activePromptId !== undefined && next.activePromptId !== promptId) return { ...next, pendingSends };
       return { ...next, pendingSends, phase: 'running', activePromptId: promptId };
+    }
+
+    case 'chat/steered': {
+      const { steerId, clientMessageId, text, attachments, editorContext } = msg.payload;
+      if (typeof steerId !== 'string' || !steerId || typeof text !== 'string' || state.items.some(item => item.kind === 'user' && item.promptId === steerId)) return state;
+      // Its own id as promptId: never matched by the running turn's end, never dimmed as pending.
+      return withItem(state, (key) => ({
+        kind: 'user', key, clientMessageId: clientMessageId ?? steerId, promptId: steerId, text, editorContext, steered: true,
+        attachments: attachments?.filter((entry) => typeof entry?.path === 'string').map((entry) => fileFromAttachment(entry.path)),
+      }));
+    }
+
+    case 'btw/reply': {
+      const panel = state.btw;
+      if (!panel || panel.pending?.requestId !== msg.payload.requestId) return state;
+      if (!msg.payload.ok) return { ...state, btw: { ...panel, pending: undefined, error: typeof msg.payload.error === 'string' && msg.payload.error ? msg.payload.error : 'error' } };
+      const record = btwRecord(msg.payload.record);
+      // Frames for this question may already have arrived: the reply only fills in what they have not.
+      const adopt = record && (panel.topicId === undefined || (panel.topicId === record.id && btwTurns(record).length > btwTurns(panel.record).length));
+      return { ...state, btw: { ...panel, pending: undefined, error: undefined, ...(adopt ? { topicId: record.id, record } : {}) } };
+    }
+
+    case 'btw/record': {
+      const panel = state.btw;
+      const record = btwRecord(msg.payload?.record);
+      if (!panel || !record) return state;
+      // The started record comes before the reply: a new topic is recognised by its question.
+      const started = panel.topicId === undefined && panel.pending !== undefined && !record.followUps?.length && record.question.trim() === panel.pending.question.trim();
+      if (!started && record.id !== panel.topicId) return state;
+      const latest = btwTurns(record).at(-1);
+      const answered = panel.pending !== undefined && latest?.question.trim() === panel.pending.question.trim();
+      return { ...state, btw: { ...panel, topicId: record.id, record, ...(answered ? { pending: undefined, error: undefined } : {}) } };
+    }
+
+    case 'btw/delta': {
+      const panel = state.btw;
+      const { recordId, delta } = msg.payload ?? {};
+      if (!panel?.record || recordId !== panel.topicId || typeof delta !== 'string' || !delta) return state;
+      const record = panel.record;
+      const followUps = record.followUps ?? [];
+      const last = followUps.at(-1);
+      if ((last ?? record).status !== 'running') return state;
+      const next: BtwRecord = last
+        ? { ...record, followUps: [...followUps.slice(0, -1), { ...last, answer: last.answer + delta }] }
+        : { ...record, answer: record.answer + delta };
+      return { ...state, btw: { ...panel, record: next } };
     }
 
     case 'chat/assistantStart': {
@@ -966,6 +1065,21 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case 'selectTarget':
       return { ...state, selectedTarget: action.target };
+
+    case 'steerSent':
+      return { ...state, sendError: undefined, composer: action.clearDraft ? { ...emptyComposer } : state.composer };
+
+    case 'btwOpen':
+      return { ...state, btw: { sessionId: action.sessionId, pending: { requestId: action.requestId, question: action.question } } };
+
+    case 'btwAsk':
+      return state.btw ? { ...state, btw: { ...state.btw, error: undefined, pending: { requestId: action.requestId, question: action.question } } } : state;
+
+    case 'btwFailed':
+      return state.btw?.pending?.requestId === action.requestId ? { ...state, btw: { ...state.btw, pending: undefined, error: action.message } } : state;
+
+    case 'btwClose':
+      return state.btw ? { ...state, btw: null } : state;
 
     case 'composerEdit': {
       const composer = updateMention({ ...state.composer, text: action.text }, action.caret, action.selectionEnd, state.bridge.state === 'running');

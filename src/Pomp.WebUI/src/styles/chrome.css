@@ -252,14 +252,15 @@
 .composer .composer-bar .pickers-composer { flex: 2 1 auto; min-width: 0; }
 
 /* Host-backed mentions and attachment drafts. */
-/* The input and its Send (and Stop while a reply runs) share one row; the buttons stay at the bottom as the input grows. */
-.composer-field { position: relative; display: flex; align-items: flex-end; gap: 4px; min-width: 0; }
+/* The input and its Send (and Stop while a reply runs) share one row; the buttons stay at the bottom as the input grows. They are 2px
+   apart, like the tool buttons above the input and the chips under it. */
+.composer-field { position: relative; display: flex; align-items: flex-end; gap: 2px; min-width: 0; }
 .composer-input-shell { position: relative; flex: 1 1 auto; min-width: 0; }
 .composer-ghost { position: absolute; overflow: hidden; pointer-events: none; border-radius: var(--pomp-radius); }
 .composer-ghost-mirror { min-height: 100%; color: transparent; }
 .composer-ghost-prefix { color: transparent; }
 .composer-ghost-text { color: var(--pomp-muted-fg); opacity: 0.7; }
-.composer-send { display: flex; flex: none; gap: 3px; }
+.composer-send { display: flex; flex: none; gap: 2px; }
 /* Matches the default single-line input row (28px input incl. border) while it grows with it. */
 .composer-send-btn { width: 28px; min-width: 28px; height: 28px; padding: 0; justify-content: center; }
 

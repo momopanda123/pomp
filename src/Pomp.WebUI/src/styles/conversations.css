@@ -47,6 +47,24 @@
 .live-progress-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; flex-wrap: wrap; }
 .live-members { max-height: 18vh; overflow: auto; }
 .live-members > li, .history-members > li { display: flex; flex-direction: column; gap: 3px; min-width: 0; margin-top: 5px; padding: 4px; border-top: 1px solid var(--pomp-border); }
+/* The side-question panel (/btw): docked above the queue and the input, scrolling inside so the transcript keeps its room. */
+.btw-panel { flex: none; display: flex; flex-direction: column; min-width: 0; max-height: min(45vh, 380px); margin: 0 8px 4px; border: 1px solid var(--pomp-focus-border); border-radius: var(--pomp-radius); background: var(--pomp-panel-bg); font-size: .85rem; word-break: keep-all; overflow-wrap: anywhere; }
+.btw-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; padding: 4px 6px; border-bottom: 1px solid var(--pomp-border); }
+.btw-head h4 { margin: 0; min-width: 0; font-size: .85rem; }
+.btw-turns { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 4px 6px; }
+.btw-note { margin: 0 0 4px; color: var(--pomp-muted-fg); font-size: .78rem; }
+.btw-turn { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 5px 0; border-top: 1px solid var(--pomp-border); }
+.btw-question { font-weight: 600; white-space: pre-wrap; }
+.btw-answer { min-width: 0; }
+.btw-status { color: var(--pomp-muted-fg); }
+.btw-status.error, .btw-error { color: var(--pomp-error); }
+.btw-error { margin: 4px 0 0; }
+.btw-input { display: flex; align-items: flex-end; gap: 4px; min-width: 0; padding: 4px 6px; border-top: 1px solid var(--pomp-border); }
+.btw-input textarea { flex: 1; min-width: 0; max-height: 6em; resize: none; font: inherit; }
+.btw-input .btn { flex: none; }
+/* A user message sent to the agent while it worked (/steer, the queue's "send now"). */
+.message-steered-badge { display: flex; align-items: center; gap: 4px; min-width: 0; margin-bottom: 4px; font-size: .78rem; font-weight: 600; color: var(--pomp-muted-fg); }
+.message-steered-badge .icon { flex: none; }
 .agents-nav { position: sticky; z-index: 2; top: -8px; display: flex; flex: none; flex-wrap: wrap; gap: 4px; margin: -8px -8px 0; padding: 7px 8px; background: var(--pomp-bg); border-bottom: 1px solid var(--pomp-border); }
 /* Same full-width description strip as Work and Tools: cancel the panel padding and the gap below the chips. */
 .agents-panel > .tools-description { margin: -12px -8px 0; }

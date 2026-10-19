@@ -1,8 +1,8 @@
 import type { MessageKey, Translate } from './i18n';
 import type { CommandInfo } from './protocol';
 
-/** The page's own commands: it handles them itself and never sends the typed text on (`goal` opens the goal card). */
-export const BUILTIN_COMMANDS = ['new', 'sessions', 'rename', 'model', 'thinking', 'effort', 'permissions', 'compact', 'accounts', 'login', 'usage', 'work', 'agents', 'computer', 'agent', 'team', 'goal', 'help'] as const;
+/** The page's own commands: it handles them itself and never sends the typed text on (`goal` opens the goal card; `steer` and `btw` post their own messages). */
+export const BUILTIN_COMMANDS = ['new', 'sessions', 'rename', 'model', 'thinking', 'effort', 'permissions', 'compact', 'accounts', 'login', 'usage', 'work', 'agents', 'computer', 'agent', 'team', 'goal', 'steer', 'btw', 'help'] as const;
 export type BuiltinCommand = typeof BUILTIN_COMMANDS[number];
 export const isBuiltinCommand = (name: string): name is BuiltinCommand => (BUILTIN_COMMANDS as readonly string[]).includes(name);
 /** POMP's plumbing commands: the host sends them programmatically, so the command list never offers them (typed text still goes to the host as written). */

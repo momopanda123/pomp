@@ -53,6 +53,8 @@ export function ChatQueue({ state, replies, sessionId, disabled, pendingSends, o
         <p>{revealControls(sentCaseFeedbackSummary(item.text, t) ?? item.text)}</p><QueueDestination item={item} />
         {item.attachments?.length ? <AttachmentSummary files={item.attachments} testId={`queue-attachments-${item.id}`} /> : null}
         <div className="conversation-actions">
+          {/* Sends now: to the agent working at this moment (or, with nothing running, as the next message). */}
+          <button className="btn subtle small" type="button" data-testid={`queue-steer-${item.id}`} title={t('queue.steerTitle')} disabled={blocked || other || !item.canSteer} onClick={() => post('chat/queue', { action: 'steer', id: item.id })}><Icon name="zap" size={12} /> {t('queue.steer')}</button>
           <button className="btn subtle small" type="button" data-testid={`queue-edit-${item.id}`} disabled={blocked} onClick={() => { capture(); setText(item.text); setEditing(item); }}>{t('queue.edit')}</button>
           <button className="icon-btn" type="button" data-testid={`queue-up-${item.id}`} title={t('queue.up')} aria-label={t('queue.up')} disabled={blocked || index === 0} onClick={() => post('chat/queue', { action: 'move', id: item.id, index: index - 1 })}><Icon name="arrowUp" size={12} /></button>
           <button className="icon-btn" type="button" data-testid={`queue-down-${item.id}`} title={t('queue.down')} aria-label={t('queue.down')} disabled={blocked || index === state.items.length - 1} onClick={() => post('chat/queue', { action: 'move', id: item.id, index: index + 1 })}><Icon name="arrowDown" size={12} /></button>

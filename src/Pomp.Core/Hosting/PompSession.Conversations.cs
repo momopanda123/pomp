@@ -263,7 +263,7 @@ namespace Pomp.Hosting
         }
         private ChatQueueStatePayload QueueView()
         {
-            lock (_stateLock) return new ChatQueueStatePayload { SessionId = _chatQueue.Count == 0 ? null : _queueSession, Paused = _queuePaused, Reason = _queueReason, Items = _chatQueue.Select(q => new ChatQueueItemPayload { Id = q.Id, Text = q.Send.Text, IncludeEditorContext = q.Send.IncludeEditorContext, Attachments = CopySend(q.Send).Attachments, Team = q.Send.Team ?? (q.Partner?.Kind == "team" ? q.Partner.Id : null), Agent = q.Send.Agent ?? (q.Partner?.Kind == "agent" ? q.Partner.Id : null), AgentInstance = q.Send.AgentInstance, CreatedAt = q.CreatedAt }).ToList() };
+            lock (_stateLock) return new ChatQueueStatePayload { SessionId = _chatQueue.Count == 0 ? null : _queueSession, Paused = _queuePaused, Reason = _queueReason, Items = _chatQueue.Select(q => new ChatQueueItemPayload { Id = q.Id, Text = q.Send.Text, IncludeEditorContext = q.Send.IncludeEditorContext, Attachments = CopySend(q.Send).Attachments, Team = q.Send.Team ?? (q.Partner?.Kind == "team" ? q.Partner.Id : null), Agent = q.Send.Agent ?? (q.Partner?.Kind == "agent" ? q.Partner.Id : null), AgentInstance = q.Send.AgentInstance, CreatedAt = q.CreatedAt, CanSteer = CanSteer(q.Send) }).ToList() };
         }
         private int QueueBytes() => System.Text.Encoding.UTF8.GetByteCount(Pomp.Json.PompJson.Serialize(QueueView()));
         private void PublishChatQueue() => _ui.Post(UiMessageTypes.ChatQueueState, QueueView(), UiDelivery.State);
@@ -310,6 +310,8 @@ namespace Pomp.Hosting
             try
             {
                 var command = Pomp.Json.PompJson.ToObject<ChatQueueCommandPayload>(args) ?? throw new ArgumentException(PompLanguage.Pick("대기열 명령 형식이 올바르지 않아요.", "The queue command is invalid."));
+                // Sends now: the item goes to the running agent (or, with nothing running, starts a turn) instead of waiting its turn.
+                if (command.Action == "steer") return SteerQueuedAsync(requestId, command.Id);
                 lock (_stateLock)
                 {
                     var item = _chatQueue.FirstOrDefault(q => q.Id == command.Id);

@@ -145,6 +145,10 @@ namespace Pomp.Hosting
                     case OmpFrameTypes.AutoRetryStart:
                         PostNotice("info", PompLanguage.Pick("공급자 연결 재시도 중", "Retrying provider connection"));
                         break;
+                    case OmpFrameTypes.BtwRecord:
+                    case OmpFrameTypes.BtwDelta:
+                        HandleBtwFrame(frame);
+                        break;
                     default:
                         // turn_start/turn_end, subagent frames, host_uri_cancel...: nothing to show.
                         break;
@@ -697,6 +701,8 @@ namespace Pomp.Hosting
                 }
 
                 _streamingRevision++;
+                // The run is over: a steer it took was delivered (or taken back by SteerAsync), so Stop needs no withdrawal any more.
+                if (!streaming) _steerSent = false;
                 if (_info.IsStreaming == streaming)
                 {
                     return;
@@ -1282,6 +1288,7 @@ namespace Pomp.Hosting
                         return;
                     }
 
+                    if (HandleDiskEditHold(request, origin)) break;
                     var permission = OmpApprovalMapper.TryMap(request);
                     if (permission != null)
                     {
@@ -1302,7 +1309,7 @@ namespace Pomp.Hosting
                     break;
                 case OmpUiMethods.Notify:
                     if (IsEngineHousekeepingNotice(NormalizeLevel(frame.Json.GetString("notifyType")), request.Message ?? "")) break;
-                    if (HandleTaskDetailsNotification(request.Message, origin) || HandleActiveRulesNotification(request.Message, origin) || HandleToolsNotification(request.Message, origin) || HandleInlineNotification(request.Message, origin) || HandleMemberStopNotification(request.Message, origin) || HandleAdvisorNotification(request.Message, origin) || HandleReviewReporterNotification(request.Message, origin)) break;
+                    if (HandleTaskDetailsNotification(request.Message, origin) || HandleActiveRulesNotification(request.Message, origin) || HandleToolsNotification(request.Message, origin) || HandleInlineNotification(request.Message, origin) || HandleMemberStopNotification(request.Message, origin) || HandleAdvisorNotification(request.Message, origin) || HandleReviewReporterNotification(request.Message, origin) || HandleDiskEditNotification(request.Message, origin)) break;
                     PostNotice(NormalizeLevel(frame.Json.GetString("notifyType")), request.Message ?? string.Empty);
                     break;
                 default:

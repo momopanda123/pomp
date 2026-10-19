@@ -7,6 +7,8 @@ export interface CommandReply { requestId: string; ok: boolean; error?: string }
 export interface QueueItem {
   id: string; text: string; attachments?: { path: string }[]; includeEditorContext: boolean;
   team?: string; agent?: string; agentInstance?: string; createdAt: string;
+  /** It goes to this conversation itself and is no slash command, so the queue's steer action can send it now. */
+  canSteer?: boolean;
 }
 export interface QueueState { sessionId?: string | null; items: QueueItem[]; paused: boolean; reason?: string }
 export interface HistoryFilter { kind?: 'team' | 'agent' | 'dm'; id?: string; status?: string; includePinned: boolean }
@@ -28,6 +30,7 @@ export interface ConversationHostToUi {
 export interface ConversationUiToHost {
   /** open: the partner's tab (a new conversation when it has none); activate: a tab's conversation (no sessionId = Default); close: a tab. */
   'conversation/tab': { requestId: string; action: 'open' | 'activate' | 'close'; partner?: ConversationPartner; sessionId?: string };
-  'chat/queue': { requestId: string; action: 'edit' | 'remove' | 'move' | 'clear' | 'pause' | 'resume'; id?: string; text?: string; index?: number };
+  /** steer: the item leaves the queue and goes to the running agent now (with nothing running it is sent normally). */
+  'chat/queue': { requestId: string; action: 'edit' | 'remove' | 'move' | 'clear' | 'pause' | 'resume' | 'steer'; id?: string; text?: string; index?: number };
   'agents/history': { requestId: string; action: 'refresh' | 'delete' | 'clear' | 'pin' | 'unpin' | 'label' | 'rerun'; id?: string; label?: string; filter?: HistoryFilter };
 }
