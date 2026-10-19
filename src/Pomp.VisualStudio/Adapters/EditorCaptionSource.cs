@@ -59,15 +59,15 @@ namespace Pomp.VisualStudio.Adapters
             {
                 token.ThrowIfCancellationRequested();
                 if (!Kinds.Contains(node.GetType().Name) || node.Span.Length == 0) continue;
-                var line = text.Lines.GetLineFromPosition(node.SpanStart).LineNumber + 1;
+                // The declaration's own first line past its attributes (its signature): the caption sits at its end, and it names the
+                // declaration when there is no cached semantic model.
+                var head = node.DescendantTokens().FirstOrDefault(t => t.Parent?.AncestorsAndSelf().Any(a => a.GetType().Name.EndsWith("AttributeListSyntax", StringComparison.Ordinal)) == false);
+                var headLine = text.Lines.GetLineFromPosition(head.RawKind != 0 ? head.SpanStart : node.SpanStart);
+                var line = headLine.LineNumber + 1;
                 if (line < firstLine || line > lastLine || !lines.Add(line)) continue;
                 ISymbol? symbol = null;
                 if (semantic != null) try { symbol = semantic.GetDeclaredSymbol(node, token); } catch (ArgumentException) { }
-                // Without a cached semantic model there is no symbol: the declaration's own first line past its attributes (its
-                // signature) names it instead.
-                var head = node.DescendantTokens().FirstOrDefault(t => t.Parent?.AncestorsAndSelf().Any(a => a.GetType().Name.EndsWith("AttributeListSyntax", StringComparison.Ordinal)) == false);
-                var name = symbol?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)
-                    ?? text.Lines.GetLineFromPosition(head.RawKind != 0 ? head.SpanStart : node.SpanStart).ToString().Trim();
+                var name = symbol?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat) ?? headLine.ToString().Trim();
                 if (name.Length > 120) name = name.Substring(0, 120);
                 targets.Add(new EditorCaptionTarget(name, line, node.SpanStart, node.Span.Length));
                 if (targets.Count == MaxTargets) break;
