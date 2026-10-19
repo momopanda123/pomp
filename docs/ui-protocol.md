@@ -255,6 +255,7 @@ Host text the page shows says what happened, the current state or a reason.
 | `session/info` | `{ model?, thinkingLevel?, sessionId?, sessionName?, contextUsage?, isStreaming, workingDirectory?, fastMode? }` | Session state for the composer. See "session/info" below. |
 | `chat/turnStarted` | `{ promptId, clientMessageId?, text?, attachments?, editorContext?, team?, agent?, agentInstance?, main? }` | The host took a user message as a prompt. See "chat/turnStarted" below. |
 | `chat/steered` | `{ steerId, clientMessageId?, text, attachments?, editorContext? }` | A message steered into the running agent. See "Steering" below. |
+| `chat/steerWithdrawn` | `{ steerIds }` | Stop took these steered messages back before the agent read them; their bubbles show 전달 안 됨 / Not delivered. See "Steering" below. |
 | `chat/assistantStart` | `{ messageId }` | New assistant bubble. |
 | `chat/assistantDelta` | `{ messageId, kind: "text"\|"thinking", delta }` | Append; render markdown incrementally. |
 | `chat/assistantNarration` | `{ messageId, text }` | The ended thinking block was narration. See "chat/assistantNarration" below. |
@@ -1010,7 +1011,8 @@ A steer is a message for the agent that is working now. omp delivers it at the a
 - When the run ended before omp took the steer, the host takes it back with `remove_queued_message` (queue `steering`) and sends it
   normally. If omp had already taken it, omp handles it and the host only logs that.
 - Stop after a steer uses `abort_and_restore_queue` instead of `abort`, so a steer omp still holds does not start a new run. A steer
-  withdrawn this way is not sent; a notice says how many.
+  withdrawn this way is not sent; a notice says how many, and `chat/steerWithdrawn` (part of the replayed transcript) marks the newest
+  that many steered bubbles of the run 전달 안 됨 / Not delivered (omp delivers steers in order, so the ones it still held are the newest).
 - Failures (omp refused it, too large, connection lost) are a `chat/notice`; nothing is resent.
 
 ### Side questions (/btw)

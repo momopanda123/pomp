@@ -702,7 +702,7 @@ namespace Pomp.Hosting
 
                 _streamingRevision++;
                 // The run is over: a steer it took was delivered (or taken back by SteerAsync), so Stop needs no withdrawal any more.
-                if (!streaming) _steerSent = false;
+                if (!streaming) _steersSent.Clear();
                 if (_info.IsStreaming == streaming)
                 {
                     return;

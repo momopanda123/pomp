@@ -702,7 +702,8 @@ namespace Pomp.Hosting
             try
             {
                 // A steer omp still holds would start a new run after a plain abort: take it back with the rest of omp's queue.
-                var withdraw = TakeSteerSent();
+                var steers = TakeSteersSent();
+                var withdraw = steers.Count > 0;
                 var response = await _bridge.SendCommandAsync(withdraw ? OmpCommands.AbortAndRestoreQueue() : OmpCommands.Abort(), TimeSpan.FromSeconds(15), _disposeCts.Token).ConfigureAwait(false);
                 if (!response.Success)
                 {
@@ -710,9 +711,13 @@ namespace Pomp.Hosting
                     return;
                 }
 
-                var withdrawn = (response.Data?["steering"] as JArray)?.Count ?? 0;
+                var withdrawn = Math.Min((response.Data?["steering"] as JArray)?.Count ?? 0, steers.Count);
                 if (withdraw && withdrawn > 0)
+                {
+                    // omp delivers steers in order, so the ones it still held are the newest.
+                    _ui.Post(UiMessageTypes.ChatSteerWithdrawn, new ChatSteerWithdrawnPayload { SteerIds = steers.Skip(steers.Count - withdrawn).ToList() });
                     PostNotice("info", PompLanguage.Pick("작업 중인 에이전트에게 아직 전달되지 않은 메시지 " + withdrawn + "개는 보내지 않았어요.", withdrawn + " message(s) not yet delivered to the working agent were not sent."));
+                }
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {

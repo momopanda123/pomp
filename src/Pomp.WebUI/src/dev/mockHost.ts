@@ -933,16 +933,22 @@ export function installMockHost(): void {
   const stopTurn = (): void => {
     const run = current;
     if (!run || run.aborted) return;
+    // The mock agent never reads a steer before its run ends: Stop takes every one back, like the host's abort_and_restore_queue.
+    const steers = runSteers.get(run);
+    if (steers?.length) { post('chat/steerWithdrawn', { steerIds: steers }); runSteers.delete(run); }
     abortRun(run); // unwinds the script (and dismisses open questions), then close the turn like the real host
     post('chat/turnEnd', { promptId: run.promptId, status: 'aborted' });
     postSession(false);
     conversations.finish(run.promptId, 'aborted');
   };
 
+  const runSteers = new WeakMap<Run, string[]>();
   /** chat/steer and the queue's "send now": a steered bubble in the running turn, or a turn of its own when nothing runs (like the host). */
   const steerTurn = (payload: UiToHost['chat/send']): void => {
     if (!current || current.aborted) { startTurn(payload, opts.scenario, true); return; }
-    post('chat/steered', { steerId: nextId('steer'), clientMessageId: payload.clientMessageId, text: payload.text, attachments: payload.attachments });
+    const steerId = nextId('steer');
+    runSteers.set(current, [...(runSteers.get(current) ?? []), steerId]);
+    post('chat/steered', { steerId, clientMessageId: payload.clientMessageId, text: payload.text, attachments: payload.attachments });
   };
 
   // ---- Engine setup (accounts / login / API keys / model / usage); nobody is signed in at the start of the "setup" scenario ----

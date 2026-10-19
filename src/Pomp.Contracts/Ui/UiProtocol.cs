@@ -63,6 +63,12 @@ namespace Pomp.Ui
         /// </summary>
         public const string ChatSteered = "chat/steered";
 
+        /// <summary>
+        /// Host → UI: Stop took steered messages back before the agent read them (<see cref="ChatSteerWithdrawnPayload"/>); their bubbles
+        /// are marked as not delivered.
+        /// </summary>
+        public const string ChatSteerWithdrawn = "chat/steerWithdrawn";
+
         /// <summary>Host → UI: a side question's full record (<see cref="BtwRecordPayload"/>) at each lifecycle change; not part of the transcript.</summary>
         public const string BtwRecord = "btw/record";
 
@@ -646,6 +652,13 @@ namespace Pomp.Ui
         public List<ChatAttachment>? Attachments { get; set; }
 
         public ChatEditorContext? EditorContext { get; set; }
+    }
+
+    /// <summary>Steered messages Stop withdrew from omp before the agent read them.</summary>
+    public sealed class ChatSteerWithdrawnPayload
+    {
+        /// <summary>The <see cref="ChatSteeredPayload.SteerId"/> of each withdrawn message.</summary>
+        public List<string> SteerIds { get; set; } = new List<string>();
     }
 
     public sealed class BtwAskPayload

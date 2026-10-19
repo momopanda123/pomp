@@ -52,6 +52,8 @@ export interface UserItem {
   failed?: UiErrorInfo;
   /** Steered into the running agent (`chat/steered`): sent while it worked, not a turn of its own. */
   steered?: boolean;
+  /** A steered message Stop took back before the agent read it (`chat/steerWithdrawn`). */
+  withdrawn?: boolean;
 }
 
 export interface AssistantItem {
@@ -663,6 +665,12 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
         kind: 'user', key, clientMessageId: clientMessageId ?? steerId, promptId: steerId, text, editorContext, steered: true,
         attachments: attachments?.filter((entry) => typeof entry?.path === 'string').map((entry) => fileFromAttachment(entry.path)),
       }));
+    }
+
+    case 'chat/steerWithdrawn': {
+      const ids = Array.isArray(msg.payload?.steerIds) ? new Set(msg.payload.steerIds.filter((id): id is string => typeof id === 'string')) : undefined;
+      if (!ids?.size || !state.items.some(item => item.kind === 'user' && item.steered && item.promptId !== undefined && ids.has(item.promptId))) return state;
+      return { ...state, items: state.items.map(item => item.kind === 'user' && item.steered && item.promptId !== undefined && ids.has(item.promptId) ? { ...item, withdrawn: true } : item) };
     }
 
     case 'btw/reply': {

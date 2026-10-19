@@ -19,8 +19,11 @@ namespace Pomp.Hosting
     {
         private enum SteerOutcome { Sent, NotRunning, Failed }
 
-        /// <summary>A steer was admitted during the current run: Stop must take it back from omp's queue (a plain abort would run it).</summary>
-        private bool _steerSent;
+        /// <summary>
+        /// The steers the current run took, oldest first (their <c>chat/steered</c> ids): Stop must take them back from omp's queue (a
+        /// plain abort would run them) and marks the ones it withdrew as not delivered.
+        /// </summary>
+        private readonly List<string> _steersSent = new List<string>();
 
         /// <summary>Goes to this conversation itself (no chosen team, agent or instance) and is no slash command, which steering does not run.</summary>
         private static bool CanSteer(ChatSendPayload send) =>
@@ -134,11 +137,12 @@ namespace Pomp.Hosting
                     return SteerOutcome.Failed;
                 }
 
+                var steerId = "steer-" + Interlocked.Increment(ref _promptCounter).ToString(System.Globalization.CultureInfo.InvariantCulture);
                 bool running;
                 lock (_stateLock)
                 {
                     running = _turns.Count > 0 || _info.IsStreaming;
-                    if (running) _steerSent = true;
+                    if (running) _steersSent.Add(steerId);
                 }
 
                 if (!running)
@@ -150,7 +154,7 @@ namespace Pomp.Hosting
 
                 _ui.Post(UiMessageTypes.ChatSteered, new ChatSteeredPayload
                 {
-                    SteerId = "steer-" + Interlocked.Increment(ref _promptCounter).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    SteerId = steerId,
                     ClientMessageId = string.IsNullOrEmpty(send.ClientMessageId) ? null : send.ClientMessageId,
                     Text = text,
                     Attachments = attachments.Count == 0 ? null : attachments.Select(path => new ChatAttachment { Path = path }).ToList(),
@@ -178,13 +182,13 @@ namespace Pomp.Hosting
             }
         }
 
-        /// <summary>True once (and clears it) when this run took a steer, so Stop withdraws omp's queue instead of a plain abort.</summary>
-        private bool TakeSteerSent()
+        /// <summary>The steers this run took, oldest first (and clears them): Stop withdraws omp's queue instead of a plain abort when any.</summary>
+        private List<string> TakeSteersSent()
         {
             lock (_stateLock)
             {
-                var sent = _steerSent;
-                _steerSent = false;
+                var sent = _steersSent.ToList();
+                _steersSent.Clear();
                 return sent;
             }
         }

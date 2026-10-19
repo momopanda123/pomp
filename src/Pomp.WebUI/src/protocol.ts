@@ -1231,6 +1231,8 @@ export interface HostToUi extends ConversationHostToUi, ToolsHostToUi {
   'chat/replayBegin': { truncated: boolean };
   'chat/replayEnd': Record<string, never>;
   'chat/steered': SteeredPayload;
+  /** Stop took these steered messages back before the agent read them: their bubbles show "not delivered". */
+  'chat/steerWithdrawn': { steerIds: string[] };
   'btw/record': { record: BtwRecord };
   'btw/delta': { recordId: string; delta: string };
   'btw/reply': { requestId: string; ok: boolean; error?: string; record?: BtwRecord };
@@ -1449,6 +1451,7 @@ const HOST_TYPES: Record<HostMessageType, true> = {
   'chat/replayBegin': true,
   'chat/replayEnd': true,
   'chat/steered': true,
+  'chat/steerWithdrawn': true,
   'btw/record': true,
   'btw/delta': true,
   'btw/reply': true,
