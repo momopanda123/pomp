@@ -27,14 +27,18 @@ export interface SkillForm { description: string; body: string }
 export interface RuleForm { description: string; alwaysApply: boolean; globs: string[]; body: string }
 /** A file read for editing: the whole text and its hash; `form` only when every frontmatter key is one the form edits. */
 export interface ResourceDocument { content: string; hash: string; form?: SkillForm | RuleForm }
-export interface ToolsReply { requestId: string; ok: boolean; error?: string; output?: string; document?: ResourceDocument; workflow?: Partial<WorkflowInfo> }
+/** What a skills `import` with `ticket` would copy: a chosen SKILL.md brings its whole folder, any other Markdown file only itself. */
+export interface SkillImportPreview { ticket: string; name: string; description: string; file: string; files: number; bytes: number }
+export interface ToolsReply { requestId: string; ok: boolean; error?: string; output?: string; document?: ResourceDocument; workflow?: Partial<WorkflowInfo>; skillImport?: SkillImportPreview }
 export interface ToolsCommand { requestId: string; action: 'refresh' | 'set' | 'reset'; active?: string[] }
 /**
  * create: name, scope, description and an optional body (empty: a starter body). read: the file of one row (scope omitted for an
  * installed/engine row) → reply.document. update: expectedHash plus either the form fields (description, body) or the whole text (content).
+ * pick: the host's open-file dialog → reply.skillImport (absent when it was closed). import: scope and the ticket of that preview.
+ * refresh and every change also make the engine rediscover its skills.
  */
 /** enable/disable: name (any source; kept in POMP's own overrides and merged into the engine's disabledExtensions, applied without a restart). reset: name (clears the overrides, back to the default). */
-export interface SkillsCommand { requestId: string; action: 'refresh' | 'create' | 'import' | 'delete' | 'open' | 'read' | 'update' | 'enable' | 'disable' | 'reset'; scope?: ResourceScope; name?: string; description?: string; body?: string; content?: string; expectedHash?: string }
+export interface SkillsCommand { requestId: string; action: 'refresh' | 'create' | 'pick' | 'import' | 'delete' | 'open' | 'read' | 'update' | 'enable' | 'disable' | 'reset'; scope?: ResourceScope; name?: string; description?: string; body?: string; content?: string; expectedHash?: string; ticket?: string }
 export interface McpCommand { requestId: string; action: 'refresh' | 'save' | 'delete' | 'enable' | 'disable' | 'test' | 'restart'; scope?: ResourceScope; name?: string; server?: McpServer; expectedHash?: string }
 /** A top-level `.pomp/rules/*.mdc` file; `note` says when only the engine can read its frontmatter. */
 export interface RuleInfo { name: string; scope: ResourceScope; file: string; hash: string; description: string; alwaysApply: boolean; globs: string[]; note?: string; unreadable?: boolean }

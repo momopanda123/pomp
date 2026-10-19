@@ -10,9 +10,10 @@ using Pomp.Hosting;
 namespace Pomp.Features
 {
     /// <summary>
-    /// Which knowledge is selected in each conversation (<c>.pomp/local/knowledge-sessions.json</c>): the page's
-    /// context basket, continued in every message of the conversation. The newest 200 conversations are kept; a malformed file
-    /// fails closed (selections fall back to empty and nothing is overwritten).
+    /// Which knowledge is selected in each conversation (<c>.pomp/local/knowledge-sessions.json</c>): the page's context basket,
+    /// continued in every message of the conversation. A conversation keeps what it picked besides the default knowledge (<c>ids</c>)
+    /// and the default knowledge it unticked (<c>excluded</c>); every other default knowledge is selected in it. The newest 200
+    /// conversations are kept; a malformed file fails closed (selections fall back to empty and nothing is overwritten).
     /// </summary>
     internal sealed class KnowledgeSelection
     {
@@ -21,7 +22,7 @@ namespace Pomp.Features
         private static readonly WorkspaceJsonFile.Shape Shape = new WorkspaceJsonFile.Shape
         {
             Folder = "knowledge-sessions", Rows = "selections", MaxBytes = 1024 * 1024, MaxRows = MaxRows,
-            Fields = new HashSet<string>(StringComparer.Ordinal) { "id", "sessionId", "ids", "updatedAt" },
+            Fields = new HashSet<string>(StringComparer.Ordinal) { "id", "sessionId", "ids", "excluded", "updatedAt" },
             CheckRow = CheckRow,
             Busy = ("다른 창에서 지식 선택을 쓰고 있어요.", "The knowledge selection is busy in another window."),
             Full = ("지식 선택이 가득 찼어요.", "The knowledge selection is full."),
@@ -41,17 +42,29 @@ namespace Pomp.Features
             return builder.ToString(0, 32);
         }
 
-        internal IReadOnlyList<string> Get(string sessionId)
+        internal sealed class Choice
+        {
+            internal static readonly Choice None = new Choice(Array.Empty<string>(), Array.Empty<string>());
+            internal Choice(IReadOnlyList<string> picked, IReadOnlyList<string> excluded) { Picked = picked; Excluded = excluded; }
+            /// <summary>Knowledge picked besides the defaults.</summary>
+            internal IReadOnlyList<string> Picked { get; }
+            /// <summary>Default knowledge unticked in this conversation.</summary>
+            internal IReadOnlyList<string> Excluded { get; }
+        }
+
+        internal Choice Get(string sessionId)
         {
             var id = RowId(sessionId);
             var row = store.Read().OfType<JObject>().FirstOrDefault(r => (string?)r["id"] == id && (string?)r["sessionId"] == sessionId);
-            return row == null ? Array.Empty<string>() : ((JArray)row["ids"]!).Select(t => (string)t!).ToList();
+            if (row == null) return Choice.None;
+            return new Choice(((JArray)row["ids"]!).Select(t => (string)t!).ToList(), (row["excluded"] as JArray)?.Select(t => (string)t!).ToList() ?? (IReadOnlyList<string>)Array.Empty<string>());
         }
 
-        /// <summary>Saves the selection (unknown ids are the caller's to filter); the oldest conversations fall out past 200.</summary>
-        internal void Set(string sessionId, IEnumerable<string> ids)
+        /// <summary>Saves the choice (unknown ids are the caller's to filter); the oldest conversations fall out past 200.</summary>
+        internal void Set(string sessionId, Choice choice)
         {
-            var list = ids.Distinct(StringComparer.Ordinal).ToList();
+            var picked = choice.Picked.Distinct(StringComparer.Ordinal).ToList();
+            var excluded = choice.Excluded.Distinct(StringComparer.Ordinal).ToList();
             store.Mutate(rows =>
             {
                 var id = RowId(sessionId);
@@ -63,7 +76,8 @@ namespace Pomp.Features
                 }
 
                 row["sessionId"] = sessionId;
-                row["ids"] = new JArray(list);
+                row["ids"] = new JArray(picked);
+                if (excluded.Count > 0) row["excluded"] = new JArray(excluded); else row.Remove("excluded");
                 row["updatedAt"] = DateTimeOffset.UtcNow.ToString("O");
                 // Newest last (eviction order); the id stays stable so a re-selected conversation keeps its row.
                 rows.Remove(row);
@@ -81,14 +95,18 @@ namespace Pomp.Features
 
         private static void CheckRow(JObject row)
         {
-            if (row["sessionId"]?.Type != JTokenType.String || row["updatedAt"]?.Type != JTokenType.String || row["ids"] is not JArray ids)
+            if (row["sessionId"]?.Type != JTokenType.String || row["updatedAt"]?.Type != JTokenType.String || row["ids"] is not JArray ids
+                || (row["excluded"] != null && row["excluded"] is not JArray))
                 throw new InvalidDataException("Invalid selection field type.");
             if (string.IsNullOrEmpty((string)row["sessionId"]!)) throw new InvalidDataException("Invalid selection session.");
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var token in ids)
+            foreach (var list in new[] { ids, row["excluded"] as JArray ?? new JArray() })
             {
-                if (token.Type != JTokenType.String || ((string)token!).Length != 32 || !seen.Add((string)token!))
-                    throw new InvalidDataException("Invalid selection ids.");
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var token in list)
+                {
+                    if (token.Type != JTokenType.String || ((string)token!).Length != 32 || !seen.Add((string)token!))
+                        throw new InvalidDataException("Invalid selection ids.");
+                }
             }
         }
     }

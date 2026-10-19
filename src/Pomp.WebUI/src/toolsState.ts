@@ -116,7 +116,9 @@ export function useToolsState({ locale, connected, busy, active, workspaceKey, s
         });
         resolve(reply);
       };
-      const timer = window.setTimeout(() => finish({ requestId, ok: false, error: toolsTranslate(settings.current.locale)('tools.noReply') }), domain === 'mcp' && ['test', 'save'].includes(payload.action) ? 60000 : 15000);
+      // The skills import dialog waits for the user; a skills change waits for the engine to rediscover its skills (up to 30 s on the host).
+      const timeout = domain === 'skills' && payload.action === 'pick' ? 600000 : domain === 'skills' || (domain === 'mcp' && ['test', 'save'].includes(payload.action)) ? 60000 : 15000;
+      const timer = window.setTimeout(() => finish({ requestId, ok: false, error: toolsTranslate(settings.current.locale)('tools.noReply') }), timeout);
       requests.current.set(requestId, { domain, action: payload.action, timer, resolve: finish, abort: resolve });
       const envelope = { ...payload, requestId } as ToolsUiToHost[`${D}/command`];
       if (!sendToolsCommand(domain, envelope)) finish({ requestId, ok: false, error: t('tools.hostUnavailable') });

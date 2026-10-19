@@ -62,6 +62,18 @@ namespace Pomp.Features
             Walk(DirectoryFor(scope), 0);
             return scan;
         }
+        /// <summary>The SKILL.md files of both scopes with size and write time: changes when a skill is added, edited or removed. Never empty.</summary>
+        internal string Fingerprint()
+        {
+            var text = new StringBuilder("skills");
+            foreach (var scope in new[] { "project", "user" })
+                foreach (var found in ScanScope(scope, _ => { }).Files)
+                {
+                    var info = new FileInfo(found.File);
+                    text.Append('\n').Append(found.File).Append('|').Append(info.Length).Append('|').Append(info.LastWriteTimeUtc.Ticks);
+                }
+            return text.ToString();
+        }
         internal SkillsStatePayload View(JArray commands, IEnumerable<SkillInfoPayload>? installed = null, IReadOnlyList<PompCatalog.BuiltinSkill>? builtins = null, ISet<string>? switchedOff = null, ISet<string>? configDisabled = null)
         {
             lock (ToolResourceFiles.Gate)
@@ -216,13 +228,104 @@ namespace Pomp.Features
         }
         /// <summary>Strict UTF-8 of at most <see cref="MaxBytes"/> bytes (the limit the listing and the editor read with), else refused with both sizes.</summary>
         private static byte[] Encoded(string text) => ToolResourceFiles.Encode(text, MaxBytes, "스킬 파일", "skill file");
-        internal string Import(string scope, string name, string content)
+        /// <summary>Folder imports: a guard against picking a SKILL.md that sits in a big unrelated folder, not a quota on real skills.</summary>
+        internal const int MaxImportFiles = 500;
+        internal const long MaxImportBytes = 32L * 1024 * 1024;
+        private const int MaxImportDepth = 6;
+        /// <summary>What importing one chosen file copies: a <c>SKILL.md</c> brings its folder (references, scripts), any other Markdown file only itself.</summary>
+        internal sealed class ImportPlan
         {
-            if (!NewName.IsMatch(name)) throw new ArgumentException(PompLanguage.Pick("이름이 올바르지 않아요.", "The name is invalid."));
-            var bytes = ToolResourceFiles.DecodeImport(content, MaxBytes, "스킬 파일", "skill file");
-            var (declaredName, description) = Metadata(ToolResourceFiles.Text(bytes), "");
-            if (declaredName != name || description.Length == 0) throw new ArgumentException(PompLanguage.Pick("프런트매터의 name이나 description이 올바르지 않아요.", "The frontmatter name or description is invalid."));
-            return WriteNewSkill(scope, name, bytes);
+            internal string File = "";
+            internal string Name = "";
+            internal string Description = "";
+            internal byte[] Skill = Array.Empty<byte>();
+            /// <summary>Other files of a SKILL.md folder, relative to it; empty for a single Markdown file.</summary>
+            internal readonly List<(string Relative, string Full)> Others = new List<(string Relative, string Full)>();
+            internal long Bytes;
+            internal int Files => Others.Count + 1;
+        }
+        /// <summary>
+        /// Reads a chosen file for import. The name is the frontmatter name, else the folder name (SKILL.md) or the file name.
+        /// A frontmatter POMP's form cannot edit (folded text, lists) is still imported: the engine reads full YAML, the list then offers open and delete.
+        /// </summary>
+        internal static ImportPlan PlanImport(string file)
+        {
+            file = Path.GetFullPath(file);
+            CheckpointStore.CheckDirectPath(file);
+            var whole = string.Equals(Path.GetFileName(file), "SKILL.md", StringComparison.OrdinalIgnoreCase);
+            if (!whole && !string.Equals(Path.GetExtension(file), ".md", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException(PompLanguage.Pick("SKILL.md나 Markdown(.md) 파일을 골라 주세요.", "Choose a SKILL.md or Markdown (.md) file."));
+            var probe = ToolResourceFiles.Examine(file, MaxBytes);
+            if (probe.Unreadable) throw new ArgumentException(probe.Problem);
+            var folder = Path.GetDirectoryName(file)!;
+            var fallback = whole ? Path.GetFileName(folder) : Path.GetFileNameWithoutExtension(file);
+            var plan = new ImportPlan { File = file, Skill = probe.Bytes!, Bytes = probe.Bytes!.Length };
+            var readable = true;
+            try { (plan.Name, plan.Description) = Metadata(probe.Text!, fallback); }
+            catch (ArgumentException) when (FrontmatterOnlyUnreadable(probe.Text!)) { plan.Name = fallback; readable = false; }
+            catch (JsonException) when (FrontmatterOnlyUnreadable(probe.Text!)) { plan.Name = fallback; readable = false; }
+            if (readable && plan.Description.Length == 0) throw new ArgumentException(PompLanguage.Pick("프런트매터에 description이 없어요. 모델이 언제 쓸지 알 수 있게 description을 넣어 주세요.", "The frontmatter has no description. Add one so the model knows when to use the skill."));
+            if (!Name.IsMatch(plan.Name)) throw new ArgumentException(PompLanguage.Pick("스킬 이름으로 쓸 수 없어요: " + plan.Name + ". 영문자, 숫자, '.', '_', '-'만 쓸 수 있어요.", "Not usable as a skill name: " + plan.Name + ". Use letters, digits, '.', '_' and '-'."));
+            if (!whole) return plan;
+
+            void Walk(string current, int depth)
+            {
+                foreach (var entry in Directory.EnumerateFileSystemEntries(current).OrderBy(p => p, StringComparer.Ordinal))
+                {
+                    ToolResourceFiles.CheckNotLinked(entry);
+                    if (Directory.Exists(entry))
+                    {
+                        if (string.Equals(Path.GetFileName(entry), ".git", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (depth >= MaxImportDepth) throw new ArgumentException(PompLanguage.Pick("스킬 폴더가 너무 깊어요.", "The skill folder is nested too deeply."));
+                        Walk(entry, depth + 1); continue;
+                    }
+                    if (string.Equals(entry, file, StringComparison.OrdinalIgnoreCase)) continue;
+                    plan.Others.Add((entry.Substring(folder.Length).TrimStart('\\', '/'), entry));
+                    plan.Bytes += new FileInfo(entry).Length;
+                    if (plan.Files > MaxImportFiles || plan.Bytes > MaxImportBytes)
+                        throw new ArgumentException(PompLanguage.Pick("SKILL.md 폴더가 너무 커요. 파일 " + ToolResourceFiles.Number(MaxImportFiles) + "개, " + (MaxImportBytes >> 20) + " MiB까지 가져올 수 있어요.",
+                            "The SKILL.md folder is too large. Up to " + ToolResourceFiles.Number(MaxImportFiles) + " files and " + (MaxImportBytes >> 20) + " MiB can be imported."));
+                }
+            }
+            Walk(folder, 1);
+            return plan;
+        }
+        /// <summary>True when the text has a closed frontmatter and a body, so only the frontmatter is beyond POMP's simple reader.</summary>
+        private static bool FrontmatterOnlyUnreadable(string text)
+        {
+            var normalized = text.Replace("\r\n", "\n");
+            var match = Regex.Match(normalized, @"\A---\n([\s\S]*?)\n---(?:\n|$)");
+            return match.Success && normalized.IndexOf('\0') < 0 && normalized.Substring(match.Length).Trim().Length > 0;
+        }
+        /// <summary>Copies a planned import into <c>&lt;scope&gt;/.pomp/skills/&lt;name&gt;/</c>: a new folder moved into place whole, never over an existing skill.</summary>
+        internal string Import(string scope, ImportPlan plan)
+        {
+            lock (ToolResourceFiles.Gate)
+            {
+                RequireRoom(scope);
+                var skills = DirectoryFor(scope);
+                var target = Path.Combine(skills, plan.Name);
+                CheckpointStore.CheckDirectPath(target);
+                if (Directory.Exists(target) || File.Exists(target) || View(new JArray()).Skills.Any(s => s.Source == scope && string.Equals(s.Name, plan.Name, StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidOperationException(PompLanguage.Pick("이미 같은 이름의 스킬이 있어요: " + plan.Name + ".", "A skill with this name already exists: " + plan.Name + "."));
+                Directory.CreateDirectory(skills);
+                var staging = Path.Combine(skills, ".import-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    Directory.CreateDirectory(staging);
+                    File.WriteAllBytes(Path.Combine(staging, "SKILL.md"), plan.Skill);
+                    foreach (var (relative, full) in plan.Others)
+                    {
+                        ToolResourceFiles.CheckNotLinked(full);
+                        var destination = Path.Combine(staging, relative);
+                        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                        File.Copy(full, destination, false);
+                    }
+                    CheckpointStore.CheckDirectPath(target);
+                    Directory.Move(staging, target);
+                }
+                finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
+                return Path.Combine(target, "SKILL.md");
+            }
         }
         private string WriteNewSkill(string scope, string name, byte[] bytes)
         {

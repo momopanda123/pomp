@@ -1,5 +1,8 @@
 export interface ConversationPartner { kind: 'main' | 'agent' | 'team'; id?: string }
-export interface PartnerState { sessionId?: string | null; partner: ConversationPartner; instance?: string; title?: string; message?: string }
+/** An open agent or team tab: its own conversation. */
+export interface ConversationTab { sessionId: string; partner: ConversationPartner; title?: string }
+/** The current conversation's partner and the workspace's chat tabs; `main` is the Default (POMP) tab's conversation. */
+export interface TabsState { sessionId?: string | null; partner: ConversationPartner; title?: string; message?: string; main?: string | null; tabs: ConversationTab[] }
 export interface CommandReply { requestId: string; ok: boolean; error?: string }
 export interface QueueItem {
   id: string; text: string; attachments?: { path: string }[]; includeEditorContext: boolean;
@@ -14,8 +17,8 @@ export interface AgentHistoryEntry {
 }
 export interface AgentHistoryState { entries: AgentHistoryEntry[]; truncated: boolean }
 export interface ConversationHostToUi {
-  'conversation/partnerState': PartnerState;
-  'conversation/partnerReply': CommandReply;
+  'conversation/tabsState': TabsState;
+  'conversation/tabReply': CommandReply;
   'chat/queued': { clientMessageId: string; itemId: string };
   'chat/queueState': QueueState;
   'chat/queueReply': CommandReply;
@@ -23,11 +26,8 @@ export interface ConversationHostToUi {
   'agents/historyReply': CommandReply;
 }
 export interface ConversationUiToHost {
-  'conversation/partner': { requestId: string; partner: ConversationPartner };
+  /** open: the partner's tab (a new conversation when it has none); activate: a tab's conversation (no sessionId = Default); close: a tab. */
+  'conversation/tab': { requestId: string; action: 'open' | 'activate' | 'close'; partner?: ConversationPartner; sessionId?: string };
   'chat/queue': { requestId: string; action: 'edit' | 'remove' | 'move' | 'clear' | 'pause' | 'resume'; id?: string; text?: string; index?: number };
   'agents/history': { requestId: string; action: 'refresh' | 'delete' | 'clear' | 'pin' | 'unpin' | 'label' | 'rerun'; id?: string; label?: string; filter?: HistoryFilter };
-}
-
-export function partnerTarget(partner?: ConversationPartner): { kind: 'agent' | 'team'; id: string } | undefined {
-  return partner && partner.kind !== 'main' && partner.id ? { kind: partner.kind, id: partner.id } : undefined;
 }

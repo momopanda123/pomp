@@ -149,6 +149,9 @@
 .tools-form .ui-field-row { align-items: start; }
 .tools-form .ui-seg { align-self: flex-start; }
 .tools-form .ui-switch { align-self: flex-start; }
+.tools-import-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; }
+.tools-import-summary dt { color: var(--pomp-muted-fg); }
+.tools-import-summary dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .tools-question { overflow-wrap: anywhere; }
 .tools-pairs { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .tools-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 24px; gap: 6px; align-items: center; }

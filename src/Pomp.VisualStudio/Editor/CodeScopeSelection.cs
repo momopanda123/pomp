@@ -8,7 +8,9 @@ using Microsoft.VisualStudio.ComponentModelHost;
 using Microsoft.VisualStudio.LanguageServices;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
+using Microsoft.VisualStudio.Text.Tagging;
 using Microsoft.VisualStudio.Threading;
+using Pomp.Tools;
 using Task = System.Threading.Tasks.Task;
 
 namespace Pomp.VisualStudio.Editor
@@ -16,13 +18,17 @@ namespace Pomp.VisualStudio.Editor
     /// <summary>
     /// What an editor question is about when nothing is selected (Ask POMP, Explain / Review / Fix This Code, Write Tests): the code is
     /// selected in the editor before the question goes out, so the person sees it and the chat's editor context carries exactly it.
-    /// A selection the person made is never touched. Otherwise the innermost member around the caret (method, constructor, property,
-    /// operator, event, local function — C# and VB through Roslyn); outside a member, or where Roslyn has no document, the caret's line
-    /// without its indentation. A blank line outside a member selects nothing (the context then names the caret as before).
+    /// A selection the person made is never touched. Otherwise the innermost member around the caret: method, constructor, property,
+    /// operator, event, local function through Roslyn in C# and VB; function, method, constructor, operator, property through the lexical
+    /// declaration scanners (<see cref="SourceDeclarations"/>) in the other files they read (C/C++, TypeScript/JavaScript, Python, Java,
+    /// Kotlin, Go, Rust, PHP, Ruby, Swift, Scala, Dart, Lua, PowerShell, shell, F#, SQL, R, Objective-C, Perl, Groovy); a member block of the
+    /// editor's own block structure (<see cref="EditorStructureDeclarations"/>) in any other file. Outside a member, or in a file none of
+    /// these reads, the caret's line without its indentation. A blank line outside a member selects nothing (the context then names the
+    /// caret as before).
     /// </summary>
     internal static class CodeScopeSelection
     {
-        // By Roslyn syntax type name, so neither language assembly is referenced (as RoslynEditorCaptionSource does). Types are not
+        // By Roslyn syntax type name, so neither language assembly is referenced (as EditorCaptionSource does). Types are not
         // scopes: a whole class rarely fits the editor context's selected text and is seldom what a question at one line is about.
         private static readonly HashSet<string> Members = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -32,7 +38,7 @@ namespace Pomp.VisualStudio.Editor
             "MethodBlockSyntax", "ConstructorBlockSyntax", "OperatorBlockSyntax", "PropertyBlockSyntax", "EventBlockSyntax",
         };
 
-        /// <summary>How long the Roslyn lookup may take before the caret's line is used instead.</summary>
+        /// <summary>How long the member lookup may take before the caret's line is used instead.</summary>
         private static readonly TimeSpan LookupTimeout = TimeSpan.FromSeconds(1.5);
 
         /// <summary>Selects the scope in <paramref name="view"/> when it has no selection; on the UI thread when it returns.</summary>
@@ -53,12 +59,12 @@ namespace Pomp.VisualStudio.Editor
                 var path = document.FilePath; var text = snapshot.GetText(); var position = caret.Position;
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(LookupTimeout);
-                try { member = await FindMemberAsync(solution, path, text, position, blank, timeout.Token).ConfigureAwait(false); }
+                try { member = await FindMemberAsync(solution, path, text, position, blank, snapshot, components, jtf, timeout.Token).ConfigureAwait(false); }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
-                // A failed Roslyn lookup falls back to the caret's line like a slow one, so the request never names an empty selection.
+                // A failed lookup falls back to the caret's line like a slow one, so the request never names an empty selection.
                 catch (Exception ex) when (!(ex is OperationCanceledException)) { }
                 await jtf.SwitchToMainThreadAsync(cancellationToken);
-                // The person moved on while Roslyn answered: their editor wins.
+                // The person moved on while the lookup answered: their editor wins.
                 if (view.IsClosed || view.TextSnapshot != snapshot || !view.Selection.IsEmpty || view.Caret.Position.BufferPosition != caret) return;
             }
 
@@ -68,12 +74,23 @@ namespace Pomp.VisualStudio.Editor
             view.Selection.Select(new SnapshotSpan(snapshot, scope.Value), isReversed: false);
         }
 
-        private static async Task<Span?> FindMemberAsync(Solution? solution, string path, string text, int position, bool blankLine, CancellationToken token)
+        private static async Task<Span?> FindMemberAsync(Solution? solution, string path, string text, int position, bool blankLine, ITextSnapshot snapshot,
+            IComponentModel components, JoinableTaskFactory jtf, CancellationToken token)
         {
             await TaskScheduler.Default;
-            if (solution == null || string.IsNullOrEmpty(path)) return null;
-            var document = solution.GetDocumentIdsWithFilePath(path).Select(solution.GetDocument).FirstOrDefault(d => d?.SupportsSyntaxTree == true);
-            if (document == null) return null;
+            if (string.IsNullOrEmpty(path)) return null;
+            var document = solution == null ? null : solution.GetDocumentIdsWithFilePath(path).Select(solution.GetDocument).FirstOrDefault(d => d?.SupportsSyntaxTree == true);
+            if (document == null)
+            {
+                var declarations = SourceDeclarations.Find(path, text);
+                if (declarations == null)
+                {
+                    await jtf.SwitchToMainThreadAsync(token);
+                    declarations = EditorStructureDeclarations.Find(components.GetService<IBufferTagAggregatorFactoryService>(), snapshot);
+                }
+
+                return LexicalMember(declarations, text, position);
+            }
             var source = await document.GetTextAsync(token).ConfigureAwait(false);
             // The workspace can trail the editor buffer by a moment; positions would not match, so the caret's line is used.
             if (!string.Equals(source.ToString(), text, StringComparison.Ordinal)) return null;
@@ -84,6 +101,24 @@ namespace Pomp.VisualStudio.Editor
             // A blank line above a member belongs to its leading trivia, but it sits between members, not in this one.
             if (blankLine && position < node.SpanStart) return null;
             return new Span(node.SpanStart, node.Span.Length);
+        }
+
+        /// <summary>
+        /// The innermost member declaration around <paramref name="position"/> among <paramref name="declarations"/>, from the start of its first
+        /// line (its indentation and the caret there belong to it, as Roslyn's leading trivia does) through its end; null outside every member.
+        /// </summary>
+        private static Span? LexicalMember(IReadOnlyList<SourceDeclaration> declarations, string text, int position)
+        {
+            SourceDeclaration? member = null;
+            foreach (var declaration in declarations)
+            {
+                if (declaration.IsType || position > declaration.Start + declaration.Length) continue;
+                var lineStart = declaration.Start;
+                while (lineStart > 0 && text[lineStart - 1] != '\n' && text[lineStart - 1] != '\r' && text[lineStart - 1] != '\u0085' && text[lineStart - 1] != '\u2028' && text[lineStart - 1] != '\u2029') lineStart--;
+                // Source order puts an enclosing declaration before the ones inside it: the last one around the caret is the innermost.
+                if (position >= lineStart) member = declaration;
+            }
+            return member == null ? (Span?)null : new Span(member.Start, member.Length);
         }
 
         private static Span TrimmedLine(ITextSnapshotLine line)

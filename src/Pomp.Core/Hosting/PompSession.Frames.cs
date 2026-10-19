@@ -128,7 +128,7 @@ namespace Pomp.Hosting
                         break;
                     case OmpFrameTypes.CommandOutput:
                         // The answer to the page's computer toggle is shown by the toggle, not as a chat notice.
-                        if (!ObserveMcpOutput(frame) && !ObserveCommandOutput(frame) && !ObserveContextOutput(frame)) PostNotice("info", frame.Json.GetString("text") ?? string.Empty, "pre");
+                        if (!ObserveMcpOutput(frame) && !ObserveCommandOutput(frame) && !ObserveContextOutput(frame) && !ObserveSkillReloadOutput(frame)) PostNotice("info", frame.Json.GetString("text") ?? string.Empty, "pre");
                         break;
                     case OmpFrameTypes.Response:
                         HandleStrayResponse(frame);
@@ -608,6 +608,8 @@ namespace Pomp.Hosting
             }
 
             _ui.Post(UiMessageTypes.ChatTurnEnd, end);
+            // A reply may have written a skill (the model was asked to make one): the list and the engine catch up.
+            _commands.Enqueue(CatchUpSkillsAfterReplyAsync);
             if (history != null && runId != null)
             {
                 try { history.End(runId, status); PublishRunHistory(); }
@@ -986,6 +988,7 @@ namespace Pomp.Hosting
             Locale = PompLanguage.Locale,
             IncludeEditorContextByDefault = _settings.IncludeEditorContextByDefault,
             ComposerPredictions = _settings.ComposerPredictions,
+            WordCompletion = _settings.WordCompletion,
             ApprovalMode = _settings.ApprovalMode,
             Shortcuts = (_settings as IUiShortcutSettings)?.Shortcuts ?? new UiShortcutsPayload(),
         };
@@ -1064,7 +1067,7 @@ namespace Pomp.Hosting
                 .Append(new UiMessage(UiMessageTypes.HooksState, HooksView()))
                 .Append(ComputerStateMessage())
                 .Append(AgentsStateMessage())
-                .Append(new UiMessage(UiMessageTypes.ConversationPartnerState, PartnerView()))
+                .Append(new UiMessage(UiMessageTypes.ConversationTabsState, TabsView()))
                 .Append(new UiMessage(UiMessageTypes.ChatQueueState, QueueView()))
                 .Append(new UiMessage(UiMessageTypes.AgentsHistoryState, RunHistory()?.View() ?? new AgentsHistoryStatePayload()))
                 .Concat(GoalRequestSnapshot())
@@ -1089,24 +1092,16 @@ namespace Pomp.Hosting
         {
             if (origin.Change == WorkspaceOrigin.Change.None) return;
             var from = origin.From ?? string.Empty;
-            if (origin.Change == WorkspaceOrigin.Change.Moved)
-            {
-                _logger.Info("POMP data moved from " + from + "; paths were rewritten.");
-                PostNotice("info", PompLanguage.Pick("작업 영역이 " + from + "에서 옮겨져, POMP 기록의 경로를 새 위치로 고쳤어요.",
-                    "This workspace moved from " + from + "; POMP's records now point at the new location."));
-                if (origin.Quarantine != null && !origin.Recycled)
-                    PostNotice("warning", PompLanguage.Pick("이전 위치의 격리 작업 사본을 휴지통으로 옮기지 못해 " + origin.Quarantine + "에 모아 두었어요. 필요 없으면 지워도 돼요.",
-                        "The isolation copies of the old location could not be recycled; they are gathered in " + origin.Quarantine + ". You can delete it."));
-                return;
-            }
-            _logger.Info("POMP data copied from " + from + "; its records were " + (origin.Recycled ? "recycled." : "gathered in " + origin.Quarantine + "."));
-            PostNotice("info", origin.Quarantine == null
-                ? PompLanguage.Pick(from + "에서 복사한 POMP 설정을 이 작업 영역에서 쓰도록 맞췄어요.", "The POMP settings copied from " + from + " now belong to this workspace.")
-                : origin.Recycled
-                    ? PompLanguage.Pick(from + "에서 복사한 POMP 데이터에서 그쪽 대화·작업 기록은 휴지통으로 옮기고, 에이전트·규칙·지식 같은 설정은 그대로 쓰도록 맞췄어요.",
-                        "The POMP data copied from " + from + " keeps its settings (agents, rules, knowledge and the rest); its conversations and work records went to the Recycle Bin.")
-                    : PompLanguage.Pick(from + "에서 복사한 POMP 데이터의 대화·작업 기록을 휴지통으로 옮기지 못해 " + origin.Quarantine + "에 모아 두었어요(설정은 그대로). 필요 없으면 지워도 돼요.",
-                        "The conversations and work records copied from " + from + " could not be recycled; they are gathered in " + origin.Quarantine + " (settings kept). You can delete it."));
+            var copied = origin.Change == WorkspaceOrigin.Change.Copied;
+            _logger.Info("POMP data " + (copied ? "copied" : "moved") + " from " + from + "; paths were rewritten, conversations kept.");
+            PostNotice("info", copied
+                ? PompLanguage.Pick(from + "에서 복사한 POMP 데이터의 대화와 기록 경로를 이 작업 영역으로 고쳐, 이전 대화를 그대로 이어 쓸 수 있어요.",
+                    "The POMP data copied from " + from + " now points at this workspace: its conversations and records carry on here.")
+                : PompLanguage.Pick("작업 영역이 " + from + "에서 옮겨져, POMP 대화와 기록의 경로를 새 위치로 고쳤어요.",
+                    "This workspace moved from " + from + "; POMP's conversations and records now point at the new location."));
+            if (origin.Quarantine != null && !origin.Recycled)
+                PostNotice("warning", PompLanguage.Pick("이전 위치의 격리 작업 사본을 휴지통으로 옮기지 못해 " + origin.Quarantine + "에 모아 두었어요. 필요 없으면 지워도 돼요.",
+                    "The isolation copies of the old location could not be recycled; they are gathered in " + origin.Quarantine + ". You can delete it."));
         }
 
         private static readonly System.Text.RegularExpressions.Regex TerminalEscape = new System.Text.RegularExpressions.Regex(
@@ -1503,8 +1498,6 @@ namespace Pomp.Hosting
             public Pomp.Features.AgentRunHistory? History { get; set; }
             public string? RunId { get; set; }
             public AgentRunTargetPayload? FeedbackTarget { get; set; }
-            public string? PartnerAgent { get; set; }
-            public bool PartnerJobCaptured { get; set; }
             public string? Team { get; set; }
             public HashSet<string>? TeamMembers { get; set; }
             public OmpConnection? TeamConnection { get; set; }

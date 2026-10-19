@@ -16,6 +16,17 @@ namespace Pomp.Hosting
     {
         private static readonly Regex PlainKey = new Regex("^[A-Za-z_][A-Za-z0-9_.\\-]*$", RegexOptions.CultureInvariant);
 
+        /// <summary>
+        /// omp's <c>skills.*</c> switches for the folders of other programs, all written false: <c>~/.agents</c> and
+        /// <c>&lt;project&gt;/.agents</c> (also <c>.agent</c>), <c>~/.claude</c> and <c>&lt;project&gt;/.claude</c>, and <c>~/.codex</c>.
+        /// omp's own folders (<c>enablePiUser</c>/<c>enablePiProject</c>: <c>~/.omp/agent/skills</c> and <c>&lt;project&gt;/.omp/skills</c>)
+        /// stay on, as do the custom directories below.
+        /// </summary>
+        private static readonly string[] OtherProgramSkillSources =
+        {
+            "enableAgentsUser", "enableAgentsProject", "enableClaudeUser", "enableClaudeProject", "enableCodexUser",
+        };
+
         private static readonly HashSet<string> ReservedWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "true", "false", "null", "yes", "no", "on", "off", "y", "n", "~",
@@ -30,6 +41,8 @@ namespace Pomp.Hosting
         /// helpers get <see cref="ComputerUse.ApprovalPolicy"/>.
         /// With <paramref name="worktreeBase"/> (docs/architecture.md §8.11): task isolation is available, and an isolated task's changes
         /// stay a patch under that folder (never applied by omp) for the host to stage as change-review proposals.
+        /// Always: <c>task.maxRecursionDepth: 1</c> (only the main agent spawns subagents; a subagent gets no <c>task</c> tool and its eval
+        /// <c>agent()</c> fails with omp's depth message), and the other programs' skill folders are off (<see cref="OtherProgramSkillSources"/>).
         /// <paramref name="skillDirectories"/> and <paramref name="disabledExtensions"/> are the merged arrays: omp replaces arrays
         /// wholesale at each layer, so the overlay repeats the user's and the workspace's own values together with POMP's.
         /// </summary>
@@ -44,15 +57,18 @@ namespace Pomp.Hosting
                 text.Append("browser:\n  enabled: ").Append(computer.Browser && !denied.Contains("browser") ? "true" : "false").Append('\n');
             }
 
+            text.Append("task:\n  maxRecursionDepth: 1\n");
             if (worktreeBase != null)
             {
-                text.Append("task:\n  isolation:\n    enabled: true\n    merge: patch\n    apply: false\n");
+                text.Append("  isolation:\n    enabled: true\n    merge: patch\n    apply: false\n");
                 text.Append("worktree:\n  base: ").Append(QuoteKey(worktreeBase)).Append('\n');
             }
 
+            text.Append("skills:\n");
+            foreach (var key in OtherProgramSkillSources) text.Append("  ").Append(key).Append(": false\n");
             if (skillDirectories != null)
             {
-                text.Append("skills:\n  customDirectories:\n");
+                text.Append("  customDirectories:\n");
                 foreach (var directory in skillDirectories) text.Append("    - ").Append(QuoteKey(directory)).Append('\n');
             }
 

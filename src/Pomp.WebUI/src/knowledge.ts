@@ -95,7 +95,7 @@ function normalizeItem(raw: unknown): KnowledgeItem | null {
   const optimizedText = text(optimized?.text, 16000);
   const pieces = Array.isArray(item.pieces) ? item.pieces.map(normalizePiece).filter((piece): piece is KnowledgePiece => piece !== null) : [];
   return {
-    id, name, color: isKnowledgeColor(item.color) ? item.color.toLowerCase() : NEUTRAL_COLOR, scope: item.scope === 'personal' ? 'personal' : 'project',
+    id, name, color: isKnowledgeColor(item.color) ? item.color.toLowerCase() : NEUTRAL_COLOR, scope: item.scope === 'user' ? 'user' : 'project', default: item.default === true,
     use: item.use === 'optimized' ? 'optimized' : 'original', revision: typeof item.revision === 'number' ? item.revision : 1, createdAt: text(item.createdAt, 40) ?? '', updatedAt: text(item.updatedAt, 40) ?? '',
     roles: words(item.roles), teams: words(item.teams), candidate: item.candidate === true || (pieces.length > 0 && pieces.every(piece => piece.status === 'candidate')), pieces,
     ...(optimizedText !== undefined ? { optimized: { text: optimizedText, createdAt: text(optimized?.createdAt, 40) ?? '', stale: optimized?.stale !== false } } : {}),

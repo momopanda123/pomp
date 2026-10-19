@@ -34,7 +34,6 @@
 .session-row-open:disabled { cursor: default; color: var(--pomp-muted-fg); }
 .session-title { display: flex; gap: 4px; max-width: 100%; }
 .session-title .icon { flex: none; }
-.session-partner-badge { color: var(--pomp-fg); font-size: .8rem; overflow-wrap: anywhere; }
 .session-row-actions, .conversation-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .chat-queue, .live-agent-progress { flex: none; min-width: 0; margin: 0 8px 4px; padding: 4px 6px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); font-size: .82rem; word-break: keep-all; overflow-wrap: anywhere; background: var(--pomp-panel-bg); }
 .chat-queue > p { margin: 3px 0; }

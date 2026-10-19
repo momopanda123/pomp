@@ -16,6 +16,8 @@ namespace Pomp.Tools
         internal const int MaxCharacters = 24000;
         internal const int MaxSignatureCharacters = 180;
         private const int MaxCandidateCharacters = 2048;
+        /// <summary>The token a skipped string or character literal becomes.</summary>
+        private const string LiteralToken = "\"…\"";
 
         internal static string Create(string path, IReadOnlyList<string> lines)
         {
@@ -26,13 +28,20 @@ namespace Pomp.Tools
         internal static string CreateBounded(string path, IReadOnlyList<string> lines, int maxEntries, int maxCharacters)
         {
             var language = GetLanguage(path);
-            if (language == Language.Unknown || lines.Count == 0)
+            if (lines.Count == 0) return string.Empty;
+            List<LexicalDeclaration>? declarations = null;
+            if (language == Language.Unknown)
             {
-                return string.Empty;
+                declarations = DeclarationScanner.Find(path, lines);
+                if (declarations == null || declarations.Count == 0) return string.Empty;
             }
 
             var output = new OutlineWriter(Math.Min(MaxEntries, Math.Max(1, maxEntries)), Math.Min(MaxCharacters, Math.Max(64, maxCharacters)));
-            if (language == Language.VisualBasic)
+            if (declarations != null)
+            {
+                WriteDeclarations(lines, declarations, output);
+            }
+            else if (language == Language.VisualBasic)
             {
                 ScanVisualBasic(lines, output);
             }
@@ -44,15 +53,88 @@ namespace Pomp.Tools
             return output.Finish();
         }
 
+        /// <summary>Outline rows of the <see cref="DeclarationScanner"/> languages: each declaration's signature, nested under the ones around it.</summary>
+        private static void WriteDeclarations(IReadOnlyList<string> lines, List<LexicalDeclaration> declarations, OutlineWriter output)
+        {
+            var enclosing = new List<LexicalDeclaration>();
+            var signature = new StringBuilder();
+            foreach (var declaration in declarations)
+            {
+                while (enclosing.Count > 0 && Compare(enclosing[enclosing.Count - 1].EndLine, enclosing[enclosing.Count - 1].EndColumn, declaration.Line, declaration.Column) <= 0)
+                {
+                    enclosing.RemoveAt(enclosing.Count - 1);
+                }
+
+                if (!output.NeedsSignature) { output.Omit(); continue; }
+                signature.Clear();
+                var space = false;
+                for (var line = declaration.Line; line <= declaration.HeadLine && signature.Length <= MaxSignatureCharacters; line++)
+                {
+                    var text = lines[line - 1];
+                    var from = line == declaration.Line ? declaration.Column : 0;
+                    var to = line == declaration.HeadLine ? Math.Min(declaration.HeadColumn, text.Length) : text.Length;
+                    for (var i = from; i < to && signature.Length <= MaxSignatureCharacters; i++)
+                    {
+                        if (char.IsWhiteSpace(text[i])) { space = signature.Length > 0; continue; }
+                        if (space) { signature.Append(' '); space = false; }
+                        signature.Append(text[i]);
+                    }
+
+                    space = signature.Length > 0;
+                }
+
+                output.Add(declaration.Line, enclosing.Count, signature.ToString());
+                enclosing.Add(declaration);
+            }
+        }
+
+        private static int Compare(int line, int column, int otherLine, int otherColumn) => line != otherLine ? line.CompareTo(otherLine) : column.CompareTo(otherColumn);
+
+        /// <summary>
+        /// The type and member declarations of a file, in source order, with the position of their first token and of the end of their
+        /// body or terminator. Brace languages (C#, TypeScript/JavaScript, C/C++) through the brace scanner, the other languages through
+        /// <see cref="DeclarationScanner"/>. Null when the file type is not scanned this way (Visual Basic, unknown extensions).
+        /// Namespaces and declarations whose body never closes are left out.
+        /// </summary>
+        internal static List<LexicalDeclaration>? FindDeclarations(string path, IReadOnlyList<string> lines)
+        {
+            var language = GetLanguage(path);
+            if (language == Language.VisualBasic) return null;
+            if (language == Language.Unknown) return DeclarationScanner.Find(path, lines);
+            var found = new List<LexicalDeclaration>();
+            new BraceScanner(lines, language, null, found).Scan();
+            found.RemoveAll(declaration => declaration.EndLine == 0);
+            return found;
+        }
+
+        /// <summary>One declaration: 1-based lines, 0-based columns; the end and head-end columns are exclusive.</summary>
+        internal sealed class LexicalDeclaration
+        {
+            public LexicalDeclaration(bool isType, int line, int column, int headLine, int headColumn)
+            { IsType = isType; Line = line; Column = column; HeadLine = headLine; HeadColumn = headColumn; }
+            public bool IsType { get; }
+            public int Line { get; }
+            public int Column { get; }
+            /// <summary>Where the signature ends: the body's opening brace, the terminating ';', or the '=>' / '='.</summary>
+            public int HeadLine { get; }
+            public int HeadColumn { get; }
+            /// <summary>0 while the end is unknown.</summary>
+            public int EndLine { get; private set; }
+            public int EndColumn { get; private set; }
+            /// <summary>Whether whitespace before the end belongs to the gap after the declaration (an expression ended by what followed it).</summary>
+            public bool TrimEnd { get; private set; }
+            public void End(int line, int column, bool trim) { EndLine = line; EndColumn = column; TrimEnd = trim; }
+        }
+
         private enum Language { Unknown, CSharp, VisualBasic, JavaScript, Cpp }
-        private enum ScopeKind { Body, Namespace, Type, Interface, Enum, Property }
+        private enum ScopeKind { Body, Namespace, Type, Interface, Enum, Property, Linkage }
 
         private static Language GetLanguage(string path)
         {
             var extension = Path.GetExtension(path).ToLowerInvariant();
             switch (extension)
             {
-                case ".cs": return Language.CSharp;
+                case ".cs": case ".csx": return Language.CSharp;
                 case ".vb": return Language.VisualBasic;
                 case ".ts": case ".tsx": case ".js": case ".jsx": case ".mjs": case ".cjs": case ".mts": case ".cts":
                     return Language.JavaScript;
@@ -121,17 +203,21 @@ namespace Pomp.Tools
 
         private readonly struct Token
         {
-            public Token(string text, int line, bool gap) { Text = text; Line = line; Gap = gap; }
+            public Token(string text, int line, int column, bool gap) { Text = text; Line = line; Column = column; Gap = gap; }
             public string Text { get; }
             public int Line { get; }
+            /// <summary>0-based offset of the token's first character in its line.</summary>
+            public int Column { get; }
             public bool Gap { get; }
         }
 
         private readonly struct Scope
         {
-            public Scope(ScopeKind kind, string name = "") { Kind = kind; Name = name; }
+            public Scope(ScopeKind kind, string name = "", LexicalDeclaration? declaration = null) { Kind = kind; Name = name; Declaration = declaration; }
             public ScopeKind Kind { get; }
             public string Name { get; }
+            /// <summary>The declaration whose body this scope is; it ends at the scope's closing brace.</summary>
+            public LexicalDeclaration? Declaration { get; }
             public bool IsSymbol => Kind == ScopeKind.Namespace || Kind == ScopeKind.Type || Kind == ScopeKind.Interface || Kind == ScopeKind.Enum;
             public bool IsType => Kind == ScopeKind.Type || Kind == ScopeKind.Interface;
         }
@@ -140,7 +226,10 @@ namespace Pomp.Tools
         {
             private readonly Lexer _lexer;
             private readonly Language _language;
-            private readonly OutlineWriter _output;
+            private readonly OutlineWriter? _output;
+            private readonly List<LexicalDeclaration>? _found;
+            private LexicalDeclaration? _declared;
+            private LexicalDeclaration? _expression;
             private readonly List<Scope> _scopes = new List<Scope>();
             private readonly List<Token> _candidate = new List<Token>();
             private int _candidateCharacters;
@@ -156,14 +245,16 @@ namespace Pomp.Tools
             private int _expressionLine;
             private string _expressionLastToken = string.Empty;
 
-            public BraceScanner(IReadOnlyList<string> lines, Language language, OutlineWriter output)
+            public BraceScanner(IReadOnlyList<string> lines, Language language, OutlineWriter? output, List<LexicalDeclaration>? found = null)
             {
                 _lexer = new Lexer(lines, language);
                 _language = language;
                 _output = output;
+                _found = found;
             }
 
-            private bool CanDeclare => _scopes.Count == 0 || _scopes[_scopes.Count - 1].Kind == ScopeKind.Namespace || _scopes[_scopes.Count - 1].IsType;
+            private bool NeedsSignature => _output == null || _output.NeedsSignature;
+            private bool CanDeclare => _scopes.Count == 0 || _scopes[_scopes.Count - 1].Kind == ScopeKind.Namespace || _scopes[_scopes.Count - 1].Kind == ScopeKind.Linkage || _scopes[_scopes.Count - 1].IsType;
             private bool InsideType => _scopes.Count > 0 && _scopes[_scopes.Count - 1].IsType;
 
             public void Scan()
@@ -177,7 +268,7 @@ namespace Pomp.Tools
                         if (canFinish && token.Line > _expressionLine && !ContinuesExpression(text) && StartsJavaScriptDeclaration(text))
                         {
                             // ASI: a fresh declaration/member on a later line cannot belong to the completed initializer.
-                            _skipExpressionAtDepth = -1;
+                            EndExpression(token, inclusive: false);
                         }
                         else
                         {
@@ -209,19 +300,19 @@ namespace Pomp.Tools
                         if (text == "{") Push(new Scope(ScopeKind.Body));
                         else if (text == "}")
                         {
-                            Pop();
+                            Pop(token);
                             if (_language == Language.JavaScript && _scopes.Count == _skipExpressionAtDepth)
                             {
                                 _expressionLastToken = "}";
                                 _expressionLine = token.Line;
                             }
                         }
-                        else if (text == ";" && _scopes.Count == _skipExpressionAtDepth) _skipExpressionAtDepth = -1;
+                        else if (text == ";" && _scopes.Count == _skipExpressionAtDepth) EndExpression(token, inclusive: true);
                         continue;
                     }
 
                     // Braces in parameter/default-value types do not open a declaration body (particularly in TS).
-                    if (text == "{" && (_parentheses > 0 || _brackets > 0 || _embeddedBraces > 0))
+                    if (text == "{" && (_parentheses > 0 || _brackets > 0 || _embeddedBraces > 0 || IsMemberInitializerBrace()))
                     {
                         _embeddedBraces++;
                         Add(token);
@@ -247,24 +338,26 @@ namespace Pomp.Tools
                     }
                     else if (text == "{")
                     {
-                        var scope = Declare("{");
+                        var scope = Declare("{", token);
+                        var declaration = _declared;
+                        _declared = null;
                         Clear();
-                        Push(scope ?? new Scope(ScopeKind.Body));
+                        Push(new Scope(scope?.Kind ?? ScopeKind.Body, scope?.Name ?? "", declaration));
                     }
                     else if (text == "}")
                     {
                         Clear();
-                        Pop();
+                        Pop(token);
                     }
                     else if (text == ";")
                     {
-                        var scope = Declare(";");
+                        var scope = Declare(";", token);
                         if (scope.HasValue && scope.Value.Kind == ScopeKind.Namespace && _language == Language.CSharp) _fileNamespaceDepth = 1;
                         Clear();
                     }
                     else if (text == "=>" || text == "=")
                     {
-                        Declare(text);
+                        Declare(text, token);
                         Clear();
                         _skipExpressionAtDepth = _scopes.Count;
                         _expressionParentheses = _expressionBrackets = 0;
@@ -315,7 +408,7 @@ namespace Pomp.Tools
             private void Add(Token token)
             {
                 // Once output is full, retain only the declaration head needed for classification/nesting/counts.
-                if (!_output.NeedsSignature && (_parentheses > 0 || _brackets > 0 || _embeddedBraces > 0 || token.Text == ")" || token.Text == "]"))
+                if (!NeedsSignature && (_parentheses > 0 || _brackets > 0 || _embeddedBraces > 0 || token.Text == ")" || token.Text == "]"))
                 {
                     if (token.Text == "(" || token.Text == "[") _candidate.Add(token);
                     return;
@@ -340,25 +433,57 @@ namespace Pomp.Tools
                 if (scope.IsSymbol) _symbolDepth++;
             }
 
-            private void Pop()
+            private void Pop(Token closing)
             {
                 if (_scopes.Count > 0)
                 {
-                    if (_scopes[_scopes.Count - 1].IsSymbol) _symbolDepth--;
+                    var scope = _scopes[_scopes.Count - 1];
+                    if (scope.IsSymbol) _symbolDepth--;
+                    scope.Declaration?.End(closing.Line, closing.Column + 1, trim: false);
                     _scopes.RemoveAt(_scopes.Count - 1);
                 }
 
-                if (_scopes.Count < _skipExpressionAtDepth) _skipExpressionAtDepth = -1;
+                // The enclosing body closed under an unterminated initializer: it ended before this brace.
+                if (_scopes.Count < _skipExpressionAtDepth) EndExpression(closing, inclusive: false);
             }
 
-            private Scope? Declare(string terminator)
+            /// <summary>The initializer skipped after '=>' / '=' ends at <paramref name="token"/> (its ';') or just before it.</summary>
+            private void EndExpression(Token token, bool inclusive)
+            {
+                _skipExpressionAtDepth = -1;
+                if (inclusive) _expression?.End(token.Line, token.Column + token.Text.Length, trim: false);
+                else _expression?.End(token.Line, token.Column, trim: true);
+                _expression = null;
+            }
+
+            /// <summary>C++ <c>Ctor() : member{value} {</c>: a brace right after a member name in a constructor's initializer list is not the body.</summary>
+            private bool IsMemberInitializerBrace()
+            {
+                if (_language != Language.Cpp || _candidate.Count < 3) return false;
+                var last = _candidate[_candidate.Count - 1].Text;
+                if (!IsIdentifier(last) && last != ">") return false;
+                var closed = false;
+                foreach (var token in _candidate)
+                {
+                    if (token.Text == ")") closed = true;
+                    else if (closed && token.Text == ":") return true;
+                }
+
+                return false;
+            }
+
+            private Scope? Declare(string terminator, Token at)
             {
                 if (_candidate.Count == 0) return null;
+                // extern "C" { ... } only sets the linkage of the declarations inside it.
+                if (_language == Language.Cpp && terminator == "{" && _candidate.Count == 2 && _candidate[0].Text == "extern" && _candidate[1].Text == LiteralToken)
+                    return new Scope(ScopeKind.Linkage);
                 var first = FirstDeclarationToken();
                 if (first >= _candidate.Count) return null;
                 var kind = _candidate[first].Text;
                 Scope? scope = null;
                 var emit = false;
+                var isType = false;
                 if (kind == "namespace")
                 {
                     emit = first + 1 < _candidate.Count && terminator != "=" && terminator != "=>";
@@ -372,12 +497,14 @@ namespace Pomp.Tools
                     // delegate* is a function-pointer type, not a declaration.
                     emit = nameIndex < _candidate.Count && IsIdentifier(_candidate[nameIndex].Text) && terminator != "=" && terminator != "=>";
                     if (kind == "delegate") emit = emit && IsCallable(first);
+                    isType = true;
                     scope = kind == "delegate" ? new Scope(ScopeKind.Body) : new Scope(kind == "enum" ? ScopeKind.Enum : kind == "interface" ? ScopeKind.Interface : ScopeKind.Type,
                         nameIndex < _candidate.Count ? _candidate[nameIndex].Text : "");
                 }
                 else if (_language == Language.JavaScript && kind == "type")
                 {
                     emit = terminator == "=" && first + 1 < _candidate.Count && IsIdentifier(_candidate[first + 1].Text);
+                    isType = true;
                 }
                 else if (InsideType || _language == Language.JavaScript || _language == Language.Cpp)
                 {
@@ -390,8 +517,22 @@ namespace Pomp.Tools
 
                 if (emit)
                 {
-                    if (_output.NeedsSignature) _output.Add(_candidate[0].Line, _symbolDepth + _fileNamespaceDepth, Signature());
-                    else _output.Omit();
+                    if (_output != null)
+                    {
+                        if (_output.NeedsSignature) _output.Add(_candidate[0].Line, _symbolDepth + _fileNamespaceDepth, Signature());
+                        else _output.Omit();
+                    }
+
+                    // Namespaces are containers, not declarations; a type without a body (class Foo;) is only a forward declaration.
+                    if (_found != null && kind != "namespace" && !(isType && terminator == ";"))
+                    {
+                        var declaration = new LexicalDeclaration(isType, _candidate[0].Line, _candidate[0].Column, at.Line, at.Column);
+                        _found.Add(declaration);
+                        if (terminator == ";") declaration.End(at.Line, at.Column + 1, trim: false);
+                        else if (terminator == "{") _declared = declaration;
+                        else _expression = declaration;
+                    }
+
                     return scope;
                 }
 
@@ -562,7 +703,7 @@ namespace Pomp.Tools
                         var structural = FastBodyToken();
                         if (structural != '\0')
                         {
-                            token = new Token(structural.ToString(), _line + 1, true);
+                            token = new Token(structural.ToString(), _line + 1, _offset, true);
                             _offset++;
                             _lineHasCode = true;
                             _regexMayStart = structural != '}';
@@ -583,12 +724,13 @@ namespace Pomp.Tools
                         continue;
                     }
                     var line = _line + 1;
+                    var column = _offset;
                     if (TrySkipLiteral(0))
                     {
                         _lineHasCode = true;
                         _regexMayStart = false;
                         if (!capture) continue;
-                        token = new Token("\"…\"", line, _gap);
+                        token = new Token(LiteralToken, line, column, _gap);
                         _gap = false;
                         return true;
                     }
@@ -599,7 +741,7 @@ namespace Pomp.Tools
                         _lineHasCode = true;
                         _regexMayStart = false;
                         if (!capture) continue;
-                        token = new Token("/…/", line, _gap);
+                        token = new Token("/…/", line, column, _gap);
                         _gap = false;
                         return true;
                     }
@@ -615,7 +757,7 @@ namespace Pomp.Tools
                         var source = _lines[line - 1];
                         _regexMayStart = RangeEquals(source, start, length, "return") || RangeEquals(source, start, length, "throw") || RangeEquals(source, start, length, "case") || RangeEquals(source, start, length, "yield");
                         if (!capture) continue;
-                        token = new Token(source.Substring(start, Math.Min(length, MaxCandidateCharacters)), line, _gap);
+                        token = new Token(source.Substring(start, Math.Min(length, MaxCandidateCharacters)), line, start, _gap);
                         _gap = false;
                         return true;
                     }
@@ -631,7 +773,7 @@ namespace Pomp.Tools
                         (c == '=' || c == '!' || c == '<' || c == '>') && Peek(1) == '=' ? c.ToString() + "=" : c.ToString();
                     Advance(text.Length);
                     _regexMayStart = c == '=' || c == '(' || c == '[' || c == ',' || c == ':' || c == ';' || c == '!' || c == '?' || c == '{' || text == "=>";
-                    token = new Token(text, line, _gap);
+                    token = new Token(text, line, column, _gap);
                     _gap = false;
                     return true;
                 }

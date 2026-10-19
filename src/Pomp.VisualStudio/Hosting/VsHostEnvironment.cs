@@ -59,18 +59,19 @@ namespace Pomp.VisualStudio.Hosting
             Pomp.VisualStudio.Adapters.VsAdapterContext.ResolveWorkspaceRootAsync(joinableTaskFactory, logger, cancellationToken);
 
         /// <inheritdoc />
-        public async Task<System.Collections.Generic.IReadOnlyList<string>> PickFilesAsync(string? initialDirectory, CancellationToken cancellationToken)
+        public async Task<System.Collections.Generic.IReadOnlyList<string>> PickFilesAsync(string? initialDirectory, string title, string? filter, bool multiselect, CancellationToken cancellationToken)
         {
             await joinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
 
             var dialog = new Microsoft.Win32.OpenFileDialog
             {
-                Title = PompLanguage.Pick("POMP 메시지에 첨부할 파일", "Attach files to the POMP message"),
-                Multiselect = true,
+                Title = title,
+                Multiselect = multiselect,
                 CheckFileExists = true,
                 ValidateNames = true,
                 DereferenceLinks = true,
             };
+            if (!string.IsNullOrEmpty(filter)) dialog.Filter = filter;
             if (!string.IsNullOrEmpty(initialDirectory) && Directory.Exists(initialDirectory))
             {
                 dialog.InitialDirectory = initialDirectory;

@@ -24,10 +24,12 @@ using Pomp.VisualStudio.Options;
 namespace Pomp.VisualStudio.Editor
 {
     [Export(typeof(IWpfTextViewCreationListener))]
-    [Export(typeof(ILineTransformSourceProvider))]
-    [ContentType("code")]
+    // The caption sits at the end of the declaration's own line (no row of its own, so the code keeps its line spacing).
+    // "text", not "code": a language Visual Studio has no service for (a .py without the Python workload) opens as plain text, and its
+    // declarations still come from the lexical scanner. Files the scanner does not read (notes, data) get no captions.
+    [ContentType("text")]
     [TextViewRole(PredefinedTextViewRoles.Editable)]
-    internal sealed class CodeCaptionFeature : IWpfTextViewCreationListener, ILineTransformSourceProvider
+    internal sealed class CodeCaptionFeature : IWpfTextViewCreationListener
     {
         private const string LayerName = "Pomp.CodeCaptions";
         [Export(typeof(AdornmentLayerDefinition))]
@@ -37,11 +39,13 @@ namespace Pomp.VisualStudio.Editor
         [Import] public ITextDocumentFactoryService Documents = null!;
         private Controller Get(IWpfTextView view) => view.Properties.GetOrCreateSingletonProperty(typeof(Controller), () => new Controller(view, Documents));
         public void TextViewCreated(IWpfTextView textView) => Get(textView);
-        public ILineTransformSource Create(IWpfTextView textView) => Get(textView);
 
-        private sealed class Controller : ILineTransformSource
+        private sealed class Controller
         {
-            private const double Height = 18;
+            /// <summary>Space between the end of the line's text and the caption.</summary>
+            private const double Gap = 16;
+            /// <summary>Files up to this many lines get every caption at once (see <c>OnTimer</c>); EditorCaptionSource's target cap fits them.</summary>
+            private const int WholeFileLines = 3000;
             private readonly IWpfTextView view;
             private readonly ITextDocumentFactoryService documents;
             private readonly IAdornmentLayer layer;
@@ -54,24 +58,23 @@ namespace Pomp.VisualStudio.Editor
             private Dictionary<int, EditorCaptionTarget> targets = new Dictionary<int, EditorCaptionTarget>();
             private readonly Dictionary<int, string> summaries = new Dictionary<int, string>();
             private string status = "", currentFile = "";
-            private bool closed, formatting;
+            private bool closed;
             private Style? buttonStyle;
             private Brush? buttonForeground;
-            private bool Enabled => PompServices.Current?.Settings.CodeCaptionsEnabled == true && PompServices.Current?.Settings.NativeCodeLensCaptionsEnabled != true;
+            // Native CodeLens captions replace these only in the languages the POMP CodeLens provider registers for (C#, VB: see
+            // CodeLensCaptionFeature); every other language keeps these.
+            private bool Enabled => PompServices.Current?.Settings.CodeCaptionsEnabled == true &&
+                !(PompServices.Current?.Settings.NativeCodeLensCaptionsEnabled == true && (view.TextBuffer.ContentType.IsOfType("CSharp") || view.TextBuffer.ContentType.IsOfType("Basic")));
             private bool Korean => Pomp.Hosting.PompLanguage.IsKorean;
             public Controller(IWpfTextView view, ITextDocumentFactoryService documents)
             {
                 this.view = view; this.documents = documents; layer = view.GetAdornmentLayer(LayerName);
                 debounce = new DispatcherTimer(DispatcherPriority.Background, view.VisualElement.Dispatcher) { Interval = TimeSpan.FromMilliseconds(350) };
-                debounce.Tick += OnTimer; view.TextBuffer.Changed += OnChanged; view.LayoutChanged += OnLayout;
+                // High priority: the targets are moved to the new text before the view lays the edited lines out and the captions are
+                // drawn again (OnLayout).
+                debounce.Tick += OnTimer; view.TextBuffer.ChangedHighPriority += OnChanged; view.LayoutChanged += OnLayout;
                 view.GotAggregateFocus += OnFocus; view.VisualElement.IsVisibleChanged += OnVisible; view.Closed += OnClosed;
                 Schedule();
-            }
-            public LineTransform GetLineTransform(ITextViewLine line, double yPosition, ViewRelativePosition placement)
-            {
-                if (!closed && Enabled && targetSnapshot == line.Snapshot && line.IsLastTextViewLineForSnapshotLine && targets.ContainsKey(line.Start.GetContainingLine().LineNumber + 1))
-                    return new LineTransform(0, Height, 1);
-                return new LineTransform(1);
             }
             private void Bind()
             {
@@ -94,16 +97,45 @@ namespace Pomp.VisualStudio.Editor
             }
             private void OnFocus(object sender, EventArgs args) { Bind(); Schedule(); }
             private void OnVisible(object sender, DependencyPropertyChangedEventArgs args) => Schedule();
-            private void OnChanged(object sender, TextContentChangedEventArgs args) { Cancel(ref capture); Cancel(ref inference); summaries.Clear(); status = ""; queriedSnapshot = null; retries = 0; Clear(); Schedule(); }
-            private void OnLayout(object sender, TextViewLayoutChangedEventArgs args) { if (closed || formatting) return; Render(); Schedule(); }
+            // An edit keeps the captions (moved with the text) instead of clearing them until the refreshed targets are worked out; a
+            // summary whose declaration line changed is dropped. A summary on its way is not cancelled: it lands on its declaration's new place.
+            private void OnChanged(object sender, TextContentChangedEventArgs args) { Cancel(ref capture); if (inference == null) status = ""; queriedSnapshot = null; retries = 0; MapToCurrent(args.After.TextBuffer.CurrentSnapshot); Schedule(); }
+            /// <summary>
+            /// Moves the targets to <paramref name="current"/>. The buffer's current snapshot, not the event's: an edit made inside another
+            /// edit's Changed handlers (formatting after Enter) raises its event first, so events can arrive out of version order.
+            /// </summary>
+            private void MapToCurrent(ITextSnapshot current)
+            {
+                var from = targetSnapshot;
+                if (from == null || from == current || from.TextBuffer != current.TextBuffer || from.Version.VersionNumber > current.Version.VersionNumber) return;
+                var moved = new Dictionary<int, EditorCaptionTarget>(); var kept = new Dictionary<int, string>();
+                foreach (var target in targets.Values)
+                {
+                    var span = new SnapshotSpan(from, target.Start, target.Length).TranslateTo(current, SpanTrackingMode.EdgeInclusive);
+                    if (span.Length == 0) continue;
+                    // The caption's line keeps its distance from the declaration's start (attributes above a C# signature).
+                    var line = current.GetLineNumberFromPosition(span.Start) + 1 + (target.Line - (from.GetLineNumberFromPosition(target.Start) + 1));
+                    if (line < 1 || line > current.LineCount || moved.ContainsKey(line)) continue;
+                    moved[line] = new EditorCaptionTarget(target.Name, line, span.Start, span.Length);
+                    if (summaries.TryGetValue(target.Start, out var text) && from.GetLineFromLineNumber(target.Line - 1).GetText() == current.GetLineFromLineNumber(line - 1).GetText())
+                        kept[span.Start] = text;
+                }
+                targets = moved; targetSnapshot = current; summaries.Clear();
+                foreach (var pair in kept) summaries[pair.Key] = pair.Value;
+            }
+            private void OnLayout(object sender, TextViewLayoutChangedEventArgs args) { if (closed) return; Render(); Schedule(); }
             private void Schedule() { if (closed) return; Bind(); debounce.Stop(); if (Enabled && view.VisualElement.IsVisible) debounce.Start(); }
             private void OnTimer(object? sender, EventArgs args)
             {
                 debounce.Stop(); var services = PompServices.Current;
                 if (closed || !Enabled || services == null || view.InLayout || view.TextViewLines == null || !view.VisualElement.IsVisible || view.TextSnapshot.Length > 500000 || !documents.TryGetTextDocument(view.TextBuffer, out var document)) return;
                 var snapshot = view.TextSnapshot;
-                var first = view.TextViewLines.FirstVisibleLine.Start.GetContainingLine().LineNumber + 1;
-                var last = view.TextViewLines.LastVisibleLine.End.GetContainingLine().LineNumber + 1;
+                // The whole file up to WholeFileLines lines, else one screen above and one below the visible lines as well, so a declaration
+                // scrolled into view already has its caption.
+                var top = view.TextViewLines.FirstVisibleLine.Start.GetContainingLine().LineNumber + 1;
+                var bottom = view.TextViewLines.LastVisibleLine.End.GetContainingLine().LineNumber + 1;
+                var whole = snapshot.LineCount <= WholeFileLines;
+                var first = whole ? 1 : Math.Max(1, top - (bottom - top + 1)); var last = whole ? snapshot.LineCount : Math.Min(snapshot.LineCount, bottom + (bottom - top + 1));
                 if (snapshot == queriedSnapshot && first == queriedFirst && last == queriedLast) return;
                 var exactText = snapshot.GetText(); var path = document.FilePath;
                 Cancel(ref capture); var pending = new CancellationTokenSource(); capture = pending; var token = pending.Token;
@@ -114,42 +146,46 @@ namespace Pomp.VisualStudio.Editor
                         var result = await services.Adapters.EditorCaptions.CaptureAsync(root, path, exactText, first, last, token).ConfigureAwait(false);
                         await services.JoinableTaskFactory.SwitchToMainThreadAsync(token);
                         if (closed || !Enabled || view.TextSnapshot != snapshot) return;
-                        if (!result.SourceMatched && retries++ < 2) { Schedule(); return; }
+                        // A source that does not match the buffer yet (Roslyn lags an edit) is asked again; its targets are never applied, so the
+                        // captions mapped through the edit stay meanwhile.
+                        if (!result.SourceMatched) { if (retries++ < 2) Schedule(); return; }
                         queriedSnapshot = snapshot; queriedFirst = first; queriedLast = last;
-                        targets = result.Targets.Where(target => target.Start >= 0 && target.Length > 0 && target.Start + target.Length <= snapshot.Length).GroupBy(target => target.Line).ToDictionary(group => group.Key, group => group.First());
-                        targetSnapshot = snapshot; currentFile = path; Relayout(); Render();
+                        // The refreshed range replaces only its own lines: captions elsewhere (mapped through earlier edits) stay.
+                        var merged = targetSnapshot == snapshot ? targets.Where(pair => pair.Key < first || pair.Key > last).ToDictionary(pair => pair.Key, pair => pair.Value) : new Dictionary<int, EditorCaptionTarget>();
+                        foreach (var group in result.Targets.Where(target => target.Start >= 0 && target.Length > 0 && target.Start + target.Length <= snapshot.Length).GroupBy(target => target.Line))
+                            merged[group.Key] = group.First();
+                        foreach (var start in summaries.Keys.Where(start => !merged.Values.Any(target => target.Start == start)).ToList()) summaries.Remove(start);
+                        targets = merged; targetSnapshot = snapshot; currentFile = path;
+                        Render();
                     }
                     catch (OperationCanceledException) { }
                     catch (Exception ex) { services.Logger.Debug("Code captions unavailable: " + ex.Message); }
                     finally { Interlocked.CompareExchange(ref capture, null, pending); pending.Dispose(); }
                 });
             }
-            private void Relayout()
-            {
-                if (closed || view.InLayout || view.TextViewLines == null) return;
-                var first = view.TextViewLines.FirstVisibleLine; if (first.Start.Snapshot != view.TextSnapshot) return; formatting = true;
-                try { view.DisplayTextLineContainingBufferPosition(first.Start, first.Top - view.ViewportTop, ViewRelativePosition.Top); }
-                finally { formatting = false; }
-            }
-            private void Clear() { targets = new Dictionary<int, EditorCaptionTarget>(); targetSnapshot = null; layer.RemoveAllAdornments(); Relayout(); }
+            private void Clear() { targets = new Dictionary<int, EditorCaptionTarget>(); targetSnapshot = null; layer.RemoveAllAdornments(); }
             private void Render()
             {
                 if (closed || view.InLayout) return;
                 layer.RemoveAllAdornments();
+                MapToCurrent(view.TextSnapshot);
                 if (!Enabled || targetSnapshot != view.TextSnapshot || view.TextViewLines == null) return;
                 foreach (var line in view.TextViewLines)
                 {
                     if (!line.IsLastTextViewLineForSnapshotLine || !targets.TryGetValue(line.Start.GetContainingLine().LineNumber + 1, out var target)) continue;
-                    // Arrow over the row (the editor's I-beam would say "type here"); the button itself shows a hand.
-                    var panel = new StackPanel { Orientation = Orientation.Horizontal, Height = Height, Background = Brushes.Transparent, Cursor = Cursors.Arrow };
+                    // Arrow over the caption (the editor's I-beam would say "type here"); the button itself shows a hand.
+                    var panel = new StackPanel { Orientation = Orientation.Horizontal, Height = line.TextHeight, Background = Brushes.Transparent, Cursor = Cursors.Arrow };
                     var foreground = view.FormattedLineSource.DefaultTextProperties.ForegroundBrush;
                     if (buttonStyle == null || buttonForeground != foreground) { buttonForeground = foreground; buttonStyle = CaptionButtonStyle(foreground); }
-                    var summary = new Button { Content = Korean ? "AI 설명" : "AI summary", FontSize = 10, Style = buttonStyle, ToolTip = status.Length > 0 ? status : target.Name };
+                    var summary = new Button { Content = Korean ? "AI 설명" : "AI summary", FontSize = 10, Style = buttonStyle, Opacity = .75, VerticalAlignment = VerticalAlignment.Center, ToolTip = status.Length > 0 ? status : target.Name };
                     summary.IsEnabled = inference == null && PompServices.Current?.Session is IInlineAssistant;
                     summary.Click += (_, __) => Describe(target);
                     panel.Children.Add(summary);
-                    if (summaries.TryGetValue(target.Start, out var text)) panel.Children.Add(new TextBlock { Text = "AI: " + text, Foreground = foreground, Opacity = .8, FontSize = 10, MaxWidth = Math.Max(80, view.ViewportWidth - 150), TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = text });
-                    Canvas.SetLeft(panel, Math.Max(view.ViewportLeft + 4, line.TextLeft)); Canvas.SetTop(panel, line.TextBottom);
+                    var left = line.TextRight + Gap;
+                    if (summaries.TryGetValue(target.Start, out var text))
+                        panel.Children.Add(new TextBlock { Text = text, Foreground = foreground, Opacity = .65, FontSize = 10, FontStyle = FontStyles.Italic, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0),
+                            MaxWidth = Math.Max(160, view.ViewportRight - left - 70), TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = text });
+                    Canvas.SetLeft(panel, left); Canvas.SetTop(panel, line.TextTop);
                     layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, new SnapshotSpan(line.Start, 0), target, panel, null);
                 }
             }
@@ -174,10 +210,16 @@ namespace Pomp.VisualStudio.Editor
                     catch (Exception ex) { error = ex.Message; }
                     await services.JoinableTaskFactory.SwitchToMainThreadAsync();
                     Interlocked.CompareExchange(ref inference, null, pending);
-                    if (!closed && Enabled && !token.IsCancellationRequested && view.TextSnapshot == snapshot)
+                    if (!closed && Enabled && !token.IsCancellationRequested)
                     {
                         status = error ?? "";
-                        if (!string.IsNullOrWhiteSpace(text)) { if (summaries.Count >= 50) summaries.Clear(); summaries[target.Start] = text!; }
+                        // Text typed meanwhile moved the declaration: the summary goes to the same declaration in the current text, unless its
+                        // line itself was edited.
+                        var current = view.TextSnapshot; MapToCurrent(current);
+                        var start = new SnapshotPoint(snapshot, target.Start).TranslateTo(current, PointTrackingMode.Positive).Position;
+                        var landed = targetSnapshot == current ? targets.Values.FirstOrDefault(candidate => candidate.Start == start) : null;
+                        if (!string.IsNullOrWhiteSpace(text) && landed != null && snapshot.GetLineFromLineNumber(target.Line - 1).GetText() == current.GetLineFromLineNumber(landed.Line - 1).GetText())
+                        { if (summaries.Count >= 50) summaries.Clear(); summaries[start] = text!; }
                         Render();
                     }
                     pending.Dispose();
@@ -224,7 +266,7 @@ namespace Pomp.VisualStudio.Editor
             private void OnClosed(object sender, EventArgs args)
             {
                 if (closed) return; closed = true; debounce.Stop(); debounce.Tick -= OnTimer; Cancel(ref capture); Cancel(ref inference);
-                view.TextBuffer.Changed -= OnChanged; view.LayoutChanged -= OnLayout; view.GotAggregateFocus -= OnFocus; view.VisualElement.IsVisibleChanged -= OnVisible; view.Closed -= OnClosed;
+                view.TextBuffer.ChangedHighPriority -= OnChanged; view.LayoutChanged -= OnLayout; view.GotAggregateFocus -= OnFocus; view.VisualElement.IsVisibleChanged -= OnVisible; view.Closed -= OnClosed;
                 if (settings != null) settings.Changed -= OnSourceChanged; if (changes != null) changes.Changed -= OnSourceChanged; layer.RemoveAllAdornments(); summaries.Clear();
             }
         }

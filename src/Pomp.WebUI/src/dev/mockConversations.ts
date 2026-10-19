@@ -1,12 +1,17 @@
 import type { HostMessageType, HostToUi, UiToHost } from '../protocol';
 import type { AgentHistoryEntry, ConversationPartner, HistoryFilter, QueueState } from '../conversationProtocol';
 
-/** Browser-only partner, queue and bounded history fixtures. Never invokes a provider. */
+/** Browser-only chat tabs, queue and bounded history fixtures. Never invokes a provider. */
 export function createMockConversations(post: <K extends HostMessageType>(type: K, payload: HostToUi[K]) => void, options: {
-  sessionId: () => string; busy: () => boolean; start: (input: UiToHost['chat/send']) => void; partnerChanged: (partner: ConversationPartner) => void;
+  sessionId: () => string; busy: () => boolean; start: (input: UiToHost['chat/send']) => void;
 }) {
   let counter = 0;
+  // Agent and team conversations (the host's chat-tabs.json): their partners, the open tabs in order, and the Default tab's conversation.
   const partners = new Map<string, ConversationPartner>();
+  let open: string[] = [];
+  let main: string | null = options.sessionId();
+  const same = (a?: ConversationPartner, b?: ConversationPartner) => !!a && !!b && a.kind === b.kind && a.id === b.id;
+  const titleOf = (partner: ConversationPartner) => partner.kind === 'team' ? '기능 개발팀' : partner.kind === 'agent' ? '설계자' : undefined;
   let queue: QueueState = { sessionId: null, items: [], paused: false };
   let history: AgentHistoryEntry[] = [
     { id: 'history-feature', sessionId: options.sessionId(), target: { kind: 'team', id: 'feature-dev', title: '기능 개발팀' }, text: '설계와 구현 결과를 확인하고 회귀 테스트를 정리해 주세요.', startedAt: '2026-10-04T08:00:00Z', endedAt: '2026-10-04T08:02:11Z', status: 'completed', pinned: true, label: '확인할 결과', members: [{ agent: 'architect', jobId: 'job-mock-1', status: 'completed', toolCount: 5, tokens: 2400, durationMs: 12000 }, { agent: 'implementer', jobId: 'job-mock-2', status: 'completed', toolCount: 13, tokens: 6900, durationMs: 52000 }] },
@@ -15,16 +20,17 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
   ];
   const publishQueue = () => post('chat/queueState', structuredClone(queue));
   const publishHistory = () => post('agents/historyState', { entries: structuredClone(history), truncated: false });
-  const publishPartner = () => {
+  const publishTabs = () => {
     const partner = partners.get(options.sessionId()) ?? { kind: 'main' as const };
-    post('conversation/partnerState', { sessionId: options.sessionId(), partner, title: partner.kind === 'team' ? '기능 개발팀' : partner.kind === 'agent' ? '설계자' : undefined });
+    post('conversation/tabsState', { sessionId: options.sessionId(), partner, title: titleOf(partner), main, tabs: open.map(id => ({ sessionId: id, partner: partners.get(id)!, title: titleOf(partners.get(id)!) })) });
   };
-  const snapshot = () => { publishPartner(); publishQueue(); publishHistory(); };
+  const snapshot = () => { publishTabs(); publishQueue(); publishHistory(); };
   const matches = (entry: AgentHistoryEntry, filter?: HistoryFilter) => (!filter?.kind || entry.target.kind === filter.kind) && (!filter?.id || entry.target.id === filter.id) && (!filter?.status || entry.status === filter.status) && (!entry.pinned || filter?.includePinned === true);
+  // A team conversation sends every message to its team; an agent conversation is the agent itself (the message goes as typed).
   const route = (input: UiToHost['chat/send']): UiToHost['chat/send'] => {
     if (input.main || input.agent || input.team || input.agentInstance) return input;
     const partner = partners.get(options.sessionId());
-    return partner?.kind === 'team' ? { ...input, team: partner.id } : partner?.kind === 'agent' ? { ...input, agent: partner.id } : input;
+    return partner?.kind === 'team' ? { ...input, team: partner.id } : input;
   };
   const drain = () => {
     if (options.busy() || queue.paused || !queue.items.length || queue.sessionId !== options.sessionId()) return;
@@ -39,7 +45,23 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
   };
   const tryQueue = (input: UiToHost['chat/send']) => { if (!options.busy() && !queue.items.length) return false; enqueue(route(input)); return true; };
   const pause = (reason: string) => { if (!queue.items.length) return; queue.paused = true; queue.reason = reason; publishQueue(); };
-  const changedSession = (partner?: ConversationPartner) => { if (partner && !partners.has(options.sessionId())) partners.set(options.sessionId(), partner); pause('대화가 바뀌어 대기열을 멈췄어요.'); snapshot(); };
+  /** The current conversation changed; `assign` makes it that partner's new conversation. A listed one opens as its partner's tab, any other becomes Default's. */
+  const changedSession = (assign?: ConversationPartner) => {
+    const id = options.sessionId();
+    if (assign && assign.kind !== 'main') partners.set(id, assign);
+    const partner = partners.get(id);
+    if (partner) { open = [...open.filter(other => other !== id && !same(partners.get(other), partner)), id]; if (main === id) main = null; }
+    else main = id;
+    pause('대화가 바뀌어 대기열을 멈췄어요.'); snapshot();
+  };
+  const tabs = {
+    current: () => partners.get(options.sessionId()),
+    seed: (id: string, partner: ConversationPartner) => { if (partner.kind !== 'main') partners.set(id, partner); },
+    openSession: (partner: ConversationPartner) => open.find(id => same(partners.get(id), partner)),
+    main: () => main,
+    close: (id: string) => { open = open.filter(other => other !== id); publishTabs(); },
+    forget: (id: string) => { open = open.filter(other => other !== id); partners.delete(id); if (main === id) main = null; },
+  };
   const start = (input: UiToHost['chat/send'], promptId: string) => {
     const target = input.team ? { kind: 'team' as const, id: input.team, title: '기능 개발팀' } : input.agent ? { kind: 'agent' as const, id: input.agent, title: input.agent } : input.agentInstance ? { kind: 'dm' as const, id: input.agentInstance, title: input.agentInstance } : undefined;
     if (!target) return;
@@ -51,12 +73,6 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
     if (status !== 'completed') pause(status === 'aborted' ? '중지 요청으로 대기열을 멈췄어요.' : '응답 오류로 대기열을 멈췄어요.'); else window.setTimeout(drain, 0);
   };
   function handle(type: string, payload: Record<string, unknown> | undefined): boolean {
-    if (type === 'conversation/partner') {
-      const p = payload as unknown as UiToHost['conversation/partner'];
-      if (options.busy()) post('conversation/partnerReply', { requestId: p.requestId, ok: false, error: 'Finish this response before changing the partner.' });
-      else { partners.set(options.sessionId(), p.partner); options.partnerChanged(p.partner); post('conversation/partnerReply', { requestId: p.requestId, ok: true }); publishPartner(); }
-      return true;
-    }
     if (type === 'chat/queue') {
       const p = payload as unknown as UiToHost['chat/queue']; let error: string | undefined;
       const index = queue.items.findIndex(item => item.id === p.id);
@@ -85,5 +101,5 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
   }
   const mode = new URLSearchParams(window.location.search).get('chatQueue');
   if (mode) queue = { sessionId: mode === 'other' ? 'mock-session-2' : options.sessionId(), paused: true, reason: mode === 'error' ? '응답 오류로 대기열을 멈췄어요.' : '사용자가 대기열을 일시정지했어요.', items: [{ id: 'fixture-queue', text: '완료된 변경과 검증 결과를 정리해 주세요.', includeEditorContext: true, agent: 'architect', createdAt: new Date().toISOString() }] };
-  return { handle, route, tryQueue, snapshot, changedSession, start, finish, pause };
+  return { handle, route, tryQueue, snapshot, changedSession, start, finish, pause, tabs };
 }

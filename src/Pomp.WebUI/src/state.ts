@@ -1,7 +1,7 @@
 import { addAttachments, dismissMention, emptyComposer, fileFromAttachment, fileIdentity, receiveFiles, selectMention, updateMention, withoutMentions, type ComposerState } from './composerState';
 import { localeFromHost, makeTranslate, type Locale } from './i18n';
 import { dialogTitle, permissionTitle } from './requestTitle';
-import type { AgentHistoryState, CommandReply, PartnerState, QueueState } from './conversationProtocol';
+import type { AgentHistoryState, CommandReply, QueueState, TabsState } from './conversationProtocol';
 import { normalizeSetup, recordReply, type SetupReply, type SetupState } from './setup';
 import type {
   AdvisorNote,
@@ -47,8 +47,6 @@ export interface UserItem {
   promptId?: string;
   /** Set when the host ended this message's turn without it becoming the running turn (e.g. rejected as busy). */
   failed?: UiErrorInfo;
-  /** The partner tab (`agent:name`/`team:id`) it was sent from: keeps it in that tab, also when it went elsewhere (restored from `chat/turnStarted.from`). View only. */
-  partnerKey?: string;
 }
 
 export interface AssistantItem {
@@ -229,7 +227,8 @@ export interface AppState {
   activeRules: ActiveRule[];
   /** Chosen destination for the next message (cleared only after successful delivery). */
   selectedTarget?: SendTarget;
-  partner: PartnerState | null;
+  /** The chat tabs (host `conversation/tabsState`); kept across a conversation change, which the host follows with a new one. */
+  tabs: TabsState | null;
   queue: QueueState;
   agentHistory: AgentHistoryState;
   conversationReplies: CommandReply[];
@@ -273,7 +272,7 @@ export const initialState: AppState = {
   basketTokens: null,
   activeRules: [],
   selectedTarget: undefined,
-  partner: null,
+  tabs: null,
   queue: { items: [], paused: false },
   agentHistory: { entries: [], truncated: false },
   conversationReplies: [],
@@ -287,7 +286,7 @@ export interface Stamped {
 
 export type Action =
   | { type: 'host'; batch: Stamped[] }
-  | { type: 'userSend'; id: string; text: string; attachments?: WorkspaceFile[]; clearDraft?: boolean; target?: SendTarget; preserveDraftTarget?: boolean; queued?: boolean; partnerKey?: string }
+  | { type: 'userSend'; id: string; text: string; attachments?: WorkspaceFile[]; clearDraft?: boolean; target?: SendTarget; preserveDraftTarget?: boolean; queued?: boolean }
   | { type: 'queueSendUnconfirmed'; id: string }
   | { type: 'recoverQueueSend'; id: string }
   | { type: 'composerEdit'; text: string; caret: number; selectionEnd: number }
@@ -300,9 +299,7 @@ export type Action =
   | { type: 'pickerRequested'; requestId: string }
   | { type: 'workspaceFailed'; requestId: string; message: string }
   | { type: 'attachmentsAdd'; files: WorkspaceFile[] }
-  | { type: 'attachmentToggle'; fullPath: string }
   | { type: 'attachmentReorder'; fullPath: string; beforePath?: string }
-  | { type: 'attachmentsReplace'; files: WorkspaceFile[] }
   | { type: 'attachmentRemove'; fullPath: string }
   | { type: 'dialogDraft'; requestId: string; text: string }
   /** `session/new` was posted: wait for the host's `session/newResult` before touching the transcript. */
@@ -406,7 +403,6 @@ function clearedForNewSession(state: AppState): AppState {
     pendingSends: [],
     pendingQueued: [],
     sendError: undefined,
-    partner: null,
     replaying: false,
     replayTruncated: false,
     phase: 'idle',
@@ -433,10 +429,10 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
       return { ...state, activeRules: payload.rules.filter(rule => rule && typeof rule.name === 'string' && typeof rule.file === 'string')
         .map(rule => ({ name: rule.name, file: rule.file, always: rule.always === true, globs: Array.isArray(rule.globs) ? rule.globs.filter(glob => typeof glob === 'string') : [] })) };
     }
-    case 'conversation/partnerState': return { ...state, partner: msg.payload };
+    case 'conversation/tabsState': return { ...state, tabs: msg.payload };
     case 'chat/queueState': return { ...state, queue: msg.payload };
     case 'agents/historyState': return { ...state, agentHistory: msg.payload };
-    case 'conversation/partnerReply':
+    case 'conversation/tabReply':
     case 'chat/queueReply':
     case 'agents/historyReply': return { ...state, conversationReplies: [...state.conversationReplies.filter(reply => reply.requestId !== msg.payload.requestId), msg.payload].slice(-40) };
     case 'chat/queued': {
@@ -459,12 +455,10 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
     case 'workspace/goalState':
     case 'workspace/goalRequest':
     case 'workspace/tokenCount':
-    case 'workspace/contextSuggestions':
     case 'workspace/snippetResult':
     case 'workspace/hooksState':
     case 'workspace/backgroundState':
     case 'session/historyState':
-    case 'workspace/contextPresetsState':
     case 'advisors/state':
     case 'advisors/reply':
     case 'workspace/problemsState':
@@ -581,11 +575,9 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
     }
 
     case 'chat/turnStarted': {
-      const { clientMessageId, promptId, text, attachments, editorContext, team, agent, agentInstance, main, from } = msg.payload;
-      // `from` is only sent with another target than the tab's partner; a restored one with no agent/team/instance went to POMP itself.
-      const target: SendTarget | undefined = team ? { kind: 'team', id: team } : agent ? { kind: 'agent', id: agent } : agentInstance ? { kind: 'instance', id: agentInstance } : main || from ? { kind: 'main', id: '' } : undefined;
-      // A replayed or restored message keeps the agent/team tab it was sent from, like the optimistic bubble did.
-      const partnerKey = (from?.kind === 'agent' || from?.kind === 'team') && typeof from.id === 'string' && from.id ? `${from.kind}:${from.id}` : undefined;
+      const { clientMessageId, promptId, text, attachments, editorContext, team, agent, agentInstance, main } = msg.payload;
+      // A restored one with no agent/team/instance went to the conversation itself.
+      const target: SendTarget | undefined = team ? { kind: 'team', id: team } : agent ? { kind: 'agent', id: agent } : agentInstance ? { kind: 'instance', id: agentInstance } : main ? { kind: 'main', id: '' } : undefined;
       if (!promptId) return state;
       let next = state;
       const index = findLastIndex(state.items, (it) => it.kind === 'user' && (clientMessageId ? it.clientMessageId === clientMessageId : it.promptId === promptId));
@@ -598,7 +590,7 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
         if (pending) next = { ...next, items: [...next.items, { ...pending, editorContext, promptId, failed: undefined }] };
         else if (typeof text === 'string' || attachments?.length) {
           next = withItem(next, (key) => ({
-            kind: 'user', key, clientMessageId: clientMessageId ?? promptId, promptId, text: text ?? '', target, editorContext, ...(partnerKey ? { partnerKey } : {}),
+            kind: 'user', key, clientMessageId: clientMessageId ?? promptId, promptId, text: text ?? '', target, editorContext,
             attachments: attachments?.filter((entry) => typeof entry?.path === 'string').map((entry) => fileFromAttachment(entry.path)),
           }));
         }
@@ -948,7 +940,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return action.batch.reduce((s, { msg, at }) => applyHost(s, msg, at), state);
 
     case 'userSend': {
-      const item: UserItem = { kind: 'user', key: `u:${action.id}`, clientMessageId: action.id, text: action.text, target: action.target, attachments: action.attachments?.slice(), ...(action.partnerKey ? { partnerKey: action.partnerKey } : {}) };
+      const item: UserItem = { kind: 'user', key: `u:${action.id}`, clientMessageId: action.id, text: action.text, target: action.target, attachments: action.attachments?.slice() };
       // A message sent from an idle page starts a new turn; one sent during a running turn (a race) must not downgrade it.
       const idle = state.phase === 'idle';
       return {
@@ -1016,15 +1008,6 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'attachmentsAdd':
       return { ...state, composer: addAttachments(state.composer, action.files) };
-
-    case 'attachmentsReplace':
-    {
-      const next = addAttachments({ ...state.composer, attachments: [] }, action.files);
-      const kept = new Set(next.attachments.map(file => fileIdentity(file.fullPath)));
-      return { ...state, composer: withoutMentions(next, state.composer.attachments.filter(file => !kept.has(fileIdentity(file.fullPath)))) };
-    }
-    case 'attachmentToggle':
-      return { ...state, composer: { ...state.composer, attachments: state.composer.attachments.map(file => fileIdentity(file.fullPath) === fileIdentity(action.fullPath) ? { ...file, excluded: !file.excluded } : file) } };
 
     case 'attachmentReorder': {
       const current = state.composer.attachments;

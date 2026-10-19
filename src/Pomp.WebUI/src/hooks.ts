@@ -55,20 +55,65 @@ export function useEscapeToComposer(input: RefObject<HTMLTextAreaElement | null>
   }, [input]);
 }
 
+/** The Windows paths of the `file:` URIs in a `text/uri-list` (comment lines and other schemes are left out). */
+export function fileUriPaths(list: string): string[] {
+  const paths: string[] = [];
+  for (const line of list.split(/\r?\n/)) {
+    const value = line.trim();
+    if (!value || value.startsWith('#')) continue;
+    try {
+      const url = new URL(value);
+      if (url.protocol !== 'file:') continue;
+      const path = decodeURIComponent(url.pathname).replace(/^\/(?=[A-Za-z]:)/, '').replace(/\//g, '\\');
+      paths.push(url.host ? `\\\\${url.host}${path}` : path);
+    } catch { /* not a URI */ }
+  }
+  return paths;
+}
+
 /**
- * Files dropped on the page would navigate the WebView away from the chat UI (attachments use the host picker instead).
- * Only file drags are swallowed: cancelling every drop would also cancel dropping text (code dragged from the editor) into the composer.
+ * Files dropped anywhere on the page go into the context basket (`ui/dropFiles`). The drop is always cancelled, which keeps the WebView from
+ * navigating to the file. Where the paths come from depends on the drag source:
+ * - Explorer files: the host reads them from the message's additional objects (WebView2 Runtime 113+; an older runtime gets a notice).
+ * - A `text/uri-list` drag (Solution Explorer in VS 2017): the page sends the paths, from the `file:` URIs or, as Chromium hides those from
+ *   pages, from the absolute paths the same drag carries as plain text lines.
+ * - No data the page can read (Solution Explorer in later versions uses Visual Studio's own formats): `projectItems`, and the host takes
+ *   Solution Explorer's selection, the dragged items.
+ * Plain text dragged from the editor still drops into the composer.
  */
-export function useIgnoreFileDrops(): void {
+export function useFileDrops(unsupported: () => string): void {
+  const message = useRef(unsupported); message.current = unsupported;
   useEffect(() => {
-    const swallow = (event: DragEvent): void => {
-      if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
+    const handled = (event: DragEvent): boolean => {
+      const types = event.dataTransfer?.types;
+      return !!types && (types.includes('Files') || types.includes('text/uri-list') || types.length === 0);
     };
-    window.addEventListener('dragover', swallow);
-    window.addEventListener('drop', swallow);
+    const over = (event: DragEvent): void => {
+      if (!handled(event)) return;
+      event.preventDefault(); event.dataTransfer!.dropEffect = 'copy';
+    };
+    const drop = (event: DragEvent): void => {
+      if (!handled(event)) return;
+      event.preventDefault();
+      const data = event.dataTransfer!; const webview = window.chrome?.webview;
+      if (!webview) return;
+      if (!data.types.length) { send('ui/dropFiles', { projectItems: true }); return; }
+      if (!data.types.includes('Files')) {
+        const listed = fileUriPaths(data.getData('text/uri-list'));
+        const paths = listed.length ? listed : data.getData('text/plain').split(/\r?\n/).map(line => line.trim()).filter(line => /^([A-Za-z]:\\|\\\\)/.test(line));
+        if (paths.length) send('ui/dropFiles', { paths: paths.slice(0, 500) });
+        return;
+      }
+      if (!data.files.length) return;
+      if (!webview.postMessageWithAdditionalObjects) { send('ui/status', { text: message.current(), level: 'warning' }); return; }
+      try { webview.postMessageWithAdditionalObjects({ type: 'ui/dropFiles', payload: {} }, data.files); }
+      catch (error) { console.error('[pomp] postMessageWithAdditionalObjects failed', error); }
+    };
+    window.addEventListener('dragover', over);
+    window.addEventListener('drop', drop);
     return () => {
-      window.removeEventListener('dragover', swallow);
-      window.removeEventListener('drop', swallow);
+      window.removeEventListener('dragover', over);
+      window.removeEventListener('drop', drop);
     };
   }, []);
 }

@@ -56,7 +56,7 @@ export function SkillsView({ controller, locale, disabled, busy, onUseSkill }: {
           { id: 'on', label: t('skills.filterOn'), badge: onCount, testId: 'skills-filter-on' },
           { id: 'off', label: t('skills.filterOff'), badge: all.length - onCount, testId: 'skills-filter-off' }]} />
       </Toolbar>
-      {manager.created && <p className="ui-note" role="status" data-testid="skills-created">{t('skills.created', { name: manager.created })}</p>}
+      {manager.createdNote && <p className="ui-note" role="status" data-testid="skills-created">{manager.createdNote}</p>}
       {manager.together.length > 0 && <p className="ui-note" role="status" data-testid="skills-together">{t('ext.together', { names: manager.together.join(', ') })}</p>}
       {manager.readError && <p className="ui-note" role="alert" data-testid="skills-read-error">{manager.readError}</p>}
       {controller.skills.diagnostics.map((note, index) => <p className="ui-note ui-muted" role="status" key={index}>{note}</p>)}

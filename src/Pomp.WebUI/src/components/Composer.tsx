@@ -12,10 +12,11 @@ import { send, APPROVAL_MODES, DEFAULT_SHORTCUTS, MAIN_TARGET, type AgentsStateP
 import type { EditorFollowState, UiToHost } from '../protocol';
 import { matchesShortcut } from '../shortcuts';
 import { useComposerPrediction } from '../useComposerPrediction';
+import { useWordCompletion } from '../useWordCompletion';
 import { ComposerGhost } from './ComposerGhost';
 import { commandCatalog, isBuiltinCommand, LEGACY_COMMANDS, slashMatches, slashTakesReferences, type BuiltinCommand, type SlashMatch } from '../slashCommands';
 import type { SetupReply, SetupState } from '../setup';
-import type { Action } from '../state';
+import type { Action, TranscriptItem } from '../state';
 import { effectiveRoles, isRunnableTeam, targetKey, targetPayload } from '../teamsCache';
 import { useWorkState } from '../work/store';
 import { ConfirmPopover } from './ConfirmPopover';
@@ -49,6 +50,10 @@ interface ComposerProps {
   inputRef: RefObject<HTMLTextAreaElement | null>;
   connected: boolean;
   composerPredictions?: boolean;
+  /** Word completion (Tools > Options > Pomp > Chat): the rest of the word being typed, from this workspace's words. */
+  wordCompletion?: boolean;
+  /** The conversation: its words feed word completion. */
+  transcript: readonly TranscriptItem[];
   busy: boolean;
   queueBlocked?: boolean;
   insertSkill?: { name: string; seq: number };
@@ -63,8 +68,8 @@ interface ComposerProps {
   onIncludeEditorContextChange: (value: boolean) => void;
   draft: ComposerState;
   dispatch: Dispatch<Action>;
-  /** `target` undefined: the chosen one-message target (else the partner); null: the tab's partner, whatever is chosen. `toMain`: an editor
-   *  request of the main conversation (the view moves to Default (POMP) once it is accepted). */
+  /** `target` undefined: the chosen one-message target (else the tab's conversation); null: the tab's conversation, whatever is chosen. `toMain`:
+   *  an editor request of the Default (POMP) tab's conversation (from another tab it waits in the input while the page switches there). */
   onSend: (text: string, attachments: WorkspaceFile[], clearDraft?: boolean, target?: SendTarget | null, preserveDraftTarget?: boolean, includeEditorContext?: boolean, toMain?: boolean) => SendResult;
   onStop: () => void;
   commands: CommandInfo[];
@@ -168,7 +173,7 @@ function LiveEditorControls({ state, disabled, shortcuts, inputRef, t }: { state
   </span>;
 }
 
-export function Composer({ locale, workspaceKey, sessionId, model, session, setup, setupReplies, onManageAccounts, inputRef, connected, composerPredictions = false, busy, queueBlocked = false, insertSkill, insertText, basketRequest = 0, basketTokens, requestPending, newSessionPending, includeEditorContext, onIncludeEditorContextChange, draft, dispatch, onSend, onStop, commands, commandsHidden, onCommand, onGoal, skillsOff, prefill, agents, shortcuts = DEFAULT_SHORTCUTS, approvalMode, permissionModeReply, editorFollow, selectedTarget, onSelectTarget, partnerName, partner, onOpenPartner }: ComposerProps) {
+export function Composer({ locale, workspaceKey, sessionId, model, session, setup, setupReplies, onManageAccounts, inputRef, connected, composerPredictions = false, wordCompletion = false, transcript, busy, queueBlocked = false, insertSkill, insertText, basketRequest = 0, basketTokens, requestPending, newSessionPending, includeEditorContext, onIncludeEditorContextChange, draft, dispatch, onSend, onStop, commands, commandsHidden, onCommand, onGoal, skillsOff, prefill, agents, shortcuts = DEFAULT_SHORTCUTS, approvalMode, permissionModeReply, editorFollow, selectedTarget, onSelectTarget, partnerName, partner, onOpenPartner }: ComposerProps) {
   const t = useT();
   const focusInput = useCallback(() => inputRef.current?.focus(), [inputRef]);
   const [failure, setFailure] = useState<SendFailure | null>(null);
@@ -194,7 +199,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     if (!basketOpen || !focusBasketOnOpen.current) return;
     focusBasketOnOpen.current = false;
     const visible = (element: HTMLElement) => element.getClientRects().length > 0 && !element.closest('[hidden], [inert]');
-    const file = basketByKey.current ? [...(basketPop.current?.querySelectorAll<HTMLElement>('input[data-basket-check]:not(:disabled)') ?? [])].find(visible) : undefined;
+    // Opened from the keyboard: the first attached file (its menu opens with the context-menu key).
+    const file = basketByKey.current ? [...(basketPop.current?.querySelectorAll<HTMLElement>('[data-attachment-menu]') ?? [])].find(visible) : undefined;
     const control = file ?? [...(basketPop.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]') ?? [])]
       .find(visible);
     (control ?? basketPop.current)?.focus({ preventScroll: true });
@@ -243,9 +249,9 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     }),
   ], [runnableTeams, runnableRoles, instances, t]);
   // The list: teams, agents, then this conversation's running members; each group by name, except that the row of the conversation the
-  // user is in (POMP in its own tab, the agent or team of an agent/team tab) heads its group, tinted: choosing it clears the one-message
-  // target, so the next message continues this conversation (never a subagent run of itself). POMP heads the agents in its own tab and
-  // in a team tab, and comes right under the agent in that agent's tab. Running members of the tab's own role are left out.
+  // user is in (POMP in the Default tab, the agent or team of an agent/team tab) heads its group, tinted: choosing it clears the one-message
+  // target, so the next message continues this conversation (never a subagent run of itself). POMP is listed only in the Default tab: an
+  // agent or team tab is its own conversation, where POMP does not answer. Running members of the tab's own role are left out.
   const partnerTab = partner?.id && partner.kind !== 'main' ? { kind: partner.kind, id: partner.id } : undefined;
   const listed = useMemo(() => {
     const own = (item: (typeof destinations)[number]) => !partnerTab ? item.target.kind === 'main'
@@ -253,31 +259,27 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
       : item.target.kind === 'agent' && item.target.id === partnerTab.id;
     const main: (typeof destinations)[number] = { target: MAIN_TARGET, name: t('partner.main'), label: t('partner.main'), chip: 'POMP', title: 'POMP', groupKey: 'agents', group: t('composer.targetAgents'), avatar: { kind: 'main' } };
     const ownFirst = (items: (typeof destinations)[number][]) => [...items.filter(own), ...items.filter(item => !own(item))];
-    const agents = ownFirst(destinations.filter(item => item.target.kind === 'agent'));
-    const ownAgent = agents.length > 0 && own(agents[0]!);
     return [
       ...ownFirst(destinations.filter(item => item.target.kind === 'team')),
-      ...(ownAgent ? [agents[0]!, main, ...agents.slice(1)] : [main, ...agents]),
+      ...(partnerTab ? [] : [main]), ...ownFirst(destinations.filter(item => item.target.kind === 'agent')),
       ...destinations.filter(item => item.target.kind === 'instance' && !(partnerTab?.kind === 'agent' && item.avatar.id === partnerTab.id)),
     ].map(item => ({ ...item, own: own(item) }));
   }, [destinations, partnerTab?.kind, partnerTab?.id, t]);
   const choices = useMemo(() => listed.filter(item => !item.own), [listed]);
   const hasTargets = choices.length > 0;
   const selectedDestination = choices.find(item => targetKey(item.target) === targetKey(selectedTarget));
-  // Where a message without a one-message target goes: the active partner tab (named when a lost target is reported).
+  // Where a message without a one-message target goes: the active tab's conversation (named when a lost target is reported).
   const partnerLabel = partnerName || t('partner.main');
-  // An editor menu request that could not go out at once (a reply was running, or a draft was there) still belongs to POMP
-  // when the user sends it later, whatever partner tab is active then.
+  // An editor menu request that could not go out at once (a reply was running, or a draft was there) still belongs to the Default (POMP)
+  // tab's conversation when the user sends it later (from another tab the page switches there first).
   const deferredMain = useRef<string | null>(null);
   useEffect(() => { deferredMain.current = null; }, [sessionId]);
   // A one-message target the user picks afterwards wins: the chip and the send must agree.
   const mainPending = !selectedDestination && deferredMain.current !== null && draft.text.includes(deferredMain.current);
   // The chip names only a target other than the conversation the user is in; without one it is just the send-target button (a picked POMP
-  // in its own tab, or this tab's own partner, would read as a message to itself). A deferred editor request is POMP's: a target only in an
-  // agent/team tab.
-  const chosen = selectedDestination ?? (mainPending && partnerTab ? choices.find(item => item.target.kind === 'main') : undefined);
-  const targetLabel = chosen ? (chosen.chip ?? chosen.label) : t('composer.sendTarget');
-  const targetTitle = chosen ? t('composer.targetPartnerTitle', { name: chosen.label }) : t('composer.sendTarget');
+  // in the Default tab, or this tab's own partner, would read as a message to itself).
+  const targetLabel = selectedDestination ? (selectedDestination.chip ?? selectedDestination.label) : t('composer.sendTarget');
+  const targetTitle = selectedDestination ? t('composer.targetPartnerTitle', { name: selectedDestination.label }) : t('composer.sendTarget');
   // What the chosen target is called, to name it if it disappears later.
   const selectedName = useRef<{ key: string; name: string }>(undefined);
   if (selectedDestination) selectedName.current = { key: targetKey(selectedTarget), name: selectedDestination.name };
@@ -407,11 +409,11 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     consumedBasket.current = basketRequest; setBasketOpen(true);
   }, [basketRequest, requestPending]);
   const text = draft.text.trim();
-  const sendPaths = useMemo(() => draft.attachments.filter(file => !file.excluded).map(file => file.fullPath), [draft.attachments]);
+  const sendPaths = useMemo(() => draft.attachments.map(file => file.fullPath), [draft.attachments]);
   const rejection = useMemo(() => promptRejection(draft.text, {
     type: 'chat/send', payload: { clientMessageId: 'draft', text, includeEditorContext, ...targetPayload(selectedTarget), attachments: sendPaths.map(path => ({ path })) },
   }, sendPaths), [text, draft.text, sendPaths, includeEditorContext, selectedTarget]);
-  const canSend = connected && !queueBlocked && !requestPending && !newSessionPending && !draft.composing && (text.length > 0 || draft.attachments.some(file => !file.excluded));
+  const canSend = connected && !queueBlocked && !requestPending && !newSessionPending && !draft.composing && (text.length > 0 || draft.attachments.length > 0);
   const failureMessage = failure ? failureText(t, failure) : rejection ? failureText(t, rejection) : null;
   // The composer's notices go to the VS status bar (with errors in the POMP log), not as text between its controls.
   useStatusReport(failureMessage);
@@ -423,6 +425,10 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   const { prediction, discard: discardPrediction } = useComposerPrediction({
     inputRef, enabled: composerPredictions, sessionId, text: draft.text, caret, focused: inputFocused,
     suppressed: !connected || requestPending || newSessionPending || queueBlocked || draft.composing || slash !== null || mention !== null,
+  });
+  const { completion: word, dismiss: dismissWord, accepted: acceptedWord } = useWordCompletion({
+    enabled: wordCompletion, workspaceKey: workspaceKey ?? '', sessionId, items: transcript, text: draft.text, caret, focused: inputFocused,
+    suppressed: requestPending || draft.composing || slash !== null || mention !== null,
   });
   const mentionTargets = useMemo(() => {
     if (!mention) return [];
@@ -576,7 +582,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     if (payload.files?.length) dispatch({ type: 'attachmentsAdd', files: payload.files });
     autoSend.current = null;
     if (payload.text && payload.send && connected && !newSessionPending) {
-      const files = [...draft.attachments, ...(payload.files ?? [])].filter((file, index, all) => !file.excluded && all.findIndex(other => other.fullPath === file.fullPath) === index);
+      const files = [...draft.attachments, ...(payload.files ?? [])].filter((file, index, all) => all.findIndex(other => other.fullPath === file.fullPath) === index);
       const result = onSend(payload.text, files, false, MAIN_TARGET, true, payload.includeEditorContext || includeEditorContext, true);
       if (result.ok) return;
     }
@@ -596,7 +602,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     const pending = autoSend.current;
     if (pending === null || draft.text !== pending || (prefill?.payload.includeEditorContext && !includeEditorContext)) return;
     autoSend.current = null;
-    // Editor menu requests belong to the main conversation: POMP answers them whatever partner tab is active.
+    // Editor menu requests belong to the Default (POMP) tab's conversation (from another tab the page switches there first).
     if (canSend && !busy) submit(MAIN_TARGET);
   });
 
@@ -638,8 +644,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
         // A name alone switches the conversation partner (a tab); with a message it is a one-message target.
         if (!args?.[2]?.trim() && onOpenPartner && target.kind !== 'instance') { onOpenPartner(target); result = { ok: true }; }
         // The tab's own partner is this conversation already: the message goes to it as usual, not to a second run of it.
-        else if (partnerTab && args?.[2]?.trim() && target.kind === partnerTab.kind && target.id.toLowerCase() === partnerTab.id.toLowerCase()) result = onSend(args[2].trim(), draft.attachments.filter(file => !file.excluded), true, null);
-        else { onSelectTarget(target); result = args?.[2]?.trim() ? onSend(args[2].trim(), draft.attachments.filter(file => !file.excluded), true, target) : { ok: true }; }
+        else if (partnerTab && args?.[2]?.trim() && target.kind === partnerTab.kind && target.id.toLowerCase() === partnerTab.id.toLowerCase()) result = onSend(args[2].trim(), draft.attachments, true, null);
+        else { onSelectTarget(target); result = args?.[2]?.trim() ? onSend(args[2].trim(), draft.attachments, true, target) : { ok: true }; }
       }
       else result = onCommand(name, command[2]?.trim() ?? '');
       setFailure(result.ok ? null : result);
@@ -649,7 +655,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
       // A slash command takes the basket's checked files when it hands its text to the model; any other command leaves the basket for the next message.
       const keepBasket = command !== null && !slashTakesReferences(text, commands);
       const destination = override ?? (mainPending ? MAIN_TARGET : undefined);
-      const result = onSend(text, keepBasket ? [] : draft.attachments.filter(file => !file.excluded), !keepBasket, destination, false, undefined, destination?.kind === 'main');
+      const result = onSend(text, keepBasket ? [] : draft.attachments, !keepBasket, destination, false, undefined, destination?.kind === 'main');
       setFailure(result.ok ? null : result);
       if (result.ok) recalled.current = null;
       if (result.ok) deferredMain.current = null;
@@ -729,6 +735,26 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     // React/native composition and the legacy IME keyCode must all be checked before handling popup or send keys.
     if (composing.current || draft.composing || event.nativeEvent.isComposing || event.keyCode === 229) { discardPrediction(); return; }
+    // A word completion takes Tab before a sentence prediction; Esc clears both.
+    if (word && !slash && !mention) {
+      if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        const el = event.currentTarget;
+        if (el.value === draft.text && el.selectionStart === word.at && el.selectionEnd === word.at) {
+          event.preventDefault();
+          const value = draft.text.slice(0, word.at) + word.rest + draft.text.slice(word.at);
+          const position = word.at + word.rest.length;
+          discardPrediction();
+          acceptedWord(word.prefix + word.rest);
+          setCaret({ start: position, end: position });
+          dispatch({ type: 'composerEdit', text: value, caret: position, selectionEnd: position });
+          if (failure) setFailure(null);
+          if (targetError) setTargetError(null);
+          window.requestAnimationFrame(() => el.setSelectionRange(position, position));
+          return;
+        }
+      }
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); dismissWord(); discardPrediction(); return; }
+    }
     if (prediction && !slash && !mention) {
       if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
         const el = event.currentTarget;
@@ -805,11 +831,11 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     window.requestAnimationFrame(() => { el.focus(); el.setSelectionRange(caret, caret); });
   };
 
-  // Files, folders and symbols that go with the next message (excluded ones stay listed but are not sent), and the knowledge selected for the conversation.
+  // Files, folders and symbols that go with the next message, and the knowledge selected for the conversation.
   const knowledge = useKnowledge();
   const selectedKnowledge = usableKnowledge(knowledge.items).filter(item => knowledge.selected.includes(item.id)).length;
-  const basketCount = draft.attachments.filter(file => !file.excluded).length + selectedKnowledge;
-  const attachmentPaths = useMemo(() => draft.attachments.filter(file => !file.excluded).map(file => file.path), [draft.attachments]);
+  const basketCount = draft.attachments.length + selectedKnowledge;
+  const attachmentPaths = useMemo(() => draft.attachments.map(file => file.path), [draft.attachments]);
   const placeholder = !connected ? t('composer.placeholderOffline') : newSessionPending ? t('composer.placeholderNewSession') : requestPending ? t('composer.placeholderPending') : busy ? t('composer.placeholderBusy') : t('composer.placeholder');
 
   // Right-click on the composer background: which controls it shows (checked = shown). Text fields keep their edit menu.
@@ -863,7 +889,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
                 setBasketOpen(!basketOpen);
               }}><Icon name="paperclip" size={12} /><span className="context-count-value">{basketCount}</span></button>
             <div ref={basketPop} className="context-popover" data-testid="context-popover" hidden={!basketOpen} tabIndex={-1}>
-              <ContextBasket visible={basketOpen} files={draft.attachments} text={draft.text} includeEditorContext={includeEditorContext} onIncludeEditorContextChange={onIncludeEditorContextChange} dispatch={dispatch} locale={locale} workspaceKey={workspaceKey} sessionId={sessionId} model={model} connected={connected} disabled={requestPending || newSessionPending || draft.composing} />
+              <ContextBasket visible={basketOpen} files={draft.attachments} text={draft.text} dispatch={dispatch} locale={locale} workspaceKey={workspaceKey} sessionId={sessionId} model={model} connected={connected} disabled={requestPending || newSessionPending || draft.composing} />
             </div>
           </div>
           <LiveEditorControls state={editorFollow} disabled={requestPending || newSessionPending || draft.composing} shortcuts={shortcuts} inputRef={inputRef} t={t} />
@@ -954,7 +980,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
             // Options and the "/" button keep the focus (preventDefault on mousedown), so a blur means "clicked elsewhere".
             if (slash) { setHelpOpen(false); setSlashDismissed(draft.text); }
           }} onKeyDown={onKeyDown} />
-        {prediction && <ComposerGhost inputRef={inputRef} text={draft.text} prediction={prediction} />}
+        {word ? <ComposerGhost inputRef={inputRef} text={draft.text.slice(0, word.at)} prediction={word.rest} testId="composer-word-ghost" />
+          : prediction && <ComposerGhost inputRef={inputRef} text={draft.text} prediction={prediction} />}
         </div>
         {/* Send (Enter) sits next to the text it sends; Stop joins it while a reply runs. */}
         <div className="composer-send">
@@ -1000,7 +1027,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
               aria-expanded={targetOpen}
               onClick={() => setTargetOpen(!targetOpen)}
             >
-              {chosen ? <DestinationAvatar kind={chosen.avatar.kind} id={chosen.avatar.id} size={14} /> : <Icon name="users" size={12} />}
+              {selectedDestination ? <DestinationAvatar kind={selectedDestination.avatar.kind} id={selectedDestination.avatar.id} size={14} /> : <Icon name="users" size={12} />}
               <span className="chip-text">{revealControls(targetLabel)}</span>
               <Icon name="chevronDown" size={11} className="chip-caret" />
             </button>

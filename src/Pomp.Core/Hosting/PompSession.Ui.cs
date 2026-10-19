@@ -70,12 +70,6 @@ namespace Pomp.Hosting
                 case "workspace/countDraftTokens":
                     CountDraftTokensAsync(message.Payload ?? new JObject()).Forget(_logger, "draft token count");
                     break;
-                case "workspace/suggestContext":
-                    SuggestContextAsync(message.Payload ?? new JObject()).Forget(_logger, "context suggestions");
-                    break;
-                case "workspace/contextPresets":
-                    HandleContextPresetsAsync(message.Payload ?? new JObject()).Forget(_logger, "context presets");
-                    break;
                 case WorkspaceReviewController.HistoryCommandMessage:
                     _workspaceReview?.HandleHistoryAsync(message.Payload ?? new JObject(), _disposeCts.Token).Forget(_logger, "workspace history");
                     break;
@@ -114,8 +108,8 @@ namespace Pomp.Hosting
                     PauseChatQueue(PompLanguage.Pick("사용자가 대화를 중지했어요.", "Conversation stopped by the user."));
                     Cancel(sending);
                     break;
-                case UiMessageTypes.ConversationPartner:
-                    _commands.Enqueue(() => HandlePartnerAsync(message.Payload ?? new JObject()));
+                case UiMessageTypes.ConversationTab:
+                    _commands.Enqueue(() => HandleTabAsync(message.Payload ?? new JObject()));
                     break;
                 case UiMessageTypes.ChatQueue:
                     _commands.Enqueue(() => HandleQueueAsync(message.Payload ?? new JObject()));
@@ -223,7 +217,7 @@ namespace Pomp.Hosting
                 case UiMessageTypes.SessionNew:
                     _composerAuto?.Stop(PompLanguage.Pick("새 대화를 요청했어요.", "New conversation requested."));
                     var requestId = message.PayloadAs<SessionNewPayload>()?.RequestId;
-                    _commands.Enqueue(() => HandleNewSessionAsync(requestId));
+                    _commands.Enqueue(() => HandleNewInTabAsync(requestId));
                     break;
                 case UiMessageTypes.BridgeRestart:
                     _composerAuto?.Stop(PompLanguage.Pick("다시 시작을 요청했어요.", "Restart requested."));
@@ -260,21 +254,6 @@ namespace Pomp.Hosting
                     _logger.Debug("Ignoring the UI message '" + message.Type + "'.");
                     break;
             }
-        }
-
-        private readonly SemaphoreSlim _contextPresetGate = new SemaphoreSlim(1, 1);
-        private async Task HandleContextPresetsAsync(JObject args)
-        {
-            await _contextPresetGate.WaitAsync(_disposeCts.Token).ConfigureAwait(false);
-            try
-            {
-                var root = await _environment.GetWorkspaceRootAsync(_disposeCts.Token).ConfigureAwait(false);
-                var answer = await Task.Run(() => new ContextPresetStore(_environment.DataDirectory, root).Handle(args), _disposeCts.Token).ConfigureAwait(false);
-                answer["requestId"] = args["requestId"];
-                _ui.Post("workspace/contextPresetsState", answer, UiDelivery.State);
-            }
-            catch (Exception ex) { _ui.Post("workspace/contextPresetsState", new JObject { ["requestId"] = args["requestId"], ["error"] = ex.Message }, UiDelivery.State); }
-            finally { _contextPresetGate.Release(); }
         }
 
         /// <summary>workspace/findFiles → workspace/files (the @-mention list).</summary>
@@ -333,7 +312,7 @@ namespace Pomp.Hosting
                 else
                 {
                     var root = await TryGetWorkspaceRootAsync().ConfigureAwait(false);
-                    var files = await picker.PickFilesAsync(root, _disposeCts.Token).ConfigureAwait(false) ?? Array.Empty<string>();
+                    var files = await picker.PickFilesAsync(root, PompLanguage.Pick("POMP 메시지에 첨부할 파일", "Attach files to the POMP message"), null, true, _disposeCts.Token).ConfigureAwait(false) ?? Array.Empty<string>();
                     answer.Files = files
                         .Where(path => !string.IsNullOrWhiteSpace(path))
                         .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -412,7 +391,7 @@ namespace Pomp.Hosting
             catch (Exception ex) { partnerError = ex; }
 
             // Agents this prompt starts must come after the first job snapshot (taken once per connection and conversation, before
-            // the turn is registered): only then are they reported as new and remembered for a partner tab or team continuation.
+            // the turn is registered): only then are they reported as new and remembered for a team continuation.
             await _backgroundAgents.EnsureBaselineAsync(TimeSpan.FromSeconds(3), requestToken).ConfigureAwait(false);
             if (requestToken.IsCancellationRequested) return false;
 
@@ -493,7 +472,6 @@ namespace Pomp.Hosting
                 Agent = string.IsNullOrWhiteSpace(send.Agent) ? null : send.Agent!.Trim(),
                 AgentInstance = string.IsNullOrWhiteSpace(send.AgentInstance) ? null : send.AgentInstance!.Trim(),
                 Main = string.IsNullOrWhiteSpace(send.Team) && string.IsNullOrWhiteSpace(send.Agent) && string.IsNullOrWhiteSpace(send.AgentInstance) ? true : null,
-                From = send.From,
             });
 
             ChatTurnEndPayload? endedEarly;
@@ -532,13 +510,11 @@ namespace Pomp.Hosting
                 // engineText: the host's own commands (a goal run) say exactly what the engine gets; the bubble keeps what the user typed.
                 var message = engineText ?? await ComposeMessageAsync(editorContext?.Text, text, attachments, sending.Token).ConfigureAwait(false);
                 sending.Token.ThrowIfCancellationRequested();
-                // The tab a message came from when it went elsewhere is recorded in the prompt itself: the engine's transcript is all a
-                // restored chat has (PromptDisplay.Origin). A slash command for POMP stays first, because omp only parses it there.
-                var targeted = !string.IsNullOrWhiteSpace(send.Team) || !string.IsNullOrWhiteSpace(send.Agent) || !string.IsNullOrWhiteSpace(send.AgentInstance);
-                if (send.From != null && (targeted || !message.TrimStart().StartsWith("/", StringComparison.Ordinal))) message = PromptDisplay.OriginMarker(send.From) + "\n\n" + message;
                 // A message for a team or one agent goes through the extension's /pomp-team, /pomp-agent or /pomp-dm (docs/architecture.md §8.2).
                 message = await ApplyTargetAsync(send, message, sending.Token).ConfigureAwait(false);
                 sending.Token.ThrowIfCancellationRequested();
+                // An agent conversation answers as the agent only with the engine extension that gives it the role (extensions/partner.ts).
+                if (partner?.Kind == "agent") await RequireEngineCommandsAsync(connection, sending.Token, "pomp-partner").ConfigureAwait(false);
 
                 // omp reads each command as one line and asks clients to stay within its physical frame limit (1 MiB).
                 var probe = OmpCommands.Prompt(message, null);
@@ -559,7 +535,7 @@ namespace Pomp.Hosting
                 }
 
                 lock (_stateLock) if (expectedSession != null && _info.SessionId != expectedSession) throw new InvalidOperationException("POMP Workflow conversation changed before dispatch.");
-                BeginRun(turn, send, partner);
+                BeginRun(turn, send);
                 var response = await SendPromptCommandAsync(connection, promptId, message, sending.Token).ConfigureAwait(false);
                 sending.Token.ThrowIfCancellationRequested();
                 if (!response.Success)

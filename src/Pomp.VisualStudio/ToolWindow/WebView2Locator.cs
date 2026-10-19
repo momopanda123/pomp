@@ -22,8 +22,8 @@ namespace Pomp.VisualStudio.ToolWindow
     /// Finds the WebView2 runtime and the native WebView2Loader.dll.
     /// <para>
     /// VS 2022/2026 redirect Microsoft.Web.WebView2.* to their own newer copy (loaded from PrivateAssemblies, with
-    /// its loader next to it): nothing to do. VS 2019 loads the copy shipped in this VSIX, whose loader lives in
-    /// <c>runtimes\win-x86\native</c> next to it; Core 1.0.1245.22 probes exactly there on .NET Framework, and
+    /// its loader next to it): nothing to do. VS 2017/2019 load the copy shipped in this VSIX, whose loader lives in
+    /// <c>runtimes\win-x86\native</c> next to it; Core 1.0.1901.177 probes exactly there on .NET Framework, and
     /// the loader folder is also set explicitly (reflection: the API name differs between WebView2 versions) as a belt-and-braces measure.
     /// </para>
     /// </summary>

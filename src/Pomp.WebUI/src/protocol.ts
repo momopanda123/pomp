@@ -50,6 +50,8 @@ export interface HostHelloPayload {
   locale?: string;
   includeEditorContextByDefault: boolean;
   composerPredictions: boolean;
+  /** Word completion in the chat input (Tools > Options > Pomp > Chat); absent on an older host (= on). */
+  wordCompletion?: boolean;
   /** omp's approval mode in effect; absent on an older host (= alwaysAsk). Changed with `permission/mode`. */
   approvalMode?: ApprovalMode;
   /** The page's shortcuts (Tools > Options > Pomp > Shortcuts); absent keys keep {@link DEFAULT_SHORTCUTS}. */
@@ -340,8 +342,8 @@ export interface WorkspaceTrustState {
 }
 export const WORKSPACE_TRUST_REQUIRED = 'workspaceTrustRequired';
 
-/** `personal` is never shown to agents on their own; the user may still select it or give it to a role or team. */
-export type KnowledgeScope = 'project' | 'personal';
+/** `project`: the workspace's `.pomp/knowledge.json` (committed); `user`: `~/.pomp/knowledge.json` (every project on this PC). */
+export type KnowledgeScope = 'project' | 'user';
 /** `original`: the pieces as written; `optimized`: the compact text the editor model made from them. */
 export type KnowledgeUse = 'original' | 'optimized';
 /** Where the lines of an anchored piece are now, as the host found them in the file on disk. */
@@ -360,6 +362,8 @@ export interface KnowledgeItem {
   roles: string[]; teams: string[];
   /** Every piece is a candidate: an agent proposed this name and the user has not accepted anything yet. */
   candidate: boolean;
+  /** Used in every conversation, agent and team without being selected in the basket. */
+  default: boolean;
   /** `stale`: the pieces changed after the last conversion, so the original is used until it is converted again. */
   optimized?: { text: string; createdAt: string; stale: boolean };
   pieces: KnowledgePiece[];
@@ -383,6 +387,7 @@ export type KnowledgeCommand =
   | { action: 'create'; knowledge: KnowledgeFields; piece?: KnowledgePieceInput }
   | { action: 'update'; id: string; revision: number; knowledge: KnowledgeFields & { use: KnowledgeUse } }
   | { action: 'delete'; id: string; revision: number }
+  | { action: 'setDefault'; id: string; revision: number; on: boolean }
   | { action: 'addPiece'; id: string; revision: number; piece: KnowledgePieceInput }
   | { action: 'updatePiece'; id: string; revision: number; pieceId: string; text: string }
   | { action: 'deletePiece'; id: string; revision: number; pieceId: string }
@@ -408,7 +413,9 @@ export interface AgentPlanTask { content: string; status: string; blocker?: stri
 export interface AgentPlanPhase { name: string; tasks: AgentPlanTask[] }
 /** One page of the whole plan; phase/task are indexes into the whole plan. */
 export interface AgentPlanPage {
-  requestId: string; ok: boolean; error?: string; revision?: string; editable?: boolean; page: number; size: number; total: number;
+  requestId: string; ok: boolean; error?: string; revision?: string; editable?: boolean;
+  /** While the agent works: the tasks not in progress may be edited (added, changed, deleted) and phases renamed. */
+  editableWhileWorking?: boolean; page: number; size: number; total: number;
   phases: { index: number; name: string; taskCount: number }[];
   rows: { phase: number; task: number; content: string; status: string; blocker?: string }[];
 }
@@ -513,16 +520,12 @@ export interface TurnStartedPayload {
   team?: string | null;
   agent?: string | null;
   agentInstance?: string | null;
-  /** POMP itself answered: a retry keeps that destination after a partner change. */
+  /** The conversation answered itself (no team, agent or instance): a retry keeps that destination. */
   main?: boolean | null;
-  /** The agent/team tab a message to another target was sent from (also restored from the engine's transcript): keeps it in that tab. */
-  from?: { kind: string; id?: string | null } | null;
 }
 
 export interface WorkspaceFile {
   kind?: string; symbol?: string; line?: number;
-  /** Omitted from automatic attachment paths; does not prohibit explicit model reads. */
-  excluded?: boolean;
   /** Workspace-relative display path, or the full path for a file outside the workspace. */
   path: string;
   fullPath: string;
@@ -1182,7 +1185,6 @@ export interface HostToUi extends ConversationHostToUi, ToolsHostToUi {
   'workspace/problemsState': WorkspaceProblemsState;
   'workspace/problemsReply': { requestId: string; ok: boolean; error?: string };
   'workspace/codeReviewState': CodeReviewState;
-  'workspace/contextPresetsState': { requestId?: string; root?: string; error?: string; presets?: { id: string; name: string; includeEditorContext: boolean; files: WorkspaceFile[] }[] };
   'host/hello': HostHelloPayload;
   'host/editorFollow': EditorFollowState;
   'bridge/state': BridgeStatePayload;
@@ -1221,7 +1223,6 @@ export interface HostToUi extends ConversationHostToUi, ToolsHostToUi {
   'knowledge/draft': KnowledgeDraft;
   'agentHooks/state': AgentHooksState;
   'workspace/tokenCount': { requestId: string; root?: string; modelId?: string; provider?: string; tokens?: number; estimated?: boolean; method?: 'catalog-native' | 'fallback-native' | 'byte-upperbound' | 'byte-estimate' | 'empty'; encoding?: string | null; error?: string };
-  'workspace/contextSuggestions': { requestId: string; root?: string; files: WorkspaceFile[]; mode?: string; notices?: string[]; notice?: string; error?: string };
   'agents/state': AgentsStatePayload;
   'agents/reply': AgentsReplyPayload;
   'advisors/state': AdvisorsStatePayload;
@@ -1252,7 +1253,6 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'feedback/image': { requestId: string; root: string; sessionId: string; proposalId: string; caseId: string };
   'feedback/command': { action: 'refresh' | 'open' | 'draft' | 'submit' | 'delete'; requestId: string; root: string; sessionId?: string; proposalId?: string; revision?: number; draftRevision?: number; selections?: CaseFeedbackSelection[] };
   'workspace/snippet': { requestId: string; root: string; sessionId: string; code: string };
-  'workspace/contextPresets': { requestId: string; action: 'refresh' | 'save' | 'delete'; root?: string; name?: string; id?: string; includeEditorContext?: boolean; files?: WorkspaceFile[] };
   /** deleteRun: remove one previous run (runId) from the history; never the run being shown as latest. */
   'workspace/problems': { requestId: string; action: 'refresh' | 'open' | 'dismiss'; id?: string };
   'workspace/codeReview': { action: 'refresh' | 'scan' | 'cancel' | 'auto' | 'open' | 'acknowledge' | 'openRun' | 'deleteRun'; reviewId?: string; findingId?: string; runId?: string; enabled?: boolean; value?: boolean };
@@ -1286,10 +1286,8 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
     team?: string;
     agent?: string;
     agentInstance?: string;
-    /** POMP itself answers, whatever the conversation partner is; never combined with the targets above. */
+    /** The conversation answers itself, without a team conversation's team routing; never combined with the targets above. */
     main?: true;
-    /** The agent/team tab it is sent from, only when it goes to a different target: that tab keeps it after a restore. View only. */
-    from?: { kind: 'agent' | 'team'; id: string };
   };
   'chat/stop': Empty;
   /** start: begin a new run from a saved workflow's task/steps (no active run; unpaused; sends no model request — the page sends the chat message). */
@@ -1299,8 +1297,8 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'workspace/agentPlanEdit': AgentPlanEdit;
   'knowledge/command': { requestId: string; root: string } & KnowledgeCommand;
   'agentHooks/command': { requestId: string; root: string; sessionId: string; action: 'refresh' | 'save' | 'delete' | 'autoForward'; id?: string; revision?: number; rule?: Omit<AgentHookRule, 'id' | 'revision'>; enabled?: boolean };
-  'workspace/countDraftTokens': { requestId: string; root: string; sessionId: string; modelId: string; provider: string; text: string };
-  'workspace/suggestContext': { requestId: string; root: string; query: string; excludePaths: string[] };
+  /** The basket's token count: the draft, the attachment list as a send writes it and the conversation's knowledge; answered by `workspace/tokenCount`. */
+  'workspace/countDraftTokens': { requestId: string; root: string; sessionId: string; modelId: string; provider: string; text: string; attachments?: { path: string }[] };
   'workspace/findFiles': { requestId: string; query: string; limit?: number };
   /** What the next message adds beyond its text (the editor context when on, the attachment list); answered by `workspace/basketTokens`. */
   'workspace/countBasketTokens': { requestId: string; root: string; sessionId?: string; includeEditorContext: boolean; attachments?: { path: string }[] };
@@ -1310,6 +1308,12 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'ui/status': { text: string; level: 'error' | 'warning' | 'info' };
   /** Files or an image were pasted into the chat input: the host reads the clipboard and puts them into the context basket (composer/prefill). */
   'ui/pasteFiles': Record<string, never>;
+  /**
+   * Files dropped on the page: sent with `postMessageWithAdditionalObjects`, the files as additional objects (only VS reads their paths).
+   * `paths`: the files of a `text/uri-list` drag (Solution Explorer in VS 2017). `projectItems`: a Visual Studio drag the page
+   * cannot read (Solution Explorer in later versions); the host adds Solution Explorer's selection.
+   */
+  'ui/dropFiles': { paths?: string[]; projectItems?: true };
   'workspace/pickFiles': { requestId: string };
   'permission/respond': { requestId: string; decision: PermissionDecision; note?: string };
   /** The composer's permission-mode chip; answered by `permission/modeResult`, and a changed mode comes back in a new `host/hello` (omp restarts). */
@@ -1336,6 +1340,8 @@ export type UiMessageType = keyof UiToHost;
 
 interface WebViewHost {
   postMessage(message: unknown): void;
+  /** WebView2 Runtime 113+: hands DOM objects (a dropped `FileList`) to the host along with the message. */
+  postMessageWithAdditionalObjects?(message: unknown, additionalObjects: ArrayLike<unknown>): void;
   addEventListener(type: 'message', listener: (event: { data: unknown }) => void): void;
   removeEventListener(type: 'message', listener: (event: { data: unknown }) => void): void;
 }
@@ -1355,8 +1361,8 @@ const HOST_TYPES: Record<HostMessageType, true> = {
   'rules/state': true, 'rules/reply': true, 'rules/active': true,
   'workflows/state': true, 'workflows/reply': true,
   'hooks/state': true, 'hooks/reply': true,
-  'conversation/partnerState': true,
-  'conversation/partnerReply': true,
+  'conversation/tabsState': true,
+  'conversation/tabReply': true,
   'chat/queued': true,
   'chat/queueState': true,
   'chat/queueReply': true,
@@ -1382,7 +1388,6 @@ const HOST_TYPES: Record<HostMessageType, true> = {
   'workspace/problemsState': true,
   'workspace/problemsReply': true,
   'workspace/codeReviewState': true,
-  'workspace/contextPresetsState': true,
   'host/hello': true,
   'host/editorFollow': true,
   'bridge/state': true,
@@ -1419,7 +1424,6 @@ const HOST_TYPES: Record<HostMessageType, true> = {
   'chat/replayBegin': true,
   'chat/replayEnd': true,
   'workspace/files': true,
-  'workspace/contextSuggestions': true,
   'workspace/composerState': true,
   'workspace/agentPlanResult': true,
   'workspace/agentPlanPageResult': true,

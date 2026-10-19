@@ -46,8 +46,10 @@
     <PackageReference Include="NuGet.VisualStudio" Version="4.9.6" PrivateAssets="all" ExcludeAssets="runtime" />
     <!-- The build tooling (pkgdef, VSCT, VSIX container) is independent of the targeted IDE. -->
     <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="16.11.71" />
-    <!-- VS 2017 has no WebView2 of its own: this copy (and its x86 loader) is what runs. -->
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.1245.22" />
+    <!-- VS 2017 has no WebView2 of its own: this copy (and its x86 loader) is what runs.
+         1.0.1901.177 is the first whose CoreWebView2WebMessageReceivedEventArgs.AdditionalObjects returns CoreWebView2File objects
+         (files dropped on the page); 1.0.1774.30 to 1.0.1823.32 throw a RuntimeBinderException there. -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.1901.177" />
     <!-- Same version Pomp.Contracts uses; packaged explicitly (see PompShipNewtonsoftJson in the common targets). -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>

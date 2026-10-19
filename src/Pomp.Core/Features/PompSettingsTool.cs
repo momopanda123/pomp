@@ -99,6 +99,7 @@ namespace Pomp.Features
                     ["includeEditorContextByDefault"] = settings.IncludeEditorContextByDefault,
                     ["editorContext"] = EditorContext((settings as IEditorContextSettings)?.EditorContextLimits ?? EditorContextLimits.Default),
                     ["composerPredictions"] = settings.ComposerPredictions,
+                    ["wordCompletion"] = settings.WordCompletion,
                     ["loadPompExtensions"] = settings.LoadOmpExtensions,
                     ["loadDiscoveredExtensions"] = settings.LoadDiscoveredOmpExtensions,
                     ["blockNetworkTools"] = settings.BlockOmpNetworkTools,

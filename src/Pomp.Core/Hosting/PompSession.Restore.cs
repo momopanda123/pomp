@@ -36,7 +36,7 @@ namespace Pomp.Hosting
 
             string root;
             lock (_stateLock) root = _workingDirectory;
-            var shown = new List<(string Role, string Text, ChatEditorContext? EditorContext, ConversationPartnerPayload? From, ChatAdvisorNotesPayload? Notes)>();
+            var shown = new List<(string Role, string Text, ChatEditorContext? EditorContext, ChatAdvisorNotesPayload? Notes)>();
             foreach (var message in all.OfType<JObject>())
             {
                 var role = message.GetString("role");
@@ -44,7 +44,7 @@ namespace Pomp.Hosting
                 {
                     // The notes advisors gave, where they came in the conversation.
                     var notes = AdvisorNotesPayload(message);
-                    if (notes.Notes.Count > 0) shown.Add(("advisor", string.Empty, null, null, notes));
+                    if (notes.Notes.Count > 0) shown.Add(("advisor", string.Empty, null, notes));
                     continue;
                 }
 
@@ -55,8 +55,6 @@ namespace Pomp.Hosting
 
                 var text = MessageText(message["content"]);
                 var editorContext = role == "user" ? PromptDisplay.EditorContext(text, root) : null;
-                // The agent or team tab a message to another target was sent from, so the restored chat keeps it there.
-                var from = role == "user" ? PromptDisplay.Origin(text) : null;
                 if (role == "user")
                 {
                     text = PromptDisplay.UserText(text, keepRoutingBrief: true);
@@ -64,7 +62,7 @@ namespace Pomp.Hosting
 
                 if (text.Length > 0)
                 {
-                    shown.Add((role!, text.Length > RestoredTextLimit ? text.Substring(0, RestoredTextLimit) : text, editorContext, from, null));
+                    shown.Add((role!, text.Length > RestoredTextLimit ? text.Substring(0, RestoredTextLimit) : text, editorContext, null));
                 }
             }
 
@@ -81,7 +79,7 @@ namespace Pomp.Hosting
 
             string? openPrompt = null;
             var index = 0;
-            foreach (var (role, text, editorContext, from, notes) in shown.Skip(skipped))
+            foreach (var (role, text, editorContext, notes) in shown.Skip(skipped))
             {
                 index++;
                 if (notes != null)
@@ -99,7 +97,7 @@ namespace Pomp.Hosting
                     }
 
                     openPrompt = id;
-                    _ui.Post(UiMessageTypes.ChatTurnStarted, new ChatTurnStartedPayload { PromptId = id, Text = text, EditorContext = editorContext, From = from });
+                    _ui.Post(UiMessageTypes.ChatTurnStarted, new ChatTurnStartedPayload { PromptId = id, Text = text, EditorContext = editorContext });
                     continue;
                 }
 

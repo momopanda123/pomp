@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from '@oh-my-pi/pi-coding-agent';
-import { isPompHost, pick } from '../lib/vs-state.ts';
+import { partnerRole } from '../lib/conversation-partner.ts';
+import { isPompHost, pick, readVsState } from '../lib/vs-state.ts';
 
 /** Local RPC commands only: selecting tools never starts inference or changes subagent definitions. */
 export default function tools(pi: ExtensionAPI): void {
@@ -16,14 +17,21 @@ export default function tools(pi: ExtensionAPI): void {
   defaults = defaults === undefined ? active : names([...defaults,...active.filter(n => all.has(n) && !registered.has(n))]);
   registered = all;
  };
+ // This conversation's default tools: an agent conversation (docs/architecture.md §8.8) has only the tools its role lists, like that agent
+ // run as a subagent; any other conversation has the startup defaults.
+ const conversationDefaults = (sessionId: unknown): string[] => {
+  const role = partnerRole(readVsState()?.solutionRoot ?? process.env.POMP_SOLUTION_ROOT, sessionId);
+  const known = new Set(pi.getAllTools().map(t => t.name));
+  return names((role?.tools ?? defaults ?? []).filter(n => known.has(n)));
+ };
  const snapshot = (ctx: any, id: string, error?: string): void => {
   const all = supported() ? pi.getAllTools().filter(t => names([t.name]).length === 1).sort((a,b) => a.name.localeCompare(b.name)).map(t => ({ name: t.name, description: String(t.description ?? '').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,200), source: t.sourceInfo?.source })) : [];
-  ctx.ui.notify('pomp-tools-result:' + Buffer.from(JSON.stringify({ id, sessionId: ctx.sessionManager?.getSessionId(), all, active: supported() ? names(pi.getActiveTools().filter(n => !forced.has(n))) : [], defaults: (defaults ?? []), available: supported(), ...(error ? { error } : {}) })).toString('base64'), 'info');
+  ctx.ui.notify('pomp-tools-result:' + Buffer.from(JSON.stringify({ id, sessionId: ctx.sessionManager?.getSessionId(), all, active: supported() ? names(pi.getActiveTools().filter(n => !forced.has(n))) : [], defaults: supported() ? conversationDefaults(ctx.sessionManager?.getSessionId()) : [], available: supported(), ...(error ? { error } : {}) })).toString('base64'), 'info');
  };
  const start: any = async (_event: unknown,ctx: any) => {
   if (ctx.agent?.kind === 'sub' || !supported()) return;
-  const initial = defaults === undefined; capture(); selected = new Set(defaults); forced.clear();
-  if (!initial) await pi.setActiveTools(defaults!.filter(n => pi.getAllTools().some(t => t.name === n)));
+  capture(); const active = conversationDefaults(ctx.sessionManager?.getSessionId()); selected = new Set(active); forced.clear();
+  if (active.length !== pi.getActiveTools().length || names(pi.getActiveTools()).some((n, i) => n !== active[i])) await pi.setActiveTools(active);
   snapshot(ctx, '');
  };
  pi.on('tool_call', event => {
@@ -50,7 +58,7 @@ export default function tools(pi: ExtensionAPI): void {
      if (!ctx.isIdle()) throw new Error('Wait for the current reply to finish before selecting tools.');
      const known = new Set(pi.getAllTools().map(t => t.name));
      let active: string[];
-     if (input === 'reset') active = defaults!.filter(n => known.has(n));
+     if (input === 'reset') active = conversationDefaults(ctx.sessionManager?.getSessionId());
      else if (input.startsWith('set ')) {
       const value: unknown = JSON.parse(input.slice(4));
       if (!Array.isArray(value) || value.some(n => typeof n !== 'string' || !known.has(n))) throw new Error('Choose registered tool names only.');

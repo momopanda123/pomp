@@ -9,7 +9,6 @@ import { hasHost } from './protocol';
 import './styles/base.css';
 import './styles/chat.css';
 import './styles/chrome.css';
-import './styles/context-kinds.css';
 import './styles/picker.css';
 import './styles/setup.css';
 import './styles/work.css';

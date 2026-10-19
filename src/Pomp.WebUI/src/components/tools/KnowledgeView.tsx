@@ -11,7 +11,7 @@ import { Icon } from '../Icon';
 import { KnowledgeDot } from '../KnowledgeChecklist';
 import { revealControls } from '../RevealControls';
 import { SectionRefresh, ViewSection } from '../ViewSection';
-import { Actions, Badge, Cell, DataTable, Field, FormActions, IconButton, Pager, Row, SearchBox, Toolbar, matches, usePaged } from '../ui';
+import { Actions, Badge, Cell, DataTable, Field, FormActions, IconButton, Pager, Row, SearchBox, Switch, Toolbar, matches, usePaged } from '../ui';
 import { InPageDialog } from './InPageDialog';
 import './knowledge.css';
 
@@ -22,7 +22,7 @@ const PIECE_LIMIT = 8000;
 const INSERT_LIMIT = 24000;
 // eslint-disable-next-line no-control-regex
 const control = /[\x00-\x1f\x7f]/;
-const COLUMNS = 'minmax(0, 1fr) 36px 84px';
+const COLUMNS = 'minmax(0, 1fr) 52px 36px 84px';
 
 interface Anchor { path: string; startLine: number; endLine: number }
 /**
@@ -223,7 +223,7 @@ export function KnowledgeView({ locale, workspaceKey, active, disabled, draft, o
             : <>
               <ColorField t={t} ko={ko} value={color} onChange={value => setEditor({ ...editor, color: value })} />
               <Field label={t('knowledge.scope')}>{id => <select id={id} data-testid="knowledge-scope" value={editor.scope} onChange={event => setEditor({ ...editor, scope: event.target.value as KnowledgeScope })}>
-                <option value="project">{t('knowledge.scope.project')}</option><option value="personal">{t('knowledge.scope.personal')}</option></select>}</Field>
+                <option value="project">{t('knowledge.scopeOption.project')}</option><option value="user">{t('knowledge.scopeOption.user')}</option></select>}</Field>
             </>}
           {editor.id
             ? <Field label={t('knowledge.use')}>{id => <select id={id} data-testid="knowledge-use" value={editor.use} onChange={event => setEditor({ ...editor, use: event.target.value as KnowledgeUse })}>
@@ -238,7 +238,7 @@ export function KnowledgeView({ locale, workspaceKey, active, disabled, draft, o
           <button type="submit" className="btn primary" data-testid="knowledge-save" disabled={submitting || disabled}>{t('tools.save')}</button></FormActions></form>
       </InPageDialog>}
       <DataTable columns={COLUMNS} label={t('tools.knowledge')} testId="knowledge-list" empty={!listed.length}
-        head={[ko ? '이름' : 'Name', ko ? '조각' : 'Pieces', '']}>
+        head={[ko ? '이름' : 'Name', <span key="default" className="knowledge-center">{t('knowledge.default')}</span>, <span key="pieces" className="knowledge-center">{ko ? '조각' : 'Pieces'}</span>, '']}>
         {paged.slice.map(item => <KnowledgeRow key={item.id} item={item} t={t} ko={ko} open={expanded.has(item.id)} onToggle={() => toggle(item.id)}
           locked={locked} busy={knowledge.optimizing === item.id || starting.has(item.id)} roleTitle={roleTitle} teamTitle={teamTitle} canInsert={!!onInsertText}
           onInsert={() => onInsertText?.(usedContent(item))}
@@ -246,6 +246,7 @@ export function KnowledgeView({ locale, workspaceKey, active, disabled, draft, o
           onEditPiece={piece => { closeForms(); setEditor(undefined); setPieceEditor({ id: item.id, revision: item.revision, pieceId: piece.id, text: piece.text, anchor: piece.anchor }); }}
           onDeletePiece={piece => { void act({ action: 'deletePiece', id: item.id, revision: item.revision, pieceId: piece.id }); }}
           onOptimize={() => { void optimize(item); }}
+          onDefault={on => { void act({ action: 'setDefault', id: item.id, revision: item.revision, on }); }}
           onEdit={() => { closeForms(); setEditor({ id: item.id, revision: item.revision, name: item.name, color: item.color, scope: item.scope, use: item.use, text: '' }); }}
           onDelete={() => { closeForms(); setEditor(undefined); setDeleting(item); }}
           pieceForm={pieceForm(item)}
@@ -297,16 +298,16 @@ interface RowProps {
   item: KnowledgeItem; t: ToolsTranslate; ko: boolean; open: boolean; locked: boolean; busy: boolean; canInsert: boolean;
   roleTitle: (name: string) => string; teamTitle: (id: string) => string;
   onToggle: () => void; onInsert: () => void; onAddPiece: () => void; onEditPiece: (piece: KnowledgePiece) => void; onDeletePiece: (piece: KnowledgePiece) => void;
-  onOptimize: () => void; onEdit: () => void; onDelete: () => void; pieceForm: ReactNode; confirm: ReactNode;
+  onOptimize: () => void; onDefault: (on: boolean) => void; onEdit: () => void; onDelete: () => void; pieceForm: ReactNode; confirm: ReactNode;
 }
 
 /** One knowledge: its row (name, pieces, scope, actions) and, opened, its tools, optimized text and saved pieces. */
-function KnowledgeRow({ item, t, ko, open, locked, busy, canInsert, roleTitle, teamTitle, onToggle, onInsert, onAddPiece, onEditPiece, onDeletePiece, onOptimize, onEdit, onDelete, pieceForm, confirm }: RowProps) {
+function KnowledgeRow({ item, t, ko, open, locked, busy, canInsert, roleTitle, teamTitle, onToggle, onInsert, onAddPiece, onEditPiece, onDeletePiece, onOptimize, onDefault, onEdit, onDelete, pieceForm, confirm }: RowProps) {
   const bodyId = useId();
   const saved = savedPieces(item); const use = knowledgeUse(item); const content = usedContent(item);
   return <div role="rowgroup" className="knowledge-group" data-testid={`knowledge-row-${item.id}`}>
     <Row className="knowledge-row">
-      <Cell>
+      <Cell className="knowledge-line">
         <button type="button" className="knowledge-toggle" data-testid={`knowledge-toggle-${item.id}`} aria-expanded={open} aria-controls={bodyId} title={t(open ? 'section.collapse' : 'section.expand')} onClick={onToggle}>
           <Icon name={open ? 'chevronDown' : 'chevron'} size={12} /><span className="knowledge-tag" style={{ '--knowledge-color': item.color } as CSSProperties}><KnowledgeDot color={item.color} /><span>{revealControls(item.name)}</span></span>
         </button>
@@ -317,7 +318,8 @@ function KnowledgeRow({ item, t, ko, open, locked, busy, canInsert, roleTitle, t
           {item.teams.map(id => <Badge key={`team:${id}`} icon="users">{teamTitle(id)}</Badge>)}
         </span>
       </Cell>
-      <Cell className="knowledge-count"><span data-testid={`knowledge-count-${item.id}`}>{saved.length}</span></Cell>
+      <Cell className="knowledge-center" title={t('knowledge.defaultHint')}><Switch checked={item.default} label={t('knowledge.defaultHint')} showLabel={false} disabled={locked} testId={`knowledge-default-${item.id}`} onChange={onDefault} /></Cell>
+      <Cell className="knowledge-count knowledge-center"><span data-testid={`knowledge-count-${item.id}`}>{saved.length}</span></Cell>
       <Actions>
         <IconButton icon="send" label={t('knowledge.insert')} testId={`knowledge-insert-${item.id}`} disabled={!canInsert || !content.trim() || content.length > INSERT_LIMIT} onClick={onInsert} />
         <IconButton icon="edit" label={t('knowledge.edit')} testId={`knowledge-edit-${item.id}`} disabled={locked} onClick={onEdit} />

@@ -31,9 +31,9 @@ export function IconButton({ icon, label, onClick, disabled = false, testId, ton
 
 /** Below this width a table's rows wrap their cells instead of squeezing the text columns to a letter per line. */
 const NARROW_TABLE = 240;
-/** A grid table: `columns` is a CSS grid template shared by the header and every row. */
+/** A grid table: `columns` is a CSS grid template shared by the header and every row; without `head` there is no header row. */
 export function DataTable({ columns, head, children, empty = false, emptyRows = 2, label, testId, className = '' }: {
-  columns: string; head: ReactNode[]; children?: ReactNode; empty?: boolean; emptyRows?: number; label?: string; testId?: string; className?: string;
+  columns: string; head?: ReactNode[]; children?: ReactNode; empty?: boolean; emptyRows?: number; label?: string; testId?: string; className?: string;
 }) {
   const table = useRef<HTMLDivElement>(null); const [narrow, setNarrow] = useState(false);
   useLayoutEffect(() => {
@@ -42,7 +42,7 @@ export function DataTable({ columns, head, children, empty = false, emptyRows = 
     apply(); const observer = new ResizeObserver(apply); observer.observe(element); return () => observer.disconnect();
   }, []);
   return <div ref={table} className={`ui-table${narrow ? ' ui-table-narrow' : ''} ${className}`} role="table" aria-label={label} data-testid={testId} style={{ '--ui-cols': columns } as CSSProperties}>
-    <div className="ui-tr ui-th" role="row">{head.map((cell, index) => <span key={index} role="columnheader" className="ui-cell">{cell}</span>)}</div>
+    {head && <div className="ui-tr ui-th" role="row">{head.map((cell, index) => <span key={index} role="columnheader" className="ui-cell">{cell}</span>)}</div>}
     {children}
     {empty && <div className="ui-empty-rows" aria-hidden="true" style={{ '--ui-empty-rows': emptyRows } as CSSProperties} />}
   </div>;

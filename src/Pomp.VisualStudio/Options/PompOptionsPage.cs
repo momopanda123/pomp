@@ -157,6 +157,13 @@ namespace Pomp.VisualStudio.Options
         public bool InlineCompletionsEnabled => Applied.EnableInlineCompletions;
 
         [PompCategory("편집기", "Editor")]
+        [PompDisplayName("자동완성 제한 시간(초)", "Inline completion time limit (seconds)")]
+        [Description("")]
+        public int InlineCompletionTimeoutSeconds { get; set; } = InlineCompletionLimits.DefaultSeconds;
+
+        int IInlineModelSettings.InlineCompletionTimeoutSeconds => Applied.InlineCompletionTimeoutSeconds;
+
+        [PompCategory("편집기", "Editor")]
         [PompDisplayName("Live 수정 따라가기", "Follow Live edits")]
         [Description("")]
         public bool LiveFollowEnabled { get; set; } = false;
@@ -378,11 +385,6 @@ namespace Pomp.VisualStudio.Options
         // ---- Knowledge (Tools > Knowledge in the chat window) ----------------------------------------
 
         [PompCategory("지식", "Knowledge")]
-        [PompDisplayName("에이전트가 지식 읽기", "Agents read knowledge")]
-        [Description("")]
-        public bool KnowledgeAgentRead { get; set; } = false;
-
-        [PompCategory("지식", "Knowledge")]
         [PompDisplayName("지식 자동 변환", "Optimize knowledge automatically")]
         [Description("")]
         public bool KnowledgeAutoOptimize { get; set; } = false;
@@ -392,7 +394,6 @@ namespace Pomp.VisualStudio.Options
         [Description("")]
         public bool KnowledgeLineColors { get; set; } = true;
 
-        bool IKnowledgeSettings.KnowledgeAgentRead => Applied.KnowledgeAgentRead;
         bool IKnowledgeSettings.KnowledgeAutoOptimize => Applied.KnowledgeAutoOptimize;
         bool IKnowledgeSettings.KnowledgeLineColors => Applied.KnowledgeLineColors;
 
@@ -457,6 +458,11 @@ namespace Pomp.VisualStudio.Options
         [PompDisplayName("입력 예측 문장", "Composer predictions")]
         [Description("")]
         public bool ComposerPredictions { get; set; } = false;
+
+        [PompCategory("채팅", "Chat")]
+        [PompDisplayName("입력 단어 완성", "Word completion")]
+        [Description("")]
+        public bool WordCompletion { get; set; } = true;
 
         // ---- Permissions -----------------------------------------------------------------------------
 
@@ -654,6 +660,8 @@ namespace Pomp.VisualStudio.Options
         bool IPompSettings.IncludeEditorContextByDefault => Applied.IncludeEditorContextByDefault;
 
         bool IPompSettings.ComposerPredictions => Applied.ComposerPredictions;
+
+        bool IPompSettings.WordCompletion => Applied.WordCompletion;
 
         IReadOnlyCollection<string> IPompSettings.AlwaysAllowedPolicyKeys => Applied.AlwaysAllowedPolicyKeys;
 
@@ -1075,6 +1083,7 @@ namespace Pomp.VisualStudio.Options
                 EditorContextLimits = new EditorContextLimits(page.EditorContextLines, page.EditorContextLargeFileLines, page.EditorContextLargeFileThreshold,
                     page.EditorContextSelectedChars, page.EditorContextLineChars, page.EditorContextWindowChars, page.EditorContextErrors, page.EditorContextTimeoutSeconds);
                 ComposerPredictions = page.ComposerPredictions;
+                WordCompletion = page.WordCompletion;
                 EnableCodeCaptions = page.EnableCodeCaptions;
                 LiveFollowEnabled = page.LiveFollowEnabled;
                 LiveBookmarksEnabled = page.LiveBookmarksEnabled;
@@ -1092,11 +1101,11 @@ namespace Pomp.VisualStudio.Options
                 LocalEmbeddingEndpoint = page.LocalEmbeddingEndpoint?.Trim() ?? "";
                 LocalEmbeddingModel = page.LocalEmbeddingModel?.Trim() ?? "";
                 EnableInlineCompletions = page.EnableInlineCompletions;
+                InlineCompletionTimeoutSeconds = Math.Max(InlineCompletionLimits.MinSeconds, Math.Min(InlineCompletionLimits.MaxSeconds, page.InlineCompletionTimeoutSeconds));
                 InlineAssistantModel = NullIfBlank(page.InlineAssistantModel);
                 ComputerUseMode = page.ComputerUseMode;
                 BrowserControl = page.BrowserControl;
                 ComputerConfirmReads = page.ComputerConfirmReads;
-                KnowledgeAgentRead = page.KnowledgeAgentRead;
                 KnowledgeAutoOptimize = page.KnowledgeAutoOptimize;
                 KnowledgeLineColors = page.KnowledgeLineColors;
                 AlwaysAllowedPolicyKeys = ParseKeys(page.AlwaysAllowedPolicyKeys).AsReadOnly();
@@ -1140,6 +1149,7 @@ namespace Pomp.VisualStudio.Options
                 IncludeEditorContextByDefault = source.IncludeEditorContextByDefault;
                 EditorContextLimits = source.EditorContextLimits;
                 ComposerPredictions = source.ComposerPredictions;
+                WordCompletion = source.WordCompletion;
                 EnableCodeCaptions = source.EnableCodeCaptions;
                 LiveFollowEnabled = source.LiveFollowEnabled;
                 LiveBookmarksEnabled = source.LiveBookmarksEnabled;
@@ -1157,11 +1167,11 @@ namespace Pomp.VisualStudio.Options
                 LocalEmbeddingEndpoint = source.LocalEmbeddingEndpoint;
                 LocalEmbeddingModel = source.LocalEmbeddingModel;
                 EnableInlineCompletions = source.EnableInlineCompletions;
+                InlineCompletionTimeoutSeconds = source.InlineCompletionTimeoutSeconds;
                 InlineAssistantModel = source.InlineAssistantModel;
                 ComputerUseMode = source.ComputerUseMode;
                 BrowserControl = source.BrowserControl;
                 ComputerConfirmReads = source.ComputerConfirmReads;
-                KnowledgeAgentRead = source.KnowledgeAgentRead;
                 KnowledgeAutoOptimize = source.KnowledgeAutoOptimize;
                 KnowledgeLineColors = source.KnowledgeLineColors;
                 AlwaysAllowedPolicyKeys = keys;
@@ -1219,6 +1229,8 @@ namespace Pomp.VisualStudio.Options
 
             public bool ComposerPredictions { get; }
 
+            public bool WordCompletion { get; }
+
             public bool EnableCodeCaptions { get; private set; }
             public bool LiveFollowEnabled { get; private set; }
             public bool LiveBookmarksEnabled { get; private set; }
@@ -1238,13 +1250,14 @@ namespace Pomp.VisualStudio.Options
 
             public bool EnableInlineCompletions { get; private set; }
 
+            public int InlineCompletionTimeoutSeconds { get; }
+
             public string? InlineAssistantModel { get; private set; }
 
             public ComputerUsePolicy ComputerUseMode { get; }
             public bool BrowserControl { get; }
             public bool ComputerConfirmReads { get; }
 
-            public bool KnowledgeAgentRead { get; }
             public bool KnowledgeAutoOptimize { get; }
             public bool KnowledgeLineColors { get; }
 

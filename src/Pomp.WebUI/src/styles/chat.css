@@ -638,11 +638,19 @@
 @media (max-width: 480px) { .review-layout-split .review-comparison { display: block; } }
 
 .context-basket { border-bottom: 1px solid var(--pomp-border); margin-bottom: 6px; font-size: .85em; }
-.context-basket summary { cursor: pointer; color: var(--pomp-muted-fg); }
-.context-basket-summary { margin: 4px 0; color: var(--pomp-muted-fg); }
-.context-basket-details { margin: 6px 0; }
+.context-basket-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 6px; color: var(--pomp-muted-fg); }
+.context-basket-summary .draft-token-button { min-height: 20px; height: 20px; padding: 0 7px; font-size: 11px; }
+.context-basket-summary .draft-token-result { color: var(--pomp-fg); font-variant-numeric: tabular-nums; }
+.context-basket > .view-section + .view-section { margin-top: 6px; }
+/* The basket's group headers: one compact row that is the fold button as a whole (hover, click and keyboard ring on the row, not the title text). */
+.context-basket .view-section-header { min-height: 0; padding: 3px 8px; cursor: pointer; user-select: none; }
+.context-basket .view-section-header:hover { background: var(--pomp-hover-bg); }
+.context-basket .view-section-header:has(.view-section-toggle:focus-visible) { outline: 1px solid var(--pomp-focus-border); outline-offset: -1px; }
+.context-basket .view-section-toggle::after { content: ''; position: absolute; inset: 0; }
+.context-basket .view-section-toggle:hover { background: transparent; }
+.context-basket .view-section-toggle:focus-visible { outline: none; }
+.context-basket .view-section-status { padding: 0 5px; }
 .perm-remember-scope { overflow-wrap: anywhere; }
-.context-basket-files { margin: 6px 0; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); }
 .context-file-order { text-align: right; font-variant-numeric: tabular-nums; }
 .context-file-handle { cursor: grab; }
 .context-file-path { display: flex; min-width: 0; }

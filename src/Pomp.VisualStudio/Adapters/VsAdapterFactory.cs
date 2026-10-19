@@ -29,7 +29,7 @@ namespace Pomp.VisualStudio.Adapters
             WorkspaceEdits = buffers;
             ShadowValidator = new RoslynShadowValidator(context);
             CodeSource = new RoslynCodeWorkspaceSource(context);
-            EditorCaptions = new RoslynEditorCaptionSource(context);
+            EditorCaptions = new EditorCaptionSource(context);
             solution = new SolutionAdapter(context);
             Debugger = new DebuggerAdapter(context);
             Bookmarks = new BookmarkAdapter(context);

@@ -5,6 +5,8 @@ import { onMessage, send, type BackgroundAgentJob, type BackgroundAgentState } f
 import { revealControls } from './RevealControls';
 
 const STOPPABLE = ['running', 'pending', 'queued', 'inProgress'];
+/** A member that has not ended yet: the states the host's stop accepts. */
+export const isRunningJob = (job: BackgroundAgentJob) => STOPPABLE.includes(job.status);
 
 /**
  * Controls stay generation- and session-bound, just as in the former background Work panel. Pause/resume/cancel need the
@@ -26,7 +28,7 @@ export function BackgroundRunControls({ state, job, sessionId, disabled }: { sta
   useEffect(() => { if (confirming) confirmButton.current?.focus(); }, [confirming]);
   if (state?.state !== 'live' || state.sessionId !== sessionId || !sessionId) return null;
   const controlled = state.controlVersion === 1 && !!job.control;
-  const stoppable = !controlled && state.stopAvailable === true && STOPPABLE.includes(job.status);
+  const stoppable = !controlled && state.stopAvailable === true && isRunningJob(job);
   if (!controlled && !stoppable) return null;
   const blocked = disabled || pending || state.controlPending;
   const post = (action: 'pause' | 'resume' | 'cancel' | 'stop') => {

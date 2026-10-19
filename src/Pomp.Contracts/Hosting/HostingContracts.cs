@@ -56,6 +56,9 @@ namespace Pomp.Hosting
 
         bool ComposerPredictions { get; }
 
+        /// <summary>Word completion in the chat input (local, from this workspace's words): a grey rest of the word Tab inserts.</summary>
+        bool WordCompletion { get; }
+
         /// <summary>Persisted "always allow" policy keys (see <see cref="Permissions.PermissionRequest.PolicyKey"/>).</summary>
         IReadOnlyCollection<string> AlwaysAllowedPolicyKeys { get; }
 
@@ -184,11 +187,14 @@ namespace Pomp.Hosting
         Task RecycleAsync(IReadOnlyList<string> paths, CancellationToken cancellationToken);
     }
 
-    /// <summary>Optional capability of an <see cref="IPompHostEnvironment"/>: a native file dialog (the chat UI's attach button).</summary>
+    /// <summary>Optional capability of an <see cref="IPompHostEnvironment"/>: a native open-file dialog (the chat UI's attach button, the Skills tab's import).</summary>
     public interface IPompFilePicker
     {
-        /// <summary>Shows a multi-select open-file dialog; full paths, or an empty list when the user closed it.</summary>
-        Task<IReadOnlyList<string>> PickFilesAsync(string? initialDirectory, CancellationToken cancellationToken);
+        /// <summary>
+        /// Shows an open-file dialog with <paramref name="title"/>; <paramref name="filter"/> is a dialog filter string
+        /// (<c>"Label|*.md"</c>) or null for all files. Full paths, or an empty list when the user closed it.
+        /// </summary>
+        Task<IReadOnlyList<string>> PickFilesAsync(string? initialDirectory, string title, string? filter, bool multiselect, CancellationToken cancellationToken);
     }
 
     /// <summary>

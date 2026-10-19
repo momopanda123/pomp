@@ -173,9 +173,8 @@ export const UserMessage = memo(function UserMessage({ item }: { item: UserItem 
 
   return (
     <div className={state ? `msg user ${state}` : 'msg user'} ref={bubbleRef} tabIndex={-1} {...bubbleHandlers}>
-      {/* No badge = POMP itself answered in its own tab. A message sent to POMP from an agent or team tab names POMP, else it would read as
-          a message to that tab's agent. */}
-      {item.target && (item.target.kind !== 'main' || item.partnerKey) && <TargetBadge target={item.target} />}
+      {/* No badge = the conversation itself answered; a badge names the one-message target (an agent, team or running member). */}
+      {item.target && item.target.kind !== 'main' && <TargetBadge target={item.target} />}
       <UserTextBody text={item.text} />
       {item.attachments && item.attachments.length > 0 && <AttachmentSummary files={item.attachments} testId="user-attachments" />}
       <EditorContextChip context={item.editorContext} />

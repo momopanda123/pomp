@@ -17,19 +17,19 @@ using Pomp.Ui;
 namespace Pomp.Hosting
 {
     // Unified knowledge (KnowledgeStore): user tags with pieces, used as written or as an editor-model summary. The Tools >
-    // Knowledge page manages them; a model can only propose candidates (or list and read them with KnowledgeAgentRead); team
-    // knowledge reaches a team only inside the messages the user sends to it.
+    // Knowledge page manages them and the context basket selects them for a conversation; a model can only propose candidates;
+    // team knowledge reaches a team only inside the messages the user sends to it.
     public sealed partial class PompSession : IKnowledgeEditor
     {
         private const int TeamKnowledgeChars = 12000;
         private const int TeamKnowledgeNotes = 10;
-        internal const int ReadKnowledgeChars = 24000;
         private const int OptimizeResultChars = 16000;
         private const int AnchorFileMaxBytes = 2 * 1024 * 1024;
 
         private readonly object _knowledgeLock = new object();
         private string _knowledgeSession = "";
-        private string[] _knowledgeSelected = Array.Empty<string>();
+        /// <summary>The current conversation's choice: knowledge picked besides the defaults, and defaults unticked.</summary>
+        private KnowledgeSelection.Choice _knowledgeChoice = KnowledgeSelection.Choice.None;
         private bool _knowledgeSelectedKnown;
         private string? _knowledgeOptimizing;
         private readonly Dictionary<string, DateTime> _knowledgeAutoQueued = new Dictionary<string, DateTime>(StringComparer.Ordinal);
@@ -42,7 +42,7 @@ namespace Pomp.Hosting
         private KnowledgeStore? Knowledge()
         {
             string root; lock (_stateLock) root = _workingDirectory;
-            return root.Length == 0 ? null : new KnowledgeStore(_environment.DataDirectory, root);
+            return root.Length == 0 ? null : new KnowledgeStore(_environment.DataDirectory, root, _options.UserHome);
         }
 
         private KnowledgeSelection? Selections()
@@ -54,18 +54,22 @@ namespace Pomp.Hosting
         private JObject KnowledgeView(string? requestId, string? error = null)
         {
             string root; lock (_stateLock) root = _workingDirectory;
-            string session; string[] selected; string? optimizing;
-            lock (_knowledgeLock) { session = _knowledgeSession; selected = _knowledgeSelected; optimizing = _knowledgeOptimizing; }
+            string session; KnowledgeSelection.Choice choice; string? optimizing;
+            lock (_knowledgeLock) { session = _knowledgeSession; choice = _knowledgeChoice; optimizing = _knowledgeOptimizing; }
             var view = new JObject { ["requestId"] = requestId, ["root"] = root, ["sessionId"] = session.Length == 0 ? null : session,
-                ["selected"] = new JArray(selected), ["items"] = new JArray() };
+                ["selected"] = new JArray(), ["items"] = new JArray() };
             if (optimizing != null) view["optimizing"] = optimizing;
             var moves = new List<(string KnowledgeId, string PieceId, int Start, int End)>();
             try
             {
                 var store = Knowledge();
                 if (store != null)
-                    foreach (var knowledge in store.List())
+                {
+                    var listed = store.List();
+                    view["selected"] = new JArray(EffectiveSelection(listed, choice));
+                    foreach (var knowledge in listed)
                         ((JArray)view["items"]!).Add(KnowledgeJson(knowledge, root, moves));
+                }
                 if (moves.Count > 0 && store != null) store.Reanchor(moves);
             }
             catch (Exception ex) { error ??= ex.Message; }
@@ -89,7 +93,7 @@ namespace Pomp.Hosting
                 ["id"] = knowledge.Id, ["name"] = knowledge.Name, ["color"] = knowledge.Color, ["scope"] = knowledge.Scope, ["use"] = knowledge.Use,
                 ["revision"] = knowledge.Revision, ["createdAt"] = knowledge.CreatedAt, ["updatedAt"] = knowledge.UpdatedAt,
                 ["roles"] = new JArray(knowledge.Roles), ["teams"] = new JArray(knowledge.Teams),
-                ["candidate"] = knowledge.Pieces.Count > 0 && knowledge.Pieces.All(p => p.Status == "candidate"),
+                ["candidate"] = knowledge.Pieces.Count > 0 && knowledge.Pieces.All(p => p.Status == "candidate"), ["default"] = knowledge.Default,
                 ["pieces"] = new JArray(knowledge.Pieces.Select(p => PieceJson(p, knowledge.Id, root, moves))),
             };
             if (knowledge.Optimized != null) item["optimized"] = new JObject
@@ -202,6 +206,7 @@ namespace Pomp.Hosting
                         changedId = id;
                         break;
                     case "delete": store.Delete(id, revision); changedId = id; break;
+                    case "setDefault": store.SetDefault(id, revision, args["on"]?.Type == JTokenType.Boolean && (bool)args["on"]!); changedId = id; break;
                     case "addPiece": store.AddPiece(id, revision, ReadPieceInput(args["piece"]), "user", "saved"); changedId = id; break;
                     case "updatePiece": store.UpdatePiece(id, revision, args.GetString("pieceId") ?? "", args.GetString("text") ?? ""); changedId = id; break;
                     case "deletePiece": store.DeletePiece(id, revision, args.GetString("pieceId") ?? ""); changedId = id; break;
@@ -285,54 +290,44 @@ namespace Pomp.Hosting
 
         // ---- conversation selection ------------------------------------------------------------------------------
 
-        /// <summary>The selection of the current conversation (unknown ids dropped); kept in memory until its id is known.</summary>
+        /// <summary>
+        /// What a conversation uses: every default knowledge it did not untick, then what it picked besides them (unknown ids dropped).
+        /// </summary>
+        internal static string[] EffectiveSelection(IReadOnlyList<KnowledgeStore.Knowledge> all, KnowledgeSelection.Choice choice)
+        {
+            var excluded = new HashSet<string>(choice.Excluded, StringComparer.Ordinal);
+            var known = new HashSet<string>(all.Select(k => k.Id), StringComparer.Ordinal);
+            return all.Where(k => k.Default && !excluded.Contains(k.Id)).Select(k => k.Id)
+                .Concat(choice.Picked.Where(known.Contains)).Distinct(StringComparer.Ordinal).ToArray();
+        }
+
+        /// <summary>
+        /// The basket's ticked knowledge for the current conversation: ticked defaults are not stored, unticked ones are; kept in memory until
+        /// the conversation's id is known.
+        /// </summary>
         private void SelectKnowledge(IReadOnlyList<string> ids)
         {
-            var store = Knowledge();
-            var known = store == null ? new HashSet<string>(StringComparer.Ordinal) : new HashSet<string>(store.List().Select(k => k.Id), StringComparer.Ordinal);
-            var selected = ids.Where(id => known.Contains(id)).Distinct(StringComparer.Ordinal).ToArray();
+            var all = Knowledge()?.List() ?? (IReadOnlyList<KnowledgeStore.Knowledge>)Array.Empty<KnowledgeStore.Knowledge>();
+            var ticked = new HashSet<string>(ids, StringComparer.Ordinal);
+            var defaults = new HashSet<string>(all.Where(k => k.Default).Select(k => k.Id), StringComparer.Ordinal);
+            var choice = new KnowledgeSelection.Choice(
+                ids.Where(id => !defaults.Contains(id) && all.Any(k => k.Id == id)).Distinct(StringComparer.Ordinal).ToArray(),
+                defaults.Where(id => !ticked.Contains(id)).ToArray());
             string session;
             lock (_knowledgeLock)
             {
                 session = _knowledgeSession;
-                _knowledgeSelected = selected;
+                _knowledgeChoice = choice;
                 _knowledgeSelectedKnown = true;
             }
 
             if (session.Length > 0)
             {
-                try { Selections()?.Set(session, selected); }
+                try { Selections()?.Set(session, choice); }
                 catch (Exception ex) { _logger.Warn("Knowledge selection was not saved: " + ex.Message); }
             }
 
-            WriteSessionKnowledge();
-            _ui.Post(UiMessageTypes.KnowledgeState, KnowledgeView(null), UiDelivery.State);
-        }
-
-        /// <summary>An agent tool read these knowledge: they stay selected for the conversation, and the page shows it.</summary>
-        private void SelectKnowledgeRead(IReadOnlyList<string> ids)
-        {
-            var store = Knowledge();
-            var known = store == null ? new HashSet<string>(StringComparer.Ordinal) : new HashSet<string>(store.List().Select(k => k.Id), StringComparer.Ordinal);
-            string session; bool changed;
-            lock (_knowledgeLock)
-            {
-                session = _knowledgeSession;
-                var merged = _knowledgeSelected.Union(ids.Where(id => known.Contains(id)), StringComparer.Ordinal).ToArray();
-                changed = merged.Length != _knowledgeSelected.Length;
-                if (changed) _knowledgeSelected = merged;
-                _knowledgeSelectedKnown = true;
-            }
-
-            if (!changed) return;
-            string[] selected;
-            lock (_knowledgeLock) selected = _knowledgeSelected;
-            if (session.Length > 0)
-            {
-                try { Selections()?.Set(session, selected); }
-                catch (Exception ex) { _logger.Warn("Knowledge selection was not saved: " + ex.Message); }
-            }
-
+            WriteRoleMemory();
             WriteSessionKnowledge();
             _ui.Post(UiMessageTypes.KnowledgeState, KnowledgeView(null), UiDelivery.State);
         }
@@ -349,7 +344,7 @@ namespace Pomp.Hosting
                 _knowledgeSelectedKnown = false;
             }
 
-            string[] selected = Array.Empty<string>();
+            var choice = KnowledgeSelection.Choice.None;
             if (_knowledgeSession.Length > 0)
             {
                 string root; lock (_stateLock) root = _workingDirectory;
@@ -357,38 +352,34 @@ namespace Pomp.Hosting
                 {
                     try
                     {
-                        var store = new KnowledgeStore(_environment.DataDirectory, root);
+                        var store = new KnowledgeStore(_environment.DataDirectory, root, _options.UserHome);
                         var known = new HashSet<string>(store.List().Select(k => k.Id), StringComparer.Ordinal);
-                        selected = new KnowledgeSelection(_environment.DataDirectory, root).Get(_knowledgeSession)
-                            .Where(id => known.Contains(id)).ToArray();
-                        new KnowledgeSelection(_environment.DataDirectory, root).Set(_knowledgeSession, selected);
+                        var stored = new KnowledgeSelection(_environment.DataDirectory, root).Get(_knowledgeSession);
+                        choice = new KnowledgeSelection.Choice(stored.Picked.Where(known.Contains).ToArray(), stored.Excluded.Where(known.Contains).ToArray());
+                        new KnowledgeSelection(_environment.DataDirectory, root).Set(_knowledgeSession, choice);
                     }
                     catch (Exception ex) { _logger.Warn("Knowledge selection was not restored: " + ex.Message); }
                 }
             }
 
-            lock (_knowledgeLock) { _knowledgeSelected = selected; _knowledgeSelectedKnown = true; }
+            lock (_knowledgeLock) { _knowledgeChoice = choice; _knowledgeSelectedKnown = true; }
             // The extension reads the conversation's knowledge from a file: it follows every switch, new or resumed.
+            WriteRoleMemory();
             WriteSessionKnowledge();
             _ui.Post(UiMessageTypes.KnowledgeState, KnowledgeView(null), UiDelivery.State);
         }
 
-        /// <summary>The saved selection of a conversation (memory while it is current, the store otherwise); unknown ids dropped.</summary>
-        internal IReadOnlyList<string> KnowledgeSelectionFor(string? sessionId)
+        /// <summary>The saved choice of a conversation (memory while it is current, the store otherwise).</summary>
+        internal KnowledgeSelection.Choice KnowledgeChoiceFor(string? sessionId)
         {
             lock (_knowledgeLock)
             {
-                if (_knowledgeSelectedKnown && _knowledgeSession == (sessionId ?? "")) return _knowledgeSelected;
+                if (_knowledgeSelectedKnown && _knowledgeSession == (sessionId ?? "")) return _knowledgeChoice;
             }
 
-            if (sessionId is null || sessionId.Length == 0) return Array.Empty<string>();
-            try
-            {
-                var store = Knowledge();
-                var known = store == null ? new HashSet<string>(StringComparer.Ordinal) : new HashSet<string>(store.List().Select(k => k.Id), StringComparer.Ordinal);
-                return (Selections()?.Get(sessionId) ?? (IReadOnlyList<string>)Array.Empty<string>()).Where(id => known.Contains(id)).ToArray();
-            }
-            catch (Exception) { return Array.Empty<string>(); }
+            if (sessionId is null || sessionId.Length == 0) return KnowledgeSelection.Choice.None;
+            try { return Selections()?.Get(sessionId) ?? KnowledgeSelection.Choice.None; }
+            catch (Exception) { return KnowledgeSelection.Choice.None; }
         }
 
         // ---- optimize (the editor model rewrites one knowledge into a compact reference) ------------------------
@@ -605,7 +596,7 @@ namespace Pomp.Hosting
             var relative = RelativeWorkspacePath(root, lines.FullPath ?? "");
             if (relative == null || lines.StartLine < 1 || lines.EndLine < lines.StartLine || lines.EndLine > lines.StartLine + 199)
                 throw new ArgumentException(OneLine(PompLanguage.Pick("줄 위치가 올바르지 않아요.", "The line range is invalid.")));
-            var store = new KnowledgeStore(_environment.DataDirectory, root);
+            var store = new KnowledgeStore(_environment.DataDirectory, root, _options.UserHome);
             KnowledgeStore.Knowledge knowledge;
             try { knowledge = store.List().FirstOrDefault(k => k.Id == knowledgeId) ?? throw new InvalidOperationException(PompLanguage.Pick("지식이 바뀌었거나 지워졌어요.", "The knowledge changed or was deleted.")); }
             catch (InvalidOperationException ex) { throw new InvalidOperationException(OneLine(ex.Message), ex); }
@@ -689,7 +680,7 @@ namespace Pomp.Hosting
                 if (relative == null) return Array.Empty<KnowledgeLineMark>();
                 var comparison = Path.DirectorySeparatorChar == '\\' ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
                 var marks = new List<KnowledgeLineMark>();
-                foreach (var knowledge in new KnowledgeStore(_environment.DataDirectory, root).List())
+                foreach (var knowledge in new KnowledgeStore(_environment.DataDirectory, root, _options.UserHome).List())
                     foreach (var piece in knowledge.Pieces)
                     {
                         if (piece.Status != "saved" || piece.Anchor == null || !string.Equals(piece.Anchor.Path, relative, comparison)) continue;
@@ -757,61 +748,6 @@ namespace Pomp.Hosting
                             ? "Saved as a candidate knowledge for the user's review. It is not knowledge until the user accepts it."
                             : "Saved as a candidate piece for the user's review. It is not knowledge until the user accepts it.",
                             new JObject { ["id"] = outcome.KnowledgeId }));
-                }
-                catch (Exception ex) { return Task.FromResult(HostToolResult.Error(ex.Message)); }
-            }
-        }
-
-        /// <summary>Lists and reads project knowledge (the KnowledgeAgentRead option); what an agent reads stays selected, so it continues.</summary>
-        private sealed class KnowledgeReadTool : IHostTool
-        {
-            private readonly PompSession owner;
-            public KnowledgeReadTool(PompSession owner) { this.owner = owner; }
-            public HostToolDefinition Definition { get; } = new HostToolDefinition
-            {
-                Name = "read_knowledge", Label = "List and read project knowledge", LoadMode = "discoverable",
-                Description = "List the user's project knowledge (without arguments: id, name, piece and character counts), or read the used content of the named knowledge ids. Knowledge you read becomes selected for this conversation, so it continues in later messages. Personal knowledge is never listed or returned.",
-                Parameters = JObject.Parse("{\"type\":\"object\",\"properties\":{\"ids\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"maxItems\":20}},\"additionalProperties\":false}"),
-            };
-            public PermissionKind ResolvePermission(HostToolInvocation invocation) => PermissionKind.None;
-            public Task<PermissionRequest?> DescribePermissionAsync(HostToolInvocation invocation, CancellationToken token) => Task.FromResult<PermissionRequest?>(null);
-            public Task<HostToolResult> ExecuteAsync(HostToolInvocation invocation, CancellationToken token)
-            {
-                try
-                {
-                    if ((owner._settings as IKnowledgeSettings)?.KnowledgeAgentRead != true)
-                        return Task.FromResult(HostToolResult.Error("Reading knowledge is turned off in POMP Options (Knowledge > Agents read knowledge)."));
-                    var args = invocation.Arguments;
-                    if (args.Properties().Any(p => p.Name is not "ids") || (args["ids"] != null && args["ids"]!.Type != JTokenType.Array))
-                        throw new ArgumentException("Unknown field.");
-                    var store = owner.Knowledge() ?? throw new InvalidOperationException("No workspace is open.");
-                    var project = store.List().Where(k => k.Scope == "project").ToList();
-                    var ids = (args["ids"] as JArray)?.Select(t => (string?)t).Where(t => t != null).Select(t => t!).ToList();
-                    if (ids == null)
-                    {
-                        var lines = project.Select(k => k.Id + "  " + k.Name + "  (" + k.Pieces.Count(p => p.Status == "saved") + " pieces, " + KnowledgeStore.UsedContent(k).Length + " chars)").ToList();
-                        return Task.FromResult(HostToolResult.Text(lines.Count == 0 ? "No project knowledge." : string.Join("\n", lines)));
-                    }
-
-                    var wanted = ids.Take(20).ToList();
-                    var byId = project.ToDictionary(k => k.Id, StringComparer.Ordinal);
-                    var unknown = wanted.Where(id => !byId.ContainsKey(id)).ToList();
-                    if (unknown.Count > 0) throw new ArgumentException("Unknown knowledge id: " + string.Join(", ", unknown.Take(5)) + ".");
-                    var blocks = new List<string>();
-                    var used = 0;
-                    var read = new List<string>();
-                    foreach (var id in wanted)
-                    {
-                        var body = KnowledgeStore.UsedContent(byId[id]);
-                        if (body.Length == 0) continue;
-                        used += byId[id].Name.Length + body.Length;
-                        if (used > ReadKnowledgeChars || blocks.Count >= 20) break;
-                        read.Add(id);
-                        blocks.Add("### " + byId[id].Name + "\n" + body);
-                    }
-
-                    if (read.Count > 0) owner.SelectKnowledgeRead(read);
-                    return Task.FromResult(HostToolResult.Text(blocks.Count == 0 ? "The selected knowledge is empty." : string.Join("\n\n", blocks)));
                 }
                 catch (Exception ex) { return Task.FromResult(HostToolResult.Error(ex.Message)); }
             }

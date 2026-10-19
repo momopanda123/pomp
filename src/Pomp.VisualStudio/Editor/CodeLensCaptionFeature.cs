@@ -22,6 +22,7 @@ using StreamJsonRpc;
 
 namespace Pomp.VisualStudio.Editor
 {
+    /// <summary>The native CodeLens side of POMP captions, for the languages CaptionProvider registers (C#, VB; its summary says why).</summary>
     [Export(typeof(ICodeLensCallbackListener))]
     [ContentType("CSharp")]
     [ContentType("Basic")]

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,18 +9,19 @@ using Pomp.Bridge;
 using Pomp.Diagnostics;
 using Pomp.Features;
 using Pomp.Internal;
+using Pomp.Protocol;
 using Pomp.Ui;
 
 namespace Pomp.Hosting
 {
     public sealed partial class PompSession
     {
-        private ConversationPartnerStore _partners = null!;
+        private ConversationTabStore _tabs = null!;
+        // The current conversation's partner (docs/architecture.md §8.8): main for a POMP conversation, else the agent or team whose own conversation it is.
         private ConversationPartnerPayload _partner = new ConversationPartnerPayload();
-        private string? _partnerSession, _partnerInstance, _partnerMessage;
-        // Agent name → the instance its partner tab talks to in this conversation, so switching tabs back and forth keeps each
-        // agent's own context (docs/architecture.md §8.8). Engine jobs do not outlive the conversation or the engine.
-        private readonly Dictionary<string, string> _partnerInstances = new Dictionary<string, string>(StringComparer.Ordinal);
+        private string? _partnerSession, _partnerMessage;
+        // The partner a conversation/tab "open" is starting a conversation for: the next conversation the engine reports becomes that partner's.
+        private ConversationPartnerPayload? _newConversationPartner;
         private readonly Dictionary<string, Dictionary<string, string>> _teamInstances = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
         private readonly HashSet<string> _unavailableTeams = new HashSet<string>(StringComparer.Ordinal);
         private OmpConnection? _teamInstancesConnection;
@@ -30,10 +32,7 @@ namespace Pomp.Hosting
         private bool _queuePaused, _queueDispatchScheduled;
         private static ConversationPartnerPayload CopyPartner(ConversationPartnerPayload value) => new ConversationPartnerPayload { Kind = value.Kind, Id = value.Id };
         private static string? Target(string? value) => string.IsNullOrWhiteSpace(value) ? null : value!.Trim();
-        private static ChatSendPayload CopySend(ChatSendPayload value) => new ChatSendPayload { ClientMessageId = value.ClientMessageId, Text = value.Text ?? "", IncludeEditorContext = value.IncludeEditorContext, Team = Target(value.Team), Agent = Target(value.Agent), AgentInstance = Target(value.AgentInstance), Main = value.Main == true ? true : null, From = ValidOrigin(value.From), Attachments = value.Attachments?.Where(a => a != null).Select(a => new ChatAttachment { Path = a.Path }).ToList() };
-        // chat/send.from is view only (it never routes the message), so an invalid one is dropped rather than refusing the message.
-        private static ConversationPartnerPayload? ValidOrigin(ConversationPartnerPayload? value) =>
-            value != null && (value.Kind == "agent" || value.Kind == "team") && value.Id != null && AgentRoster.IsValidName(value.Id) ? CopyPartner(value) : null;
+        private static ChatSendPayload CopySend(ChatSendPayload value) => new ChatSendPayload { ClientMessageId = value.ClientMessageId, Text = value.Text ?? "", IncludeEditorContext = value.IncludeEditorContext, Team = Target(value.Team), Agent = Target(value.Agent), AgentInstance = Target(value.AgentInstance), Main = value.Main == true ? true : null, Attachments = value.Attachments?.Where(a => a != null).Select(a => new ChatAttachment { Path = a.Path }).ToList() };
         private ConversationPartnerPayload ValidatePartner(ConversationPartnerPayload value)
         {
             if (value.Kind == "main") return new ConversationPartnerPayload();
@@ -42,40 +41,152 @@ namespace Pomp.Hosting
             if (value.Kind == "team" && roster.ListTeams().Any(t => t.Id == value.Id && !t.Shadowed && string.IsNullOrEmpty(t.Error))) return CopyPartner(value);
             throw new InvalidOperationException(PompLanguage.Pick("대화 상대를 찾을 수 없어요.", "Conversation partner was not found."));
         }
-        private ConversationPartnerStatePayload PartnerView()
+        private ConversationTabsStatePayload TabsView()
         {
-            ConversationPartnerStatePayload state;
-            lock (_stateLock) state = new ConversationPartnerStatePayload { SessionId = _partnerSession, Partner = CopyPartner(_partner), Instance = _partnerInstance, Message = _partnerMessage };
-            if (state.Partner.Kind == "agent") state.Title = GetAgentRoster().ListRoles().FirstOrDefault(r => r.Name == state.Partner.Id && !r.Shadowed && string.IsNullOrEmpty(r.Error))?.Title ?? state.Partner.Id;
-            if (state.Partner.Kind == "team") state.Title = GetAgentRoster().ListTeams().FirstOrDefault(t => t.Id == state.Partner.Id && !t.Shadowed && string.IsNullOrEmpty(t.Error))?.Title ?? state.Partner.Id;
+            ConversationTabsStatePayload state; string root;
+            lock (_stateLock) { root = _workingDirectory; state = new ConversationTabsStatePayload { SessionId = _partnerSession, Partner = CopyPartner(_partner), Message = _partnerMessage }; }
+            var tabs = _tabs.Read(root);
+            var roster = GetAgentRoster(); var roles = roster.ListRoles(); var teams = roster.ListTeams();
+            string? Title(ConversationPartnerPayload partner) => partner.Kind == "agent" ? roles.FirstOrDefault(r => r.Name == partner.Id && !r.Shadowed && string.IsNullOrEmpty(r.Error))?.Title ?? partner.Id
+                : partner.Kind == "team" ? teams.FirstOrDefault(t => t.Id == partner.Id && !t.Shadowed && string.IsNullOrEmpty(t.Error))?.Title ?? partner.Id : null;
+            state.Title = Title(state.Partner); state.Main = tabs.Main;
+            state.Tabs = tabs.Conversations.Where(e => e.Open).Select(e => new ConversationTabPayload { SessionId = e.SessionId, Partner = CopyPartner(e.Partner), Title = Title(e.Partner) }).ToList();
             return state;
         }
-        private void PublishPartner() => _ui.Post(UiMessageTypes.ConversationPartnerState, PartnerView(), UiDelivery.State);
-        private Task HandlePartnerAsync(JObject args)
+        private void PublishTabs() => _ui.Post(UiMessageTypes.ConversationTabsState, TabsView(), UiDelivery.State);
+        /// <summary>
+        /// conversation/tab (docs/ui-protocol.md "Conversation tabs"): every tab is its own conversation, so opening, activating and closing the
+        /// current tab switch the engine's conversation and answer with one <c>session/newResult</c>; closing another tab answers <c>conversation/tabReply</c>.
+        /// </summary>
+        private async Task HandleTabAsync(JObject args)
         {
-            var requestId = (string?)args["requestId"] ?? "";
+            var command = Pomp.Json.PompJson.ToObject<ConversationTabCommandPayload>(args) ?? new ConversationTabCommandPayload();
+            var requestId = command.RequestId ?? ""; var switching = command.Action != "close";
             try
             {
-                var value = args["partner"] is JObject raw ? Pomp.Json.PompJson.ToObject<ConversationPartnerPayload>(raw) : null;
-                if (value == null) throw new ArgumentException(PompLanguage.Pick("대화 상대가 비어 있어요.", "The conversation partner is empty."));
-                value = ValidatePartner(value); string session, root;
-                lock (_stateLock) { session = _info.SessionId ?? ""; root = _workingDirectory; }
-                if (session.Length == 0) throw new InvalidOperationException(PompLanguage.Pick("대화가 연결되지 않았어요.", "No conversation is connected."));
-                _partners.Set(root, session, value);
-                lock (_stateLock)
+                string root, current;
+                lock (_stateLock) { root = _workingDirectory; current = _info.SessionId ?? ""; }
+                if (current.Length == 0) throw new InvalidOperationException(PompLanguage.Pick("대화가 연결되지 않았어요.", "No conversation is connected."));
+                switch (command.Action)
                 {
-                    if (_partnerSession != session) { _partnerInstances.Clear(); _teamInstances.Clear(); _unavailableTeams.Clear(); }
-                    SyncTeamInstancesLocked();
-                    _partner = value; _partnerSession = session; _partnerMessage = null;
-                    _partnerInstance = value.Kind == "agent" && _partnerInstances.TryGetValue(value.Id!, out var known) ? known : null;
+                    case "open":
+                        var partner = command.Partner == null ? null : ValidatePartner(command.Partner);
+                        if (partner == null || partner.Kind == "main") throw new ArgumentException(PompLanguage.Pick("대화 상대가 비어 있어요.", "The conversation partner is empty."));
+                        var open = _tabs.OpenSession(root, partner);
+                        if (open == current) throw new InvalidOperationException(PompLanguage.Pick("이미 열려 있는 탭이에요.", "That tab is already open."));
+                        await SwitchToTabAsync(requestId, root, open, partner).ConfigureAwait(false);
+                        break;
+                    case "activate":
+                        var tabs = _tabs.Read(root);
+                        var tab = command.SessionId == null ? null : tabs.Conversations.FirstOrDefault(e => e.Open && e.SessionId == command.SessionId)
+                            ?? throw new InvalidOperationException(PompLanguage.Pick("탭을 찾을 수 없어요.", "The tab was not found."));
+                        var target = tab?.SessionId ?? tabs.Main;
+                        if (target == current) throw new InvalidOperationException(PompLanguage.Pick("이미 열려 있는 탭이에요.", "That tab is already open."));
+                        if (target == null) await StartConversationAsync(requestId, null).ConfigureAwait(false);
+                        else await SwitchToTabAsync(requestId, root, target, tab?.Partner).ConfigureAwait(false);
+                        break;
+                    case "close":
+                        if (string.IsNullOrEmpty(command.SessionId)) throw new ArgumentException(PompLanguage.Pick("닫을 탭이 없어요.", "No tab to close."));
+                        // Closing the current tab returns to the Default tab: check that the engine can switch before the tab goes.
+                        if (command.SessionId == current) { switching = true; RequireIdleForTabSwitch(); }
+                        _tabs.Close(root, command.SessionId!); PublishTabs();
+                        if (!switching) { Reply(UiMessageTypes.ConversationTabReply, requestId, null); break; }
+                        var main = _tabs.Read(root).Main;
+                        if (main == null) await StartConversationAsync(requestId, null).ConfigureAwait(false);
+                        else await SwitchToTabAsync(requestId, root, main, null).ConfigureAwait(false);
+                        break;
+                    default: throw new ArgumentException(PompLanguage.Pick("알 수 없는 탭 명령이에요.", "Unknown tab command."));
                 }
-                PublishPartner(); Reply(UiMessageTypes.ConversationPartnerReply, requestId, null);
-                HandleRecentSessionsAsync(new JObject { ["action"] = "refresh" }).Forget(_logger, "partner session list");
             }
-            catch (Exception ex) { Reply(UiMessageTypes.ConversationPartnerReply, requestId, ex.Message); }
-            return Task.CompletedTask;
+            catch (Exception ex) when (!(ex is OperationCanceledException && _disposeCts.IsCancellationRequested))
+            {
+                if (switching) _ui.Post(UiMessageTypes.SessionNewResult, new SessionNewResultPayload { RequestId = requestId, Status = "failed", Message = ex.Message });
+                else Reply(UiMessageTypes.ConversationTabReply, requestId, ex.Message);
+            }
         }
-        // Job ids belong to one engine; retain only team ids so the next partner send can explain a restart.
+        // One engine: another conversation only while nothing runs (a new conversation would abort the reply; a switch refuses anyway).
+        private void RequireIdleForTabSwitch()
+        {
+            lock (_stateLock)
+                if (_info.IsStreaming || _info.HasPendingAsyncWork || _turns.Count > 0)
+                    throw new InvalidOperationException(PompLanguage.Pick("응답이 끝나거나 중지한 뒤에 탭을 바꿀 수 있어요.", "Finish or stop the reply before switching tabs."));
+            if (_ui.PendingRequestCount > 0) throw new InvalidOperationException(PompLanguage.Pick("대기 중인 승인이나 질문이 있어요.", "An approval or question is pending."));
+        }
+        /// <summary>A new conversation for <paramref name="partner"/> (null: a POMP conversation, the Default tab's).</summary>
+        private async Task StartConversationAsync(string requestId, ConversationPartnerPayload? partner)
+        {
+            RequireIdleForTabSwitch();
+            _composerAuto?.Stop(PompLanguage.Pick("대화 전환을 요청했어요.", "Conversation switch requested."));
+            lock (_stateLock) _newConversationPartner = partner == null ? null : CopyPartner(partner);
+            try { await HandleNewSessionAsync(requestId).ConfigureAwait(false); }
+            finally { lock (_stateLock) _newConversationPartner = null; }
+        }
+        /// <summary>
+        /// session/new (the header's +, /new) and the new conversation after deleting the current one: a new conversation in the current tab,
+        /// for its agent or team (a POMP conversation in the Default tab, or when that agent or team no longer exists).
+        /// </summary>
+        private async Task HandleNewInTabAsync(string? requestId)
+        {
+            ConversationPartnerPayload partner; lock (_stateLock) partner = CopyPartner(_partner);
+            ConversationPartnerPayload? assign;
+            try { assign = partner.Kind == "main" ? null : ValidatePartner(partner); }
+            catch (InvalidOperationException) { assign = null; }
+            lock (_stateLock) _newConversationPartner = assign;
+            try { await HandleNewSessionAsync(requestId).ConfigureAwait(false); }
+            finally { lock (_stateLock) _newConversationPartner = null; }
+        }
+        /// <summary>
+        /// Switches to a tab's conversation like the conversation list does; without <paramref name="sessionId"/> (a closed tab opened again) to the
+        /// partner's most recently changed conversation. A conversation the engine never wrote (no message was sent in it) cannot be switched to,
+        /// and a partner without conversations has none: the tab starts a new conversation for its partner instead.
+        /// </summary>
+        private async Task SwitchToTabAsync(string requestId, string root, string? sessionId, ConversationPartnerPayload? partner)
+        {
+            RequireIdleForTabSwitch();
+            var workspace = await _environment.GetWorkspaceRootAsync(_disposeCts.Token).ConfigureAwait(false);
+            var store = new RecentSessionStore(_environment.DataDirectory, workspace);
+            string? file, id, name; lock (_stateLock) { file = _sessionFile; id = _info.SessionId; name = _info.SessionName; }
+            var listing = await Task.Run(() => store.List(file, id, name), _disposeCts.Token).ConfigureAwait(false);
+            var entries = (listing["entries"] as JArray)?.OfType<JObject>().ToList() ?? new List<JObject>();
+            if (sessionId == null && partner != null)
+            {
+                // The list is newest first.
+                var partners = _tabs.All(root);
+                sessionId = entries.Select(e => (string?)e["sessionId"]).FirstOrDefault(s => s != null && s != id && partners.TryGetValue(s, out var p) && p.Kind == partner.Kind && p.Id == partner.Id);
+            }
+            var handle = sessionId == null ? null : entries.FirstOrDefault(e => (string?)e["sessionId"] == sessionId)?.GetString("id");
+            if (handle == null)
+            {
+                if (sessionId != null) _tabs.Remove(root, sessionId);
+                await StartConversationAsync(requestId, partner).ConfigureAwait(false); return;
+            }
+            _composerAuto?.Stop(PompLanguage.Pick("대화 전환을 요청했어요.", "Conversation switch requested."));
+            await HandleRecentSessionsAsync(new JObject { ["action"] = "switch", ["requestId"] = requestId, ["root"] = listing["root"], ["id"] = handle }).ConfigureAwait(false);
+        }
+        /// <summary>
+        /// After every change of conversation: the engine extension applies the partner's model and thinking level (an agent conversation) or
+        /// gives a POMP conversation back the model it had (extensions/partner.ts). A conversation that just got its partner also gets the role's tools.
+        /// </summary>
+        private async Task ApplyConversationPartnerAsync(string session, bool assigned)
+        {
+            OmpConnection? connection;
+            lock (_stateLock)
+            {
+                if (_info.SessionId != session || _sessionSwitchUncertain || _recoveryStatus != "ready" || _turns.Count > 0 || _info.IsStreaming || _bridge.State != BridgeState.Running) return;
+                connection = _epochConnection;
+            }
+            if (connection == null) return;
+            try
+            {
+                await RequireEngineCommandsAsync(connection, _disposeCts.Token, "pomp-partner").ConfigureAwait(false);
+                var response = await connection.SendCommandAsync(OmpCommands.Prompt(assigned ? "/pomp-partner new" : "/pomp-partner"), TimeSpan.FromSeconds(15), _disposeCts.Token).ConfigureAwait(false);
+                if (!response.Success) _logger.Warn("The conversation partner could not be applied: " + response.Error);
+                if (assigned) await SendToolsAsync("reset").ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException)) { _logger.Warn("The conversation partner could not be applied: " + ex.Message); }
+            RequestInfoRefresh();
+        }
+        // Job ids belong to one engine; retain only team ids so the next team send can explain a restart.
         private void SyncTeamInstancesLocked()
         {
             if (ReferenceEquals(_teamInstancesConnection, _epochConnection) && _teamInstancesConnection?.IsClosed != true) return;
@@ -84,8 +195,12 @@ namespace Pomp.Hosting
         }
         private void ConversationObserved(string? sessionId)
         {
-            string root; bool changed, rootChanged, hadSession;
-            lock (_stateLock) { SyncTeamInstancesLocked(); hadSession = _partnerSession != null; changed = _partnerSession != sessionId; root = _workingDirectory; rootChanged = root != _runHistoryRoot; }
+            string root; bool changed, rootChanged, hadSession; ConversationPartnerPayload? assign = null;
+            lock (_stateLock)
+            {
+                SyncTeamInstancesLocked(); hadSession = _partnerSession != null; changed = _partnerSession != sessionId; root = _workingDirectory; rootChanged = root != _runHistoryRoot;
+                if (changed && !string.IsNullOrEmpty(sessionId)) { assign = _newConversationPartner; _newConversationPartner = null; }
+            }
             if (rootChanged && root.Length > 0)
             {
                 var history = new AgentRunHistory(_environment.DataDirectory, root, _logger);
@@ -93,14 +208,17 @@ namespace Pomp.Hosting
                 PublishRunHistory();
             }
             if (!changed) return;
-            var value = _partners.Get(root, sessionId);
-            lock (_stateLock) { _partnerSession = sessionId; _partner = value; _partnerInstance = null; _partnerInstances.Clear(); _teamInstances.Clear(); _unavailableTeams.Clear(); _partnerMessage = null; }
+            ConversationPartnerPayload value;
+            try { value = string.IsNullOrEmpty(sessionId) ? new ConversationPartnerPayload() : _tabs.Observe(root, sessionId!, assign); }
+            catch (Exception ex) when (ex is ArgumentException || ex is IOException || ex is UnauthorizedAccessException) { _logger.Warn("Chat tabs could not be saved: " + ex.Message); value = assign ?? new ConversationPartnerPayload(); }
+            lock (_stateLock) { _partnerSession = sessionId; _partner = value; _teamInstances.Clear(); _unavailableTeams.Clear(); _partnerMessage = null; }
             PauseChatQueue(PompLanguage.Pick("대화가 바뀌었어요.", "Conversation changed."), onlyIfItems: !hadSession);
-            PublishPartner();
+            PublishTabs();
+            if (!string.IsNullOrEmpty(sessionId)) _commands.Enqueue(() => ApplyConversationPartnerAsync(sessionId!, assign != null));
         }
         private ConversationPartnerPayload? DefaultPartner(ChatSendPayload send)
         {
-            // An explicit target, or an explicit "POMP itself" (page actions of the main conversation), overrides the partner.
+            // An explicit target, or an explicit "this conversation itself" (page actions), overrides the partner.
             if (send.Main == true || !string.IsNullOrWhiteSpace(send.Team) || !string.IsNullOrWhiteSpace(send.Agent) || !string.IsNullOrWhiteSpace(send.AgentInstance)) return null;
             lock (_stateLock) return CopyPartner(_partner);
         }
@@ -109,20 +227,9 @@ namespace Pomp.Hosting
             if (partner == null || partner.Kind == "main") return;
             partner = ValidatePartner(partner);
             send.Team = null; send.Agent = null; send.AgentInstance = null;
-            if (partner.Kind == "team") { send.Team = partner.Id; return; }
-            string? instance, session; bool samePartner;
-            lock (_stateLock) { samePartner = _partner.Kind == partner.Kind && _partner.Id == partner.Id; instance = samePartner ? _partnerInstance : null; session = _info.SessionId; }
-            var jobs = _backgroundAgents.View();
-            if (instance != null && (string?)jobs["sessionId"] == session && jobs["jobs"] is JArray list && list.Any(j => (string?)j["id"] == instance)) send.AgentInstance = instance;
-            else
-            {
-                send.Agent = partner.Id;
-                if (instance != null)
-                {
-                    lock (_stateLock) { _partnerInstance = null; _partnerInstances.Remove(partner.Id!); _partnerMessage = PompLanguage.Pick("이전 에이전트 인스턴스를 찾을 수 없어 새 에이전트로 이어서 시작해요.", "The previous agent instance is unavailable; starting a new agent instance."); }
-                    PublishPartner();
-                }
-            }
+            // A team conversation sends every message to its team. An agent conversation is that agent itself (the engine gives the
+            // conversation the role's persona), so the message goes as typed: no relay and no subagent.
+            if (partner.Kind == "team") send.Team = partner.Id;
         }
         private string TeamContinuation(AgentTeam team)
         {
@@ -151,7 +258,7 @@ namespace Pomp.Hosting
                 }
                 _unavailableTeams.Remove(team.Id);
             }
-            if (partnerChanged) PublishPartner();
+            if (partnerChanged) PublishTabs();
             return continuation;
         }
         private ChatQueueStatePayload QueueView()
@@ -279,7 +386,7 @@ namespace Pomp.Hosting
             }
             catch (Exception ex) { Reply(UiMessageTypes.AgentsHistoryReply, requestId, ex.Message); }
         }
-        private void BeginRun(TurnState turn, ChatSendPayload send, ConversationPartnerPayload? partner)
+        private void BeginRun(TurnState turn, ChatSendPayload send)
         {
             var kind = send.Team != null ? "team" : send.Agent != null ? "agent" : send.AgentInstance != null ? "dm" : null; if (kind == null) return;
             var id = send.Team ?? send.Agent ?? send.AgentInstance!;
@@ -289,7 +396,7 @@ namespace Pomp.Hosting
             string session;
             lock (_stateLock)
             {
-                SyncTeamInstancesLocked(); session = _info.SessionId ?? ""; turn.PartnerAgent = partner?.Kind == "agent" && send.Agent != null ? partner.Id : null;
+                SyncTeamInstancesLocked(); session = _info.SessionId ?? "";
                 turn.Team = team?.Id; turn.TeamMembers = team == null ? null : new HashSet<string>(team.Members, StringComparer.Ordinal); turn.TeamConnection = _epochConnection;
             }
             if (history == null) return;
@@ -325,16 +432,10 @@ namespace Pomp.Hosting
                         if (_partner.Kind == "team" && _partner.Id == teamTurn.Team && _partnerMessage != null) { _partnerMessage = null; partnerChanged = true; }
                     }
                 }
-                if (fresh && turn?.PartnerAgent != null && !turn.PartnerJobCaptured && turn.PartnerAgent == (string?)job["agent"] && AgentInstanceId.IsMatch((string?)job["id"] ?? ""))
-                {
-                    // Remembered for that agent even if the user switched tabs meanwhile; the active tab adopts it only if it is that agent.
-                    turn.PartnerJobCaptured = true; _partnerInstances[turn.PartnerAgent] = (string)job["id"]!;
-                    if (_partner.Kind == "agent" && _partner.Id == turn.PartnerAgent && _partnerInstance == null) { _partnerInstance = (string?)job["id"]; _partnerMessage = null; partnerChanged = true; }
-                }
             }
             try { if (history?.Observe(session, turn?.RunId, job, fresh) == true) PublishRunHistory(); }
             catch (Exception ex) { _logger.Warn("Run history progress could not be saved: " + ex.Message); }
-            if (partnerChanged) PublishPartner();
+            if (partnerChanged) PublishTabs();
             ObserveHookJob(job, fresh, duringHookTurn);
         }
         private void Reply(string type, string requestId, string? error) => _ui.Post(type, new UiCommandReplyPayload { RequestId = requestId, Ok = error == null, Error = error }, UiDelivery.State);

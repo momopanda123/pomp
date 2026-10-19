@@ -9,7 +9,7 @@ import { GoalCard } from './components/GoalCard';
 import { Transcript } from './components/Transcript';
 import { SessionHistory } from './components/SessionHistory';
 import { SessionHeader } from './components/SessionHeader';
-import { PartnerPicker } from './components/PartnerPicker';
+import { PartnerPicker, type TabSwitch } from './components/PartnerPicker';
 import { ChatQueue } from './components/ChatQueue';
 import { LiveAgentProgress } from './components/LiveAgentProgress';
 import { TabBar, type ShellTab } from './components/TabBar';
@@ -19,10 +19,9 @@ import { WorkTab, type RequestedWorkView } from './components/work/WorkTab';
 import { ToolsTab } from './components/tools/ToolsTab';
 import { toolsTarget, type ToolsView } from './toolsViews';
 import { newId } from './format';
-import { itemsForPartner } from './partnerView';
 import { useGoalCard } from './goalCard';
-import { useWorkState } from './work/store';
-import { useEscapeToComposer, useGlobalErrorLogging, useHostPump, useIgnoreFileDrops } from './hooks';
+import type { ConversationPartner } from './conversationProtocol';
+import { useEscapeToComposer, useFileDrops, useGlobalErrorLogging, useHostPump } from './hooks';
 import { I18nContext, LocaleContext, makeTranslate } from './i18n';
 import { dialogResponseRejection, permissionResponseRejection, promptRejection, type SendResult } from './limits';
 import { send, MAIN_TARGET, type PermissionDecision, type SendTarget, type WorkspaceFile } from './protocol';
@@ -73,10 +72,10 @@ export function App() {
   const [basketRequest] = useState(0);
   /** The /computer command: Tools › This conversation switches computer use (each revision once). */
   const [computerRequest, setComputerRequest] = useState<{ revision: number }>();
-  /** Agents tab "Message" on a role or team and `/agent name`: open (or switch to) that partner tab in Chat. */
-  const [partnerRequest, setPartnerRequest] = useState<{ key: string; seq: number }>();
+  /** Agents tab "Message" on a role or team and `/agent name`: open (or switch to) that agent's or team's tab, its own conversation. */
+  const [partnerRequest, setPartnerRequest] = useState<{ partner: ConversationPartner; seq: number }>();
   const translate = useMemo(() => makeTranslate(state.locale), [state.locale]);
-  useHostPump(dispatch); useEscapeToComposer(inputRef); useGlobalErrorLogging(); useIgnoreFileDrops();
+  useHostPump(dispatch); useEscapeToComposer(inputRef); useGlobalErrorLogging(); useFileDrops(() => translate('composer.dropUnsupported'));
   useEffect(() => { document.documentElement.lang = state.locale; }, [state.locale]);
 
   const connected = state.bridge.state === 'running';
@@ -118,33 +117,32 @@ export function App() {
   const workspaceKey = state.session?.workingDirectory ?? '';
   const sessionId = state.session?.sessionId;
   const goal = useGoalCard(workspaceKey, sessionId ?? '');
-  const scopedPartner = state.partner && sessionId && state.partner.sessionId === sessionId && state.partner.partner.kind !== 'main' ? state.partner : null;
-  const partnerName = scopedPartner ? (scopedPartner.partner.kind === 'agent'
-    ? roleTitle(effectiveRoles(state.agents?.roles ?? []).find(role => role.name === scopedPartner.partner.id), translate, scopedPartner.partner.id)
-    : scopedPartner.title || state.agents?.teams.find(team => team.id === scopedPartner.partner.id)?.title || scopedPartner.partner.id) : undefined;
-  // The view follows the partner tab: Default (POMP) shows every turn, an agent/team tab only its own (partnerView.ts).
-  const background = useWorkState('background') as { sessionId?: string; jobs?: { id: string; agent: string }[] } | undefined;
-  const viewItems = useMemo(() => {
-    if (!scopedPartner) return state.items;
-    const agents = new Map<string, string>();
-    for (const entry of state.agentHistory.entries) for (const member of entry.members) agents.set(member.jobId, member.agent);
-    for (const job of background?.jobs ?? []) agents.set(job.id, job.agent);
-    if (scopedPartner.instance && scopedPartner.partner.kind === 'agent' && scopedPartner.partner.id) agents.set(scopedPartner.instance, scopedPartner.partner.id);
-    return itemsForPartner(state.items, scopedPartner.partner, id => agents.get(id));
-  }, [state.items, scopedPartner, state.agentHistory, background]);
-  /** POMP answers it: show it in the Default (POMP) tab, where its turn is visible. */
-  const showPomp = () => { if (latestPartnerTab()) send('conversation/partner', { requestId: newId(), partner: { kind: 'main' } }); };
+  const scopedTabs = state.tabs && sessionId && state.tabs.sessionId === sessionId && state.tabs.partner.kind !== 'main' ? state.tabs : null;
+  const partnerName = scopedTabs ? (scopedTabs.partner.kind === 'agent'
+    ? roleTitle(effectiveRoles(state.agents?.roles ?? []).find(role => role.name === scopedTabs.partner.id), translate, scopedTabs.partner.id)
+    : scopedTabs.title || state.agents?.teams.find(team => team.id === scopedTabs.partner.id)?.title || scopedTabs.partner.id) : undefined;
+  const pendingSwitch = useRef<string | undefined>(undefined);
+  /** A tab command that changes the conversation (conversation/tab): the page waits for its session/newResult like a conversation switch. */
+  function switchTab(command: TabSwitch): boolean {
+    // One at a time: the pending state reaches `latest` only with the next render.
+    if (pendingSwitch.current || !canChangeSession()) return false;
+    const requestId = newId();
+    if (!send('conversation/tab', { ...command, requestId })) { dispatch({ type: 'localNotice', level: 'error', message: makeTranslate(latest.current.locale)('error.hostUnavailable') }); return false; }
+    pendingSwitch.current = requestId; dispatch({ type: 'newSessionRequested', requestId }); setListOpen(false); return true;
+  }
+  /** Editor requests belong to the Default (POMP) tab's conversation: from an agent or team tab the page switches there first. */
+  const showPomp = () => latestPartnerTab() && switchTab({ action: 'activate' });
   const openPartner = (target: SendTarget) => {
-    if (target.kind === 'agent' || target.kind === 'team') setPartnerRequest(previous => ({ key: `${target.kind}:${target.id}`, seq: (previous?.seq ?? 0) + 1 }));
-    // A running member is a one-message target; Default (POMP) shows every turn, so it is picked there.
-    else { showPomp(); dispatch({ type: 'selectTarget', target }); }
+    if (target.kind === 'agent' || target.kind === 'team') setPartnerRequest(previous => ({ partner: { kind: target.kind as 'agent' | 'team', id: target.id }, seq: (previous?.seq ?? 0) + 1 }));
+    // A running member of this conversation is a one-message target here.
+    else dispatch({ type: 'selectTarget', target });
     setTab('chat'); setListOpen(false); window.requestAnimationFrame(() => inputRef.current?.focus());
   };
   const latest = useRef(state); latest.current = state;
-  /** The active partner tab (`agent:name`/`team:id`) of the current conversation, or undefined in Default (POMP). */
-  function latestPartnerTab(): string | undefined {
-    const current = latest.current; const partner = current.partner;
-    return partner && partner.sessionId === current.session?.sessionId && partner.partner.kind !== 'main' && partner.partner.id ? `${partner.partner.kind}:${partner.partner.id}` : undefined;
+  /** Whether the current conversation is an agent or team tab's (not the Default (POMP) tab's). */
+  function latestPartnerTab(): boolean {
+    const current = latest.current; const tabs = current.tabs;
+    return !!tabs && tabs.sessionId === current.session?.sessionId && tabs.partner.kind !== 'main';
   }
   const activeTab = setupRequired ? 'accounts' : tab;
   const attentionRef = useRef(attention); attentionRef.current = attention;
@@ -159,32 +157,23 @@ export function App() {
 
   /** A message while a reply runs is queued, also a question sent from the code editor. */
   const sending = useRef(false); const queueSubmitting = useRef<string | undefined>(undefined);
-  /** `toMain`: a request that belongs to the main conversation (editor menu, plan continuation): once accepted the view moves to Default (POMP). */
+  /** `toMain`: a request that belongs to the Default (POMP) tab's conversation (editor menu): from another tab it waits in the input while the page switches there. */
   const sendMessage = useCallback((text: string, attachments: WorkspaceFile[] = [], clearDraft = false, target?: SendTarget | null, preserveDraftTarget = false, includeEditorContext?: boolean, toMain = false): SendResult => {
-    const current = latest.current; const partnerTab = latestPartnerTab();
-    // A one-message target chosen in an agent/team tab goes from that tab too: the message (and its turn) stays visible there.
+    const current = latest.current;
     const destination = target === undefined ? current.selectedTarget : target ?? undefined;
     const queued = current.phase === 'running' || current.session?.isStreaming === true;
-    attachments = attachments.filter(file => !file.excluded);
     if ((!queued && sending.current) || queueSubmitting.current || current.replaying || current.phase === 'sending' || current.pendingNewSession !== undefined || current.permissions.length > 0 || current.dialogs.length > 0) return { ok: false, reason: 'busy' };
     if (current.bridge.state !== 'running') return { ok: false, reason: 'hostUnavailable' };
     if (current.session?.recoveryStatus === 'restoring' || current.session?.recoveryStatus === 'failed') return { ok: false, reason: 'busy' };
+    if (toMain && destination?.kind === 'main' && latestPartnerTab()) { showPomp(); return { ok: false, reason: 'busy' }; }
     const id = newId();
-    // An editor or work request POMP answers moves the view to Default (POMP) once it was accepted; POMP chosen on the chip, or a retry
-    // of such a message, stays in the tab it was sent from.
-    const moveToMain = toMain && destination?.kind === 'main';
-    // Sent from an agent/team tab to another target: the host records that tab with the message, so it stays there after a restore
-    // (a message for the tab's own partner already names it in its routing brief).
-    const origin = partnerTab && !moveToMain && destination && `${destination.kind}:${destination.id}` !== partnerTab ? partnerTab.split(':') as ['agent' | 'team', string] : undefined;
     const message = { clientMessageId: id, text, includeEditorContext: includeEditorContext ?? current.includeEditorContext,
-      ...(attachments.length > 0 ? { attachments: attachments.map(file => ({ path: file.fullPath })) } : {}), ...targetPayload(destination),
-      ...(origin ? { from: { kind: origin[0], id: origin[1] } } : {}) };
+      ...(attachments.length > 0 ? { attachments: attachments.map(file => ({ path: file.fullPath })) } : {}), ...targetPayload(destination) };
     const rejection = promptRejection(text, { type: 'chat/send', payload: message }, attachments.map(file => file.fullPath));
     if (rejection) return { ok: false, ...rejection };
     if (queued) queueSubmitting.current = id; else sending.current = true;
     if (!send('chat/send', message)) { sending.current = false; queueSubmitting.current = undefined; return { ok: false, reason: 'hostUnavailable' }; }
-    if (moveToMain && partnerTab) send('conversation/partner', { requestId: newId(), partner: { kind: 'main' } });
-    dispatch({ type: 'userSend', id, text, attachments, clearDraft, target: destination, preserveDraftTarget, queued, partnerKey: moveToMain ? undefined : partnerTab });
+    dispatch({ type: 'userSend', id, text, attachments, clearDraft, target: destination, preserveDraftTarget, queued });
     rememberPrompt(current.session?.workingDirectory ?? '', text); // every sent prompt, also one an editor command composed
     return { ok: true };
   }, []);
@@ -243,7 +232,7 @@ export function App() {
   const openList = () => { setTab('chat'); setListOpen(true); history.command('refresh'); };
   const closeList = () => { setListOpen(false); window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[data-testid="session-quick"]')?.focus()); };
   const openWork = (view?: RequestedWorkView) => { setWorkView(view ?? workView); setTab('work'); };
-  const openRuns = () => { setAgentsView('roles'); setTab('agents'); };
+  const openRuns = () => { setAgentsView('running'); setTab('agents'); };
   /** A Tools view id (a chip, an id older builds used, or `hooks`) opens where it lives now: a Tools chip, or the Agents tab's Automation view for the project hooks. Other ids are ignored. */
   const openTools = (view: string) => {
     const target = toolsTarget(view);
@@ -264,15 +253,28 @@ export function App() {
     if (!draft || (workspaceKey && !sameRoot(draft.payload.root, workspaceKey))) return;
     setToolsView('knowledge'); setTab('tools');
   }, [draftSeq]);
-  /** Work › Progress "continue" and a started workflow (Work or Tools): the plan instruction plus the task goes to the main agent and Chat opens. */
+  /** Work › Progress "continue" and a started workflow (Work or Tools): the plan instruction plus the task goes to this conversation (its plan) and Chat opens. */
   const continueWork = (task?: string) => {
     const instruction = state.locale.startsWith('ko') ? '현재 작업 계획을 확인하고 미완료 단계부터 이어서 진행해 주세요. 기존 변경과 검증 결과를 먼저 확인하고, 완료하지 않은 작업을 완료했다고 보고하지 마세요.' : 'Review the current work plan and continue from the unfinished step. Check existing changes and verification evidence first; do not report unverified work as complete.';
-    const result = sendMessage(task ? instruction + '\n\n' + task : instruction, [], false, MAIN_TARGET, false, undefined, true); if (result.ok) setTab('chat');
+    const result = sendMessage(task ? instruction + '\n\n' + task : instruction, [], false, MAIN_TARGET); if (result.ok) setTab('chat');
   };
   /** Puts the text into the chat input (not sent) and shows Chat. */
   const insertIntoChat = (text: string) => { setTab('chat'); setListOpen(false); setInsertText(previous => ({ text, seq: (previous?.seq ?? 0) + 1 })); };
   const prefillSeq = state.prefill?.seq;
-  useEffect(() => { if (prefillSeq !== undefined) { setTab('chat'); setListOpen(false); if (state.prefill?.payload.target || state.prefill?.payload.pickTarget) showPomp(); } }, [prefillSeq]);
+  // A target the editor menu chose survives the switch to the Default (POMP) tab, which clears the one-message target.
+  const prefillTarget = useRef<SendTarget | undefined>(undefined);
+  useEffect(() => {
+    if (prefillSeq === undefined) return;
+    setTab('chat'); setListOpen(false);
+    const payload = state.prefill?.payload;
+    if (payload?.target && latestPartnerTab()) prefillTarget.current = payload.target;
+    if (payload?.send || payload?.target || payload?.pickTarget) showPomp();
+  }, [prefillSeq]);
+  useEffect(() => {
+    if (newSessionPending) return;
+    pendingSwitch.current = undefined;
+    if (prefillTarget.current) { dispatch({ type: 'selectTarget', target: prefillTarget.current }); prefillTarget.current = undefined; }
+  }, [newSessionPending]);
   const focusedPrefill = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (prefillSeq === undefined || focusedPrefill.current === prefillSeq || activeTab !== 'chat' || modal) return;
@@ -311,8 +313,8 @@ export function App() {
     <TabBar active={activeTab} onChange={changeTab} bridge={state.bridge} required={setupRequired} workCount={workCount} accountAttention={accountAttention} chatAttention={modal && activeTab !== 'chat'} inert={false} engine={state.engine} />
     <main className="main">
       <section id="page-chat" className="tab-page chat-page" role="tabpanel" aria-labelledby="tab-chat" hidden={activeTab !== 'chat'} inert={activeTab !== 'chat' || undefined}>
-        <SessionHeader session={state.session} history={history} disabled={sessionBlocked} onNew={newSession} listOpen={listOpen} onToggleList={() => { if (listOpen) closeList(); else openList(); }}><PartnerPicker state={state.partner} agents={state.agents} replies={state.conversationReplies} sessionId={sessionId} disabled={!connected || busy || newSessionPending || modal} request={partnerRequest} onRefreshRoster={() => { if (connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }} /></SessionHeader>
-        <div className="conversation-list-anchor">{listOpen && <div ref={listRef} id="conversation-list" className="conversation-list"><SessionHistory locale={state.locale} sessionId={sessionId} sessionName={state.session?.sessionName} history={history} disabled={sessionBlocked} onNew={newSession} onOpened={closeList} onClose={closeList} /></div>}</div>
+        <SessionHeader session={state.session} history={history} disabled={sessionBlocked} onNew={newSession} listOpen={listOpen} onToggleList={() => { if (listOpen) closeList(); else openList(); }}><PartnerPicker tabs={state.tabs} agents={state.agents} replies={state.conversationReplies} sessionId={sessionId} disabled={sessionBlocked} lockedTitle={connected && !recovering && !newSessionPending && sessionBlocked ? translate('partner.locked') : undefined} request={partnerRequest} onSwitch={switchTab} onRefreshRoster={() => { if (connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }} /></SessionHeader>
+        <div className="conversation-list-anchor">{listOpen && <div ref={listRef} id="conversation-list" className="conversation-list"><SessionHistory locale={state.locale} sessionId={sessionId} sessionName={state.session?.sessionName} partner={scopedTabs?.partner ?? { kind: 'main' }} history={history} disabled={sessionBlocked} onNew={newSession} onOpened={closeList} onClose={closeList} /></div>}</div>
         <ConnectionBanner bridge={state.bridge} onRestart={() => send('bridge/restart', {})} onOpenLog={() => send('log/open', {})} /><EngineNotice engine={state.engine} /><UndeliveredStatusBanner />
         {(recovering || recoveryFailed) && <div className="composer-error" role="status" data-testid="session-recovery">
           {state.session?.recoveryMessage || (state.locale.startsWith('ko') ? '이전 대화를 확인하는 중' : 'Confirming the previous conversation')}
@@ -322,16 +324,16 @@ export function App() {
             <button type="button" disabled={sessionBlocked} onClick={newSession}>{state.locale.startsWith('ko') ? '새 대화' : 'New conversation'}</button>
           </div>}
         </div>}
-        <Transcript controlsEnabled={conversationReady && !newSessionPending && !state.replaying} root={workspaceKey} sessionId={sessionId} items={viewItems} partnerName={partnerName} busy={busy} replaying={state.replaying} replayRevision={state.replayRevision} replayTruncated={state.replayTruncated} canRetry={conversationReady && !busy && !newSessionPending && !modal} onRetry={retryTurn} request={requestCard} />
+        <Transcript controlsEnabled={conversationReady && !newSessionPending && !state.replaying} root={workspaceKey} sessionId={sessionId} items={state.items} busy={busy} replaying={state.replaying} replayRevision={state.replayRevision} replayTruncated={state.replayTruncated} canRetry={conversationReady && !busy && !newSessionPending && !modal} onRetry={retryTurn} request={requestCard} />
         {(planTotal > 0 || workCount > 0 || attention.background > 0 || attention.hooks > 0) && <div className="activity-chips" data-testid="activity-chips">
           {planTotal > 0 && <button className="activity-chip" type="button" data-testid="activity-plan" onClick={() => openWork('progress')}>{translate('work.plan')} {completed}/{planTotal}</button>}
           {(['review', 'codeReview', 'workflow', 'history'] as const).filter(view => attention[view] > 0).map(view => <button className="activity-chip" type="button" key={view} data-testid={`activity-${view}`} onClick={() => openWork(view)}>{translate(`work.${view}`)} {attention[view]}</button>)}
           {/* The live progress row below names this turn's running members: the chip counts only the others (earlier turns). */}
           {(['hooks'] as const).filter(view => attention[view] > 0).map(view => <button className="activity-chip" type="button" key={view} data-testid={`activity-${view}`} onClick={() => openTools(view)}>{translate(`work.${view}`)} {attention[view]}</button>)}
         </div>}
-        <LiveAgentProgress disabled={!conversationReady || newSessionPending || state.replaying} sessionId={sessionId} promptId={state.activePromptId} items={viewItems} />
+        <LiveAgentProgress disabled={!conversationReady || newSessionPending || state.replaying} sessionId={sessionId} promptId={state.activePromptId} items={state.items} />
         <ChatQueue state={state.queue} replies={state.conversationReplies} sessionId={sessionId} disabled={!conversationReady || newSessionPending || modal} pendingSends={state.pendingQueued} onRecover={item => { dispatch({ type: 'recoverQueueSend', id: item.clientMessageId }); inputRef.current?.focus(); }} />
-        <Composer locale={state.locale} workspaceKey={workspaceKey} sessionId={sessionId} model={state.session?.model} session={state.session} setup={state.setup} setupReplies={state.setupReplies} onManageAccounts={() => changeTab('accounts')} inputRef={inputRef} connected={conversationReady} busy={busy} queueBlocked={state.phase === 'sending' || state.replaying || state.pendingQueued.some(item => !item.failed)} requestPending={modal || activeTab !== 'chat'} newSessionPending={newSessionPending} draft={state.composer} dispatch={dispatch} includeEditorContext={state.includeEditorContext} onIncludeEditorContextChange={value => dispatch({ type: 'setIncludeEditorContext', value })} onSend={sendMessage} onStop={() => send('chat/stop', {})} commands={state.commands.commands} commandsHidden={state.commands.hidden} onCommand={handleCommand} onGoal={goal.open} skillsOff={goal.skillsOff} prefill={state.prefill} insertSkill={insertSkill} insertText={insertText} basketRequest={basketRequest} basketTokens={state.basketTokens} agents={state.agents} shortcuts={shortcuts} composerPredictions={state.hello?.composerPredictions === true} approvalMode={state.hello?.approvalMode} permissionModeReply={state.permissionModeReply} editorFollow={state.editorFollow} selectedTarget={state.selectedTarget} onSelectTarget={target => dispatch({ type: 'selectTarget', target })} partnerName={partnerName} partner={scopedPartner?.partner} onOpenPartner={openPartner} />
+        <Composer locale={state.locale} workspaceKey={workspaceKey} sessionId={sessionId} model={state.session?.model} session={state.session} setup={state.setup} setupReplies={state.setupReplies} onManageAccounts={() => changeTab('accounts')} inputRef={inputRef} connected={conversationReady} busy={busy} queueBlocked={state.phase === 'sending' || state.replaying || state.pendingQueued.some(item => !item.failed)} requestPending={modal || activeTab !== 'chat'} newSessionPending={newSessionPending} draft={state.composer} dispatch={dispatch} includeEditorContext={state.includeEditorContext} onIncludeEditorContextChange={value => dispatch({ type: 'setIncludeEditorContext', value })} onSend={sendMessage} onStop={() => send('chat/stop', {})} commands={state.commands.commands} commandsHidden={state.commands.hidden} onCommand={handleCommand} onGoal={goal.open} skillsOff={goal.skillsOff} prefill={state.prefill} insertSkill={insertSkill} insertText={insertText} basketRequest={basketRequest} basketTokens={state.basketTokens} agents={state.agents} shortcuts={shortcuts} composerPredictions={state.hello?.composerPredictions === true} wordCompletion={state.hello?.wordCompletion !== false} transcript={state.items} approvalMode={state.hello?.approvalMode} permissionModeReply={state.permissionModeReply} editorFollow={state.editorFollow} selectedTarget={state.selectedTarget} onSelectTarget={target => dispatch({ type: 'selectTarget', target })} partnerName={partnerName} partner={scopedTabs?.partner} onOpenPartner={openPartner} />
       </section>
       <section id="page-work" className="tab-page work-page" role="tabpanel" aria-labelledby="tab-work" hidden={activeTab !== 'work'} inert={activeTab !== 'work' || undefined}>
         <WorkTab locale={state.locale} session={state.session} workspaceKey={workspaceKey} sessionId={sessionId} connected={conversationReady} busy={busy} newSessionPending={newSessionPending} inert={activeTab !== 'work'} attention={attention} requestedView={workView} onViewChange={setWorkView} onStop={() => send('chat/stop', {})} onContinue={continueWork} onSolve={text => {

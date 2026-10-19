@@ -96,6 +96,17 @@ The VS host handles these page messages in the WebView channel. They never reach
 - An image is first saved as `<root>/.pomp/local/clipboard/clipboard-<time>.png`.
 - Folders and missing files are left out.
 
+#### `ui/dropFiles`
+
+- The page sends it when files are dropped anywhere on it, with `chrome.webview.postMessageWithAdditionalObjects`: the payload is `{}` and the dropped `FileList` goes as the additional objects.
+- The VS host reads each `CoreWebView2File.Path` from `AdditionalObjects` and puts the files into the context basket as for `ui/pasteFiles`. Folders and missing files are left out.
+- `AdditionalObjects` needs WebView2 SDK 1.0.1901.177 (earlier SDKs have the property but throw) and Runtime 113. VS 2017/2019 ship that SDK. VS 2022+ use their own copy, read through reflection.
+- Where the runtime lacks the API, the page sends a `ui/status` warning instead. Where the host's WebView2 copy lacks it, the host logs a warning.
+- A `text/uri-list` drag (Solution Explorer in VS 2017) is sent as `ui/dropFiles { paths }` (at most 500). The paths come from its `file:` URIs or, because Chromium hides those from pages, from the absolute paths the drag carries as plain text lines; other lines are ignored.
+- A drag whose data the page cannot read at all (no types: Solution Explorer in later versions uses Visual Studio's own formats) is sent as `ui/dropFiles { projectItems: true }` with a plain `postMessage`.
+  The host then adds Solution Explorer's selected files (the dragged items), only while Solution Explorer is the active window.
+- The page cancels every file drop, so the WebView never navigates to a dropped file. Text dragged from the editor still drops into the chat input.
+
 #### `ui/status`
 
 Payload: `{ text, level: "error"|"warning"|"info" }`.
@@ -236,13 +247,13 @@ Host text the page shows says what happened, the current state or a reason.
 
 | type | payload | notes |
 |---|---|---|
-| `host/hello` | `{ version, vsVersion?, locale?, includeEditorContextByDefault, composerPredictions, approvalMode, shortcuts }` | First message after `ui/ready`. See "host/hello" below. |
+| `host/hello` | `{ version, vsVersion?, locale?, includeEditorContextByDefault, composerPredictions, wordCompletion, approvalMode, shortcuts }` | First message after `ui/ready`. See "host/hello" below. |
 | `host/editorFollow` | `{ live, bookmarks, requestId?, error? }` | Editor follow capability and applied settings. See "Host-internal messages". |
 | `bridge/state` | `{ state, message?, attempt?, nextRetryMs?, reason? }` | Engine connection state. See "bridge/state" below. |
 | `workspace/trustState` | `{ requestId?, root, required, trusted, fingerprint, files: [{ path, kind, detail? }], truncated?, error? }` | Workspace engine configuration needing trust. See "Workspace trust". |
 | `theme/changed` | `{ kind: "dark"\|"light", colors: { [cssVar]: value }, fontFamily?, fontSizePx? }` | Apply every `colors` entry. |
 | `session/info` | `{ model?, thinkingLevel?, sessionId?, sessionName?, contextUsage?, isStreaming, workingDirectory?, fastMode? }` | Session state for the composer. See "session/info" below. |
-| `chat/turnStarted` | `{ promptId, clientMessageId?, text?, attachments?, editorContext?, team?, agent?, agentInstance?, main?, from? }` | The host took a user message as a prompt. See "chat/turnStarted" below. |
+| `chat/turnStarted` | `{ promptId, clientMessageId?, text?, attachments?, editorContext?, team?, agent?, agentInstance?, main? }` | The host took a user message as a prompt. See "chat/turnStarted" below. |
 | `chat/assistantStart` | `{ messageId }` | New assistant bubble. |
 | `chat/assistantDelta` | `{ messageId, kind: "text"\|"thinking", delta }` | Append; render markdown incrementally. |
 | `chat/assistantNarration` | `{ messageId, text }` | The ended thinking block was narration. See "chat/assistantNarration" below. |
@@ -285,11 +296,14 @@ shows that the answer was cut.
 - It is sent again when:
   - the language option changes the effective locale. The option is Tools > Options > Pomp > General > Chat > Language: Automatic / 한국어 / English;
   - the approval mode changes;
-  - the shortcuts change.
+  - the shortcuts change;
+  - a Chat option it carries changes (`includeEditorContextByDefault`, `composerPredictions`, `wordCompletion`).
 - Nothing else resets it. The page compares nothing; it applies what it gets.
 - `locale` is `ko-KR`/`en-US` for an explicit choice, else VS's UI culture.
 - `approvalMode` is omp's approval mode in effect: `alwaysAsk` \| `write` \| `yolo`.
   The composer's permission-mode chip shows it. `permission/mode` changes it.
+- `wordCompletion` is Tools > Options > Pomp > General > Chat > Word completion (default on; absent from an older host means on).
+  While it is true, the page shows the rest of the word being typed and Tab inserts it. See "Word completion".
 
 `shortcuts` come from Tools > Options > Pomp > General > Shortcuts.
 
@@ -405,8 +419,7 @@ Payload fields:
 | `text`, `attachments: [{ path }]` | the user's input as typed, without editor context |
 | `editorContext` | `{ path, startLine?, endLine?, caretLine? }`: the active file actually prepended to the prompt |
 | `team`, `agent`, `agentInstance` | the destination the message actually went to |
-| `main` | `true` when POMP itself answered |
-| `from` | `{ kind: "agent"\|"team", id }`: the validated `chat/send.from` |
+| `main` | `true` when the conversation answered itself (no one-message target) |
 
 **Turn lifecycle**
 
@@ -430,21 +443,18 @@ Payload fields:
 - `startLine`/`endLine` are an inclusive non-empty selection range. An end at column 1 excludes that line.
 - Otherwise `caretLine` labels the nearby editor lines.
 - It is omitted for context-off sends, slash commands, or no active document.
-- Restored history recovers it only from POMP's leading `<vs_context>` block, after any host routing brief and origin marker.
+- Restored history recovers it only from POMP's leading `<vs_context>` block, after any host routing brief (and the tab marker an earlier POMP wrote).
 
 **Destination**
 
 - The destination is the explicit target, or the conversation partner the host applied.
 - A replayed bubble thus keeps its "→ target" badge.
-- With `main: true` there is no badge, so a retry after a partner change still goes to POMP.
-- With `from`, a bubble the page creates from this message belongs to that agent/team tab as well as to its destination.
+- With `main: true` there is no badge, and a retry goes to the conversation itself again.
 
 **Restored history of another session**
 
 - It shows the extension's routing brief, such as `<!-- pomp-team:… -->`, at the start of the user text.
-- It gives `from` from the origin marker `<!-- pomp-from:<kind>:<id> -->` the host recorded in the prompt.
-- The origin marker is never shown: the host removes it from `text`.
-- Session titles, previews and archive pages leave both out.
+- Session titles, previews and archive pages leave it out.
 
 ### chat/assistantNarration
 
@@ -502,6 +512,7 @@ It comes from the code editor's POMP menu: explain, review, ask, add file, and "
 - It is ignored while a permission/dialog is up, and for unknown views.
 - The page also accepts the Tools ids: `extensions`, `instructions`, `index`, and the older `skills`, `mcp`, `rules`, `workflows`.
 - `hooks` opens Agents › 규칙.
+- `background` opens Agents › 실행 중 (Running).
 
 ### Engine version
 
@@ -593,7 +604,7 @@ A host-level error not tied to a turn. It is sent when:
 | `ui/log` | `{ level: "debug"\|"info"\|"warning"\|"error", message }` | Page-side diagnostics into the host log. |
 | `ui/editorFollow` | `{ requestId, action: "set", live?, bookmarks? }` | Persist the specified editor-follow toggles. |
 | `chat/send` | see [`chat/send`](#chatsend) | Send a message or queue it while busy. |
-| `workspace/countDraftTokens` | `{ requestId, root, sessionId, modelId, provider, text }` | Count the draft with the local tokenizer. |
+| `workspace/countDraftTokens` | `{ requestId, root, sessionId, modelId, provider, text, attachments?: [{ path }] }` | Count the draft, attachments and knowledge with the local tokenizer. |
 | `workspace/countBasketTokens` | `{ requestId, root, sessionId?, includeEditorContext, attachments?: [{ path }] }` | Estimate what the next message adds beyond its text. |
 | `workspace/findFiles` | `{ requestId, query, limit? }` | Files for the `@` mention list. |
 | `workspace/pickFiles` | `{ requestId }` | Show a multi-select file dialog. |
@@ -633,8 +644,7 @@ Payload:
 
 ```
 { clientMessageId, text, includeEditorContext, attachments?: [{ path }],
-  team?: string, agent?: string, agentInstance?: string, main?: true,
-  from?: { kind: "agent"|"team", id: string } }
+  team?: string, agent?: string, agentInstance?: string, main?: true }
 ```
 
 **Turn start and queueing**
@@ -656,27 +666,19 @@ Payload:
 - `agentInstance` delivers the message to that existing agent over omp's IRC (`/pomp-dm`).
 - At most one of `team`/`agent`/`agentInstance` may be set.
 - An unknown target ends the turn with `send_failed` (docs/architecture.md §8.3).
-- `main: true` makes POMP itself answer, whatever the conversation partner is.
-- Uses of `main: true`: page actions of the main conversation, such as work plan continue, code-review discuss and editor menu auto-send; retries of POMP answers.
+- `main: true` makes the conversation answer itself, without a team conversation's team routing.
+- Uses of `main: true`: page actions such as work plan continue, code-review discuss and editor menu auto-send; retries of such answers.
+- Editor menu requests belong to the Default (POMP) tab's conversation: from an agent or team tab the page switches there first and the request waits in the input.
 - `main` combined with another target ends the turn with `send_failed`.
-
-**`from`**
-
-- `from` names the agent/team tab the message was sent from.
-- The page sends it only when that tab sends to a different one-message target: another agent, team, running instance, or `main`.
-- The page never sends it for an editor or work request that moves the view to Default (POMP).
-- It is view only and never routes the message.
-- The host keeps it only when `kind` is `agent`/`team` and `id` is a valid role/team name (the partner-id rule). Otherwise the host ignores it.
-- A kept `from` rides along in `chat/turnStarted.from`, also for a queued message.
-- A kept `from` is recorded as `<!-- pomp-from:<kind>:<id> -->` before the composed prompt, after the extension's routing brief.
-- This way a restored transcript returns it.
-- A slash command for POMP itself gets no marker, because omp parses the command only at the start.
+- Without a target, the current conversation's partner applies ("Conversation tabs" below): an agent conversation gets the message as typed, a team conversation through `/pomp-team`.
 
 #### `workspace/countDraftTokens`
 
-- This is the basket details' draft counter.
-- The host asks a hidden POMP extension command.
-- The command counts with the engine's local tokenizer for the current model; no provider request is made.
+- This is the basket's **Count tokens** button.
+- The host counts one text: the attachment list as a send writes it, the draft, and the conversation's knowledge block
+  (ticked defaults and picks, as the extension's `<pomp_knowledge>` block renders it).
+- The host asks a hidden POMP extension command, which counts with the engine's local tokenizer for the current model; no provider request is made.
+- Over 128,000 characters, or while a reply runs, the host answers with a characters-based estimate.
 - Answered by `workspace/tokenCount`:
 
 ```
@@ -796,7 +798,7 @@ Payload:
 - Answered by `workspace/agentPlanPageResult`:
 
 ```
-{ requestId, ok, error?, revision, editable, page, size, total,
+{ requestId, ok, error?, revision, editable, editableWhileWorking, page, size, total,
   phases: [{ index, name, taskCount }],
   rows: [{ phase, task, content, status, blocker? }] }
 ```
@@ -855,7 +857,13 @@ Payload:
 - `planRevision` is a hash of the whole plan.
 - `todoPhases` holds the first 20 phases / 200 tasks.
 - The page asks `workspace/agentPlanPage` again whenever the revision changes.
-- Each row is edited or deleted with `workspace/agentPlanEdit`, under the same guards as above.
+- Each row is edited or deleted with `workspace/agentPlanEdit`, under the same guards as above, except while the agent works:
+  - `editable` says the guards above pass; `editableWhileWorking` says only the conversation and the connection are right.
+  - While a turn, a tool, an approval/question or background work is active, or queued messages are about to run, an edit is taken only when it leaves the task in progress alone: changing or deleting a task that is not in progress, adding a task, adding or renaming a phase. No edit may set `in_progress`. A phase holding the task in progress is not deleted.
+  - The reason: the model names its tasks by their text in its todo calls; the task it works on must stay as it knows it.
+  - The host reads the plan once more just before `set_todos` and refuses the edit when the model changed it meanwhile.
+  - The page asks for the page again when the work starts or ends, so both flags are current.
+- After every saved edit the host sends `/pomp-plan-note` (extension `plan-edits.ts`) with the change in words. The model gets it once: with its next tool result while it works, else before its next run. It says the plan as it is now is the user's, so the model does not write back the plan it remembers.
 - Tasks and phases are added, and phases renamed or deleted, the same way.
 - There is no limit on the number of phases or tasks.
 - Text limits still apply: names ≤ 200, content ≤ 600, blocker ≤ 300 characters.
@@ -871,44 +879,52 @@ Payload:
 - When unfinished items remain, omp may ask the model to continue at the end of the next run.
 - The page shows these limits in the editor.
 
-## Conversation partners, command queue and agent run history
+## Conversation tabs, command queue and agent run history
 
 - All three state messages below are included in every `ui/ready` snapshot.
 - They are republished on change.
 - Commands are ordered with chat sends on the host's serial command queue.
-- Each command receives its matching reply `{ requestId, ok, error? }` exactly once.
 
-### Conversation partner
+### Conversation tabs
+
+Every chat tab is its own omp conversation: the Default (POMP) tab's, and one per open agent or team tab.
 
 | type | direction | payload |
 |---|---|---|
-| `conversation/partner` | UI → host | `{ requestId, partner: { kind: "main"\|"agent"\|"team", id? } }` |
-| `conversation/partnerReply` | host → UI | Reply to `conversation/partner`. |
-| `conversation/partnerState` | host → UI | `{ sessionId?, partner: { kind, id? }, instance?, title?, message? }` |
+| `conversation/tab` | UI → host | `{ requestId, action: "open"\|"activate"\|"close", partner?: { kind: "agent"\|"team", id }, sessionId? }` |
+| `conversation/tabReply` | host → UI | `{ requestId, ok, error? }`: only for `close` of a tab that is not the current conversation. |
+| `conversation/tabsState` | host → UI | `{ sessionId?, partner: { kind, id? }, title?, message?, main?, tabs: [{ sessionId, partner, title? }] }` |
 
-**Selection**
+**Actions**
 
-- With no explicit `team`, `agent`, `agentInstance` or `main`, `chat/send` uses the current conversation partner.
-- A one-message target overrides it without changing the preference.
-- Only usable, non-shadowed roster roles/teams can be selected.
+- `open` with `partner`: switches to that partner's open tab. With no open tab, it switches to the partner's most recently changed conversation (the list's newest), or starts a new, empty conversation for it (`new_session`) when it has none. A partner never has two open tabs.
+- `activate` with `sessionId`: switches to that open tab's conversation. Without `sessionId`: the Default tab's conversation (`main`), or a new POMP conversation when it has none.
+- `close` with `sessionId`: closes the tab; the conversation stays in the conversation list. Closing the current tab then activates the Default tab.
+- `session/new` makes a new conversation in the current tab: a new agent or team conversation in that tab (a POMP conversation in the Default tab, or when the role or team no longer exists). Deleting the current conversation does the same.
+- A `session/history` `switch` to a listed agent or team conversation makes it the current conversation of that partner's tab; the tab keeps its place and the conversation it had stays listed. A POMP conversation becomes the Default tab's.
+- A tab whose conversation the engine never wrote (no message was sent) starts a new conversation for its partner instead of switching.
+- `open`, `activate` and `close` of the current tab change the conversation: they answer with exactly one `session/newResult { requestId, status, message? }` and replay the transcript like a `session/history` switch. They are refused while a reply, approval, question or background work runs.
+
+**State**
+
+- `sessionId`/`partner`/`title`: the current conversation and its partner (`main` for a POMP conversation).
+- `main`: the Default tab's conversation id, or `null`.
+- `tabs`: the open agent and team tabs in order. The page also shows the current conversation as a tab when its tab was closed.
+- `message`: a team conversation's note that its previous members are gone.
 
 **Routing**
 
-- Agent partners start with `/pomp-agent`.
-- The host remembers the first newly started matching job in that turn.
-- Subsequent messages use `/pomp-dm` while that id remains in this conversation's background jobs.
-- If the job disappeared, including after engine restart, the next message starts a new assignment.
-- In that case `message` explains the fallback.
-- Team partners use `/pomp-team` on every message.
+- With no explicit `team`, `agent`, `agentInstance` or `main`, `chat/send` uses the current conversation's partner.
+- An agent conversation sends the message as typed: the engine extension (`extensions/partner.ts`) gives that conversation the role's instructions, model, thinking level and tools. No `/pomp-agent` and no subagent.
+- A team conversation sends every message with `/pomp-team`, as before, inside its own conversation.
+- A one-message target (the composer's send-target chip) overrides the partner for that message.
 
 **Persistence**
 
-- Preferences are persisted per omp session id in the workspace's `.pomp/local/partners.json`, atomically.
-- There is no entry count limit.
-- Past 4 MiB, the conversations used longest ago are removed first.
-- Damaged files reset with a log warning.
-- Process-local instances are not persisted.
-- Session-list `entries[].partner` is `{ kind, id? }` for an agent/team, or `null` for main.
+- `<workspace>\.pomp\local\chat-tabs.json`, written atomically: `{ version: 1, main, conversations: [{ sessionId, partner: { kind, id }, open }] }`. `open` marks the current conversation of an open tab; every agent or team conversation stays listed with its partner.
+- A conversation that is not listed is a POMP conversation. The engine extension reads the partners from this file.
+- There is no entry count limit. Past 1 MiB, closed conversations listed first are removed first. Damaged files reset with a log warning.
+- Session-list `entries[].partner` is `{ kind, id }` for an agent or team conversation, or `null` for a POMP conversation. The page lists only the entries whose partner is the current tab's.
 
 ### Host command queue
 
@@ -1145,13 +1161,22 @@ Payload:
 - The guard relies on the engine's **session-scoped settings API**.
   Every engine upgrade therefore re-verifies the actual settings resolution and permission bypass.
 
+**Screen & input control note**
+
+- While `computer-state.json` holds `desktop: true` for the current `sessionId`, the same module appends one English section to the main agent's system prompt.
+  Its heading is `## Screen & input control (pomp)`.
+- The section says that screen & input control is enabled for this conversation and that the model uses the Eval tool's `computer` prelude (docs: `xd://eval/computer`).
+  It forbids launching or using external programs or CLIs (such as Orca) for GUI control.
+- It is decided in `before_agent_start` on every turn from the state file. When the switch is off, there is no section.
+- Subagents never get it.
+
 ### Skills
 
 | type | payload | meaning |
 | --- | --- | --- |
 | `skills/state` | `{ skills, diagnostics }` | Skill rows from every source plus scan diagnostics. |
 | `skills/command` | see below | Manage, read, edit or switch one skill. |
-| `skills/reply` | `{ requestId, ok, error?, document? }` | Result of one `skills/command`. |
+| `skills/reply` | `{ requestId, ok, error?, document?, skillImport? }` | Result of one `skills/command`. |
 
 #### `skills/state`
 
@@ -1175,8 +1200,8 @@ Payload:
 
 ```
 { requestId,
-  action: "refresh"|"create"|"import"|"delete"|"open"|"read"|"update"|"enable"|"disable"|"reset",
-  scope?: "project"|"user", name?, description?, body?, content?, expectedHash? }
+  action: "refresh"|"create"|"pick"|"import"|"delete"|"open"|"read"|"update"|"enable"|"disable"|"reset",
+  scope?: "project"|"user", name?, description?, body?, content?, expectedHash?, ticket? }
 ```
 
 - `read` and `update` are described under "In-page resource editing".
@@ -1184,31 +1209,62 @@ Payload:
 - A `read` without scope serves a `pomp` row too.
 - The page copies a built-in skill with `read` followed by `create`.
 
-**`import`**
+**`pick` and `import`**
 
-- Takes pasted `content`: complete UTF-8 Markdown of at most 32 KiB.
-- Validates the existing catalog metadata and body limits.
-- The declared name must match the chosen name.
-- The name uses lowercase letters, digits and hyphens, 2–40 characters.
-- A nonempty description is required.
-- Writes a temporary sibling, then moves it without replacing an existing `SKILL.md`.
-- Project/user scope checks and direct-path checks remain mandatory.
-- It neither executes the content nor grants permissions.
-- The editor opens the saved file.
-- Restart the engine to refresh command availability.
-- No URL fetch or package execution is involved.
+The Import button imports a skill file from disk. It never takes pasted text.
+
+1. `pick` shows the host's open-file dialog, filtered to `SKILL.md` and `*.md`.
+   - The reply carries `skillImport: { ticket, name, description, file, files, bytes }`.
+   - Without `skillImport` the user closed the dialog.
+   - The dialog runs outside the command queue. The page waits up to 10 minutes for the reply.
+2. The page shows that preview with a scope choice.
+3. `import` sends `scope` and `ticket`. The page never names a path.
+
+What a chosen file brings:
+
+- A file named `SKILL.md` brings its whole folder, such as `references/` and `scripts/`.
+  - `.git` folders are skipped.
+  - At most 500 files, 32 MiB and 6 folder levels. A bigger folder is refused.
+- Any other `.md` file is copied alone as `SKILL.md`.
+
+Name and checks:
+
+- The name is the frontmatter `name`, else the folder name (`SKILL.md`) or the file name.
+- It must match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`.
+- The `SKILL.md` text must be UTF-8 of at most 32 KiB with a nonempty body.
+- A readable frontmatter needs a nonempty `description`.
+- A frontmatter POMP's simple reader cannot read (folded text, lists) is still imported.
+  The engine reads full YAML. The row then offers open and delete only.
+
+Writing:
+
+- `import` reads the file again. When the name changed since `pick`, it refuses and asks for a new pick.
+- It refuses when the scope already has a skill or folder with that name.
+- The copy goes into a hidden staging folder in `<scope>/.pomp/skills/`, which is then moved to `<name>/` whole.
+- Linked/reparse entries are refused. Nothing is executed and no permission is granted.
+
+**Engine rediscovery**
+
+- `refresh`, `create`, `import`, `update` and `delete` send omp's `/reload-plugins` after the list refresh.
+  The engine then rediscovers its skills and file commands without a restart or a model request.
+- The reply waits for that reload. The page waits up to 60 seconds for any skills reply.
+- Its `Plugins reloaded.` output is not shown as a chat notice.
+- While a reply or request runs, the reload waits for the end of that reply.
+- At the end of every reply the host compares the `SKILL.md` files of both scopes (path, size, write time) with what the engine last saw.
+  On a change it refreshes the list and reloads the engine. A skill the model wrote is usable right after its reply.
+- The model's system prompt names the two skill folders and the file format (`features-guidance`).
+- The built-in `chat-style` skill is on by default. While the engine lists it, the `reply-style` module appends its instructions to the main agent's system prompt, because the model does not pick a formatting skill by its description. A user's own `.pomp/skills/chat-style/SKILL.md` (project, then home) wins over the built-in file.
 
 **`create`, `delete`, `open`**
 
 - `create` requires a name matching `^[a-z0-9-]{2,40}$`.
 - `create` requires a single-line description of 1–500 characters.
 - `create` uses `CreateNew` for `<scope>/.pomp/skills/<name>/SKILL.md`.
-- `create` then opens the template through the existing VS editor adapter. It never overwrites.
+- `create` never overwrites. The new file is edited in the page; only `open` opens the VS editor.
 - `delete` resolves one unambiguous POMP-scope row and requires its current hash.
 - `delete` removes the containing directory only if it is empty.
 - `open` resolves the catalog identity. It does not accept a page-supplied path.
 - Linked/reparse paths are refused.
-- After creation or deletion, refresh or restart determines native invocation.
 - Disconnect clears invocation availability.
 
 **Discovery directories**
@@ -1218,6 +1274,10 @@ Payload:
   2. `<home>/.pomp/skills`
   3. the user's own directories, then the workspace's own directories
   4. POMP's bundled catalog skills, last
+- The overlay also writes `skills.enableAgentsUser`, `enableAgentsProject`, `enableClaudeUser`, `enableClaudeProject` and `enableCodexUser` as `false`.
+  The engine therefore loads no skills from other programs' folders: `~/.agents`, `<workspace>/.agents` (and `.agent`), `~/.claude`, `<workspace>/.claude` and `~/.codex`.
+  Their skills never reach the engine's command list, so they are not rows either.
+- The engine's own folders stay on: `~/.omp/agent/skills` and `<workspace>/.omp/skills` (omp's `enablePiUser`/`enablePiProject` keys, not written).
 - Stock native discovery reads only one-level `*/SKILL.md` files that have a description.
 - Native described one-level POMP skills are omitted from the legacy resource injection and list.
 - Deeper or undescribed skills remain in `/resources`.
@@ -1721,9 +1781,9 @@ catalog/command: { requestId, action: "refresh"|"install", id?, scope?: "project
 
 ### Attachments with commands
 
-- A command that hands its text to the model takes the context basket's checked files.
+- A command that hands its text to the model takes the context basket's files.
 - Such commands are: POMP's `workflow`, `plan`, `map`, `review`, `skill`, `command` and `recipe`, a skill, or a prompt file (source `file`).
-- The page sends the checked paths as `attachments` with such a command only, then empties the basket, as for a message.
+- The page sends the basket's paths as `attachments` with such a command only, then empties the basket, as for a message.
 - The host puts them after the command's own text under "Work only on these workspace references…".
 - The host keeps a space after the name.
 - Any other command goes without attachments, and the basket stays.
@@ -1756,7 +1816,7 @@ The palette lists the plain name; the host sends the registered one.
 - A short name the user defined is kept; the POMP counterpart is then not listed under that name.
 - The registered names, such as `/pomp-workflow`, keep working when typed, and are not listed.
 - POMP's plumbing commands are never listed; typing them still sends them.
-  They are `pomp-tools`, `pomp-inline`, `pomp-stop`, `pomp-feedback-guard`, `pomp-agent`, `pomp-dm` and `pomp-team`.
+  They are `pomp-tools`, `pomp-inline`, `pomp-stop`, `pomp-feedback-guard`, `pomp-agent`, `pomp-dm`, `pomp-team` and `pomp-plan-note`.
 - `/pomp-compact` no longer exists.
   - The engine's `compact` is dispatchable over RPC.
   - POMP's compaction hook (`session.compacting`) already adds the Visual Studio facts to every compaction.
@@ -1957,6 +2017,21 @@ The count starts at the start of the goal; its first run belongs to the goal.
 - It is present when the host can match the approval to exactly one pending task call of that conversation.
 - It is display only; the approve/deny path is unchanged.
 - Without it, the page shows `message` as received.
+
+## Word completion
+
+Word completion has no messages of its own: the page completes words locally while `host/hello.wordCompletion` is true.
+
+- Its words come from what the page already has:
+  - the prompts sent in this workspace (page storage);
+  - the current conversation's user and finished assistant messages;
+  - attachment paths and tool `path`-like arguments in the conversation;
+  - the paths and symbols of `workspace/files` answers (@mention lookups, the file picker).
+- A word is a run of letters, marks, digits and `_` that starts with a letter; at most 20,000 are kept.
+- Ranking: prefix match (any case), then frequency, words accepted with Tab, and recency.
+- Accepted words are kept per workspace in the page storage key `pomp.wordCompletion:<workspace>`, at most 500.
+- It never completes during IME composition, inside a `` ` `` code span, in an @mention or a leading `/command`, in a URL, or with text after the caret on the same line.
+- While a word completion shows, Tab inserts it before a composer prediction, and Esc clears both.
 
 ## Sessions
 
@@ -2577,6 +2652,13 @@ Item fields: `{ id, source: "agent"|"compiler", severity: "error"|"warning", cod
   With it, members work in isolated copies.
   Their changes come back as isolated results to review and apply; see "Isolated team runs".
 
+**Nested subagents**
+
+- The overlay writes `task.maxRecursionDepth: 1` in every approval mode: only the main agent spawns subagents.
+- omp gives subagents no `task` tool. A spawn attempt from inside a subagent (eval `agent()`/`workpool()`) fails with omp's
+  "Cannot spawn another agent at task depth 1; maximum depth is 1."
+- The main agent's `task` approval is unchanged.
+
 ### `agents/command` (UI → host)
 
 The UI sends `agents/command` to manage roles and teams. Each is answered by `agents/reply`.
@@ -2664,7 +2746,7 @@ This is Agents › 역할 › POMP, the chat agent.
 
 ### Knowledge
 
-One list per workspace, managed in Tools › Knowledge.
+One list per workspace, managed in Tools › Knowledge: the workspace's project knowledge and this PC's user knowledge together.
 The role and team editors and the context basket read the same list.
 A knowledge is a user tag holding **pieces**. A tag has a name and color; there are no predefined tags.
 
@@ -2680,15 +2762,17 @@ Payload: `{ requestId?, root, sessionId?, selected: string[], optimizing?: strin
 
 - There is no count limit.
 - Items that would pass one message, 1.75 MiB, are left out and counted in `hidden`.
-- `selected` lists the knowledge ids selected for the current conversation.
+- `selected` lists the knowledge ids selected for the current conversation: every default knowledge it did not untick, then what it picked.
+- `select` with the ticked ids stores what was picked besides the defaults and which defaults were unticked
+  (`.pomp/local/knowledge-sessions.json` rows `{ ids, excluded? }`). A default made later is ticked in every conversation that did not untick it.
 - `optimizing` is the id being optimized.
 - Unasked pushes have no `requestId`.
 
 `KnowledgeItem`:
 
 ```
-{ id, name, color: "#rrggbb", scope: "project"|"personal", use: "original"|"optimized", revision, createdAt, updatedAt,
-  roles: string[], teams: string[], candidate: boolean, optimized?: { text, createdAt, stale },
+{ id, name, color: "#rrggbb", scope: "project"|"user", use: "original"|"optimized", revision, createdAt, updatedAt,
+  roles: string[], teams: string[], candidate: boolean, default: boolean, optimized?: { text, createdAt, stale },
   pieces: [{ id, text, source: "user"|"agent"|"editor", status: "saved"|"candidate", createdAt,
              anchor?: { path, startLine, endLine, status: "current"|"moved"|"changed"|"missing" } }] }
 ```
@@ -2722,6 +2806,7 @@ Payload: `{ requestId, root, action }` plus the action's fields.
 | `create` | `knowledge: { name, color, scope }`, `piece?: { text, anchor?: { path, startLine, endLine } }` | New knowledge. |
 | `update` | `id`, `revision`, `knowledge: { name, color, scope, use }` | Updates the knowledge. |
 | `delete` | `id`, `revision` | Removes the knowledge. |
+| `setDefault` | `id`, `revision`, `on` | Makes the knowledge a default or an ordinary one. |
 | `addPiece` | `id`, `revision`, `piece: { text, anchor? }` | Adds a saved piece. |
 | `updatePiece` | `id`, `revision`, `pieceId`, `text` | Changes a piece's text. |
 | `deletePiece` | `id`, `revision`, `pieceId` | Deletes a piece. |
@@ -2744,10 +2829,14 @@ Payload: `{ requestId, root, action }` plus the action's fields.
 - Name: 1–40 characters, no control characters.
 - Piece text ≤ 8,000. Anchor ≤ 200 lines. Optimized text ≤ 16,000.
 - Knowledge, pieces and candidate pieces have no count limit of their own; the store size bounds them.
-- Store ≤ 4 MiB.
-- Stored in the workspace's `.pomp/local/knowledge.json`, which is git-ignored.
+- Each file ≤ 4 MiB.
+- `project`: the workspace's `.pomp/knowledge.json` (indented), which is committed. Its lease file stays in `.pomp/local`.
+  A file an earlier POMP kept in `.pomp/local/knowledge.json` is moved there on first use.
+- `user`: `~/.pomp/knowledge.json` (`%USERPROFILE%`), listed in every workspace on this PC. Its lease is next to it.
+- A change takes both leases. Switching the scope moves the knowledge to the other file; the file it moves into is written first.
+- An earlier scope `personal` reads as `project`.
+- The model cannot write either file with an always-allow approval: every write asks.
 - The former `%LOCALAPPDATA%\Pomp\knowledge\` store is migrated once and then removed.
-- Scopes are POMP usage scopes, not access control.
 
 #### Duplicates
 
@@ -2778,30 +2867,31 @@ When building the state, the host looks for the stored lines in the file.
 All delivery is inside blocks marked as reference material.
 These are not instructions that change tool permissions, approvals or host policy. Tags inside are neutralized.
 
-- **Selected knowledge of the conversation**
+- **Default knowledge** (`default: true`)
+  - Ticked from the start in every conversation's basket; unticking it leaves it out of that conversation only.
+  - Every subagent gets the defaults the conversation did not untick from `role-memory.json` `defaults` as its own `<pomp_knowledge>` block.
+  - Limit: 20 items / 24,000 characters.
+- **Selected knowledge of the conversation** (ticked defaults first)
   - Limit: 20 items / 24,000 characters.
   - Written to `POMP_STATE_DIR/session-knowledge.json` as `{ version: 1, root, sessionId, items: [{ title, body }] }`.
   - The omp extension appends it to the main session's system prompt as `<pomp_knowledge>` when root and session match.
-  - A resumed conversation keeps its selection. A new one starts empty.
+  - A resumed conversation keeps its choice. A new one starts with the defaults ticked.
 - **Knowledge assigned to a team**
   - Limit: newest 10 / 12,000 characters.
   - Sent as a `<team_knowledge>` block appended to the messages the user sends to that team.
   - Restored transcripts hide the block.
 - **Knowledge assigned to a role**
   - Limit: newest 10 / 8,000 characters per role.
-  - Written to `POMP_STATE_DIR/role-memory.json` v1. The title is the knowledge name.
+  - Written to `POMP_STATE_DIR/role-memory.json` v1 (`roles`, plus `defaults`). The title is the knowledge name.
   - The extension adds it to that role's subagent system prompt as `<role_memory>`.
+- The main agent's system prompt names both knowledge files (`features-guidance`).
 
 #### Host tools
 
 - `propose_knowledge { tag, text }` adds a **candidate** piece to the knowledge named `tag`.
-- Without such a knowledge, it creates a new candidate project knowledge, never personal.
+- Without such a knowledge, it creates a new candidate project knowledge.
 - Only the user accepts a candidate.
-- `read_knowledge { ids? }` is available only with the option `Agents read knowledge`. It is read-only.
-- Without `ids`, it lists project knowledge as `{ id, name, pieces, chars }`.
-- With `ids`, it returns their used content, ≤ 24,000 characters, and adds them to the conversation's selection.
-- Personal knowledge is never listed or returned.
-- Both tools post an unasked `knowledge/state`.
+- It posts an unasked `knowledge/state`.
 
 ### Advisors
 
@@ -3077,6 +3167,9 @@ Payload: `{ action: "refresh"|"apply"|"discard"|"openPatch", requestId, root?, i
 - The card shows status, tool count, time, recent tools and an individual stop.
 - The same card is also visible in the partner tab.
 - Only current members without such a call card appear in the collapsible progress row.
+- Agents › 실행 중 (Running) lists every job of the snapshot: running ones first, ended ones by `lastUpdate`, latest first.
+  A `live` snapshot of another conversation is not listed. Each row shows the role, id, description, `team`, status, `progress.durationMs`, the end time (`lastUpdate`) and the same individual stop.
+  Opening the view sends `workspace/background { action: "refresh" }`.
 
 ### Stopping one member
 

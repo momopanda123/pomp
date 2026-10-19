@@ -14,7 +14,7 @@ import type { HostMessageType, HostToUi, KnowledgeAnchorStatus, KnowledgeCommand
 interface MockPiece { id: string; text: string; source: KnowledgePiece['source']; status: KnowledgePiece['status']; createdAt: string; anchor?: { path: string; startLine: number; endLine: number; status: KnowledgeAnchorStatus } }
 interface MockKnowledge {
   id: string; name: string; color: string; scope: KnowledgeScope; use: KnowledgeUse; pieces: MockPiece[]; optimized?: { text: string; sourceHash: string; createdAt: string };
-  roles: string[]; teams: string[]; createdAt: string; updatedAt: string; revision: number;
+  roles: string[]; teams: string[]; createdAt: string; updatedAt: string; revision: number; default?: boolean;
 }
 type Post = <K extends HostMessageType>(type: K, payload: HostToUi[K]) => void;
 /** A `knowledge/command` as it reaches the host. */
@@ -50,7 +50,7 @@ export function createMockKnowledge({ post, root, sessionId }: { post: Post; roo
   const contentOf = (item: MockKnowledge) => originalContent({ pieces: item.pieces.map(viewPiece) });
   const view = (item: MockKnowledge): KnowledgeItem => ({
     id: item.id, name: item.name, color: item.color, scope: item.scope, use: item.use, revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt,
-    roles: [...item.roles], teams: [...item.teams], candidate: item.pieces.length > 0 && item.pieces.every(piece => piece.status === 'candidate'), pieces: item.pieces.map(viewPiece),
+    roles: [...item.roles], teams: [...item.teams], candidate: item.pieces.length > 0 && item.pieces.every(piece => piece.status === 'candidate'), default: item.default === true, pieces: item.pieces.map(viewPiece),
     ...(item.optimized ? { optimized: { text: item.optimized.text, createdAt: item.optimized.createdAt, stale: item.optimized.sourceHash !== hashOf(contentOf(item)) } } : {}),
   });
   const state = (requestId?: string, error?: string): KnowledgeState => ({
@@ -104,7 +104,7 @@ export function createMockKnowledge({ post, root, sessionId }: { post: Post; roo
       const name = typeof input.name === 'string' ? input.name.trim() : '';
       if (name.length < 1 || name.length > 40 || CONTROL.test(name)) return 'The name is invalid.';
       if (!isKnowledgeColor(input.color)) return 'The color is invalid.';
-      if (input.scope !== 'project' && input.scope !== 'personal') return 'The scope is invalid.';
+      if (input.scope !== 'project' && input.scope !== 'user') return 'The scope is invalid.';
       return undefined;
     };
     switch (payload.action) {
@@ -135,6 +135,11 @@ export function createMockKnowledge({ post, root, sessionId }: { post: Post; roo
         const item = target(payload.id, payload.revision); if (!item) return;
         knowledge.splice(knowledge.indexOf(item), 1);
         for (const [session, ids] of selections) selections.set(session, ids.filter(id => id !== item.id));
+        reply(requestId); return;
+      }
+      case 'setDefault': {
+        const item = target(payload.id, payload.revision); if (!item) return;
+        if (item.default !== payload.on) { item.default = payload.on; touch(item); }
         reply(requestId); return;
       }
       case 'addPiece': {
@@ -217,7 +222,7 @@ export function createMockKnowledge({ post, root, sessionId }: { post: Post; roo
   };
   // ?knowledge=empty starts with no knowledge; ?knowledge=many adds enough rows to page the table.
   const knowledgeQuery = new URLSearchParams(window.location.search).get('knowledge');
-  if (knowledgeQuery === 'many') for (let i = 1; i <= 24; i++) seed(`Note ${String(i).padStart(2, '0')}`, COLORS[i % COLORS.length]!, i % 3 ? 'project' : 'personal', 'original', [{ text: `Piece ${i}.` }]);
+  if (knowledgeQuery === 'many') for (let i = 1; i <= 24; i++) seed(`Note ${String(i).padStart(2, '0')}`, COLORS[i % COLORS.length]!, i % 3 ? 'project' : 'user', 'original', [{ text: `Piece ${i}.` }]);
   if (knowledgeQuery !== 'empty') {
   const conventions = seed('Coding conventions', COLORS[0]!, 'project', 'original', [
     { text: 'Prefer small modules.\nKeep public interfaces narrow.' },
@@ -232,7 +237,7 @@ export function createMockKnowledge({ post, root, sessionId }: { post: Post; roo
   ]);
   checklist.optimized = { text: 'Review: check error paths first; every handler answers once.', sourceHash: hashOf(contentOf(checklist)), createdAt: now() };
   checklist.teams = ['feature-dev'];
-  seed('Personal notes', COLORS[2]!, 'personal', 'original', [
+  seed('My conventions', COLORS[2]!, 'user', 'original', [
     { text: 'Ask before renaming public types.' },
     { text: 'var removed = true;', source: 'editor', anchor: { path: 'src/Pomp.Core/Features/Removed.cs', startLine: 3, endLine: 3, status: 'missing' } },
   ]);
@@ -250,8 +255,6 @@ export function createMockKnowledge({ post, root, sessionId }: { post: Post; roo
     /** What an agent's `propose_knowledge` does: a candidate piece in the knowledge with that name, or a new candidate knowledge. */
     propose: (tag: string, text: string) => {
       const existing = byName(tag);
-      // Personal knowledge is never a target of an agent.
-      if (existing?.scope === 'personal') return;
       const item = existing ?? create(tag, COLORS[knowledge.length % COLORS.length]!, 'project');
       if (addPiece(item, text, undefined, 'agent', 'candidate') && existing) touch(existing);
       push();

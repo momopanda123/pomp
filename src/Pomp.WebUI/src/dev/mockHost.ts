@@ -70,6 +70,7 @@ import type {
 } from '../protocol';
 import { createMockToolsHandler } from './mockTools';
 import { createMockConversations } from './mockConversations';
+import type { ConversationPartner } from '../conversationProtocol';
 import { createMockKnowledge } from './mockKnowledge';
 import { createMockAdvisors } from './mockAdvisors';
 import { createMockWork } from './mockWork';
@@ -514,9 +515,11 @@ export function installMockHost(): void {
   let tokens = 12_840;
   let streaming = false;
   const mockTools = createMockToolsHandler(message => post(message.type, message.payload as never), { sessionId, busy: () => streaming });
-  const conversations = createMockConversations(post, { sessionId: () => sessionId, busy: () => streaming,
-    start: input => startTurn(input, opts.scenario, true), partnerChanged: partner => { currentEntry.partner = partner; postHistory(); } });
-  for (const entry of sessions) entry.partner = entry.id === currentEntry.id ? { kind: 'main' } : entry.messageCount! % 3 === 0 ? { kind: 'team', id: 'feature-dev' } : { kind: 'agent', id: 'architect' };
+  const conversations = createMockConversations(post, { sessionId: () => sessionId, busy: () => streaming, start: input => startTurn(input, opts.scenario, true) });
+  for (const entry of sessions) {
+    entry.partner = entry.id === currentEntry.id ? { kind: 'main' } : entry.messageCount! % 3 === 0 ? { kind: 'team', id: 'feature-dev' } : { kind: 'agent', id: 'architect' };
+    if (entry.sessionId) conversations.tabs.seed(entry.sessionId, entry.partner);
+  }
   let sessionChanging = false;
   const transcripts = new Map<string, SessionHistoryMessage[]>();
   const contextTokens = new Map<string, number>([[sessionId, tokens]]);
@@ -707,7 +710,7 @@ export function installMockHost(): void {
     const promptId = run.promptId;
     if (input.text.startsWith('/')) {
       // omp command_output is bridged as a notice; no fake model inference or tools are needed.
-      post('chat/turnStarted', { promptId, clientMessageId: input.clientMessageId, text: input.text, team: input.team, agent: input.agent, agentInstance: input.agentInstance, main: !input.team && !input.agent && !input.agentInstance ? true : undefined, from: input.from });
+      post('chat/turnStarted', { promptId, clientMessageId: input.clientMessageId, text: input.text, team: input.team, agent: input.agent, agentInstance: input.agentInstance, main: !input.team && !input.agent && !input.agentInstance ? true : undefined });
       postSession(true);
       await runWait(run, 180);
       const command = input.text.slice(1).split(/\s+/, 1)[0] ?? '';
@@ -724,7 +727,7 @@ export function installMockHost(): void {
       return;
     }
     tokens += 1_900;
-    post('chat/turnStarted', { promptId, clientMessageId: input.clientMessageId, text: input.text, attachments: input.attachments, editorContext: input.includeEditorContext ? { path: 'src/Pomp.Sample/Program.cs', startLine: 20, endLine: 45, caretLine: 22 } : undefined, team: input.team, agent: input.agent, agentInstance: input.agentInstance, main: !input.team && !input.agent && !input.agentInstance ? true : undefined, from: input.from });
+    post('chat/turnStarted', { promptId, clientMessageId: input.clientMessageId, text: input.text, attachments: input.attachments, editorContext: input.includeEditorContext ? { path: 'src/Pomp.Sample/Program.cs', startLine: 20, endLine: 45, caretLine: 22 } : undefined, team: input.team, agent: input.agent, agentInstance: input.agentInstance, main: !input.team && !input.agent && !input.agentInstance ? true : undefined });
     postSession(true);
     postBackground();
     await runWait(run, 300);
@@ -911,9 +914,8 @@ export function installMockHost(): void {
       const messages = transcripts.get(entry.id) ?? [];
       if (messages.length === 0 && !entry.name) entry.title = payload.text.slice(0, 120);
       const target = payload.team ? { kind: 'team', id: payload.team } : payload.agent ? { kind: 'agent', id: payload.agent } : payload.agentInstance ? { kind: 'dm', id: payload.agentInstance } : undefined;
-      // Like the host: the routing brief, then the sending tab's origin marker (PromptDisplay.cs), then the user's text.
-      const origin = payload.from ? `<!-- pomp-from:${payload.from.kind}:${payload.from.id} -->\n\n` : '';
-      const transcriptText = target ? `<!-- pomp-${target.kind}:${target.id} -->\nMock target: ${target.id}\n<!-- /pomp-${target.kind} -->\n\n${origin}${payload.text}` : `${origin}${payload.text}`;
+      // Like the host: the routing brief, then the user's text.
+      const transcriptText = target ? `<!-- pomp-${target.kind}:${target.id} -->\nMock target: ${target.id}\n<!-- /pomp-${target.kind} -->\n\n${payload.text}` : payload.text;
       messages.push({ role: 'user', text: transcriptText }, { role: 'assistant', text: turnKind === 'error' ? '모델 제공자가 일시적으로 과부하 상태입니다.' : SHORT_ANSWER });
       transcripts.set(entry.id, messages);
       entry.messageCount = messages.length;
@@ -1631,9 +1633,7 @@ export function installMockHost(): void {
     for (let index = 0; index < messages.length; index += 2) {
       const promptId = nextId('replay-prompt');
       const messageId = nextId('replay-message');
-      // The host turns the origin marker back into chat/turnStarted.from and never shows it (PompSession.Restore.cs).
-      const user = messages[index]!.text; const origin = /<!-- pomp-from:(agent|team):([a-z0-9-]{2,40}) -->\n\n/.exec(user);
-      frames.push({ type: 'chat/turnStarted', payload: { promptId, text: origin ? user.replace(origin[0], '') : user, ...(origin ? { from: { kind: origin[1]!, id: origin[2]! } } : {}) } });
+      frames.push({ type: 'chat/turnStarted', payload: { promptId, text: messages[index]!.text } });
       const assistant = messages[index + 1];
       if (assistant) {
         frames.push(
@@ -1645,6 +1645,33 @@ export function installMockHost(): void {
       frames.push({ type: 'chat/turnEnd', payload: { promptId, status: 'completed' } });
     }
     replay((transcripts.get(entry.id)?.length ?? 0) > messages.length, frames);
+  };
+
+  /** session/new, or a tab's new conversation for `partner` (conversation/tab). Answers with exactly one session/newResult. */
+  const newConversation = (requestId: string | undefined, partner?: ConversationPartner): void => {
+    if (sessionChanging) {
+      post('session/newResult', { requestId, status: 'failed', message: 'A session operation is still running.' });
+      return;
+    }
+    if (opts.newSession !== 'completed') {
+      // The real host answers exactly once; on failure / veto nothing changes on the omp side.
+      post('session/newResult', { requestId, status: opts.newSession, message: opts.newSession === 'failed' ? 'Could not start a new session: mock failure' : 'An extension cancelled the new session.' });
+      return;
+    }
+    abortRun(current);
+    current = null;
+    currentEntry = { id: nextId('mock-entry-new'), sessionId: nextId('mock-session-new'), title: '새 대화', modifiedUtc: new Date().toISOString(), visitedUtc: new Date().toISOString(), messageCount: 0, current: true, partner: partner ?? { kind: 'main' } };
+    sessionId = currentEntry.sessionId!;
+    mockTools.resetConversation(sessionId);
+    conversations.changedSession(partner);
+    sessionName = undefined;
+    transcripts.set(currentEntry.id, []);
+    touchSession();
+    tokens = 0;
+    postSession(false);
+    knowledge.snapshot();
+    post('session/newResult', { requestId, status: 'completed' });
+    postHistory();
   };
 
   const handleHistory = async (command: SessionHistoryCommand): Promise<void> => {
@@ -1706,7 +1733,7 @@ export function installMockHost(): void {
             mockTools.resetConversation(sessionId); conversations.changedSession(); sessionName = undefined;
             transcripts.set(currentEntry.id, []); tokens = 0; touchSession(); postSession(false); knowledge.snapshot();
           }
-          sessions = sessions.filter(item => item.id !== entry.id); transcripts.delete(entry.id);
+          sessions = sessions.filter(item => item.id !== entry.id); transcripts.delete(entry.id); if (entry.sessionId) conversations.tabs.forget(entry.sessionId);
           postHistory(requestId); break;
         }
         case 'rename': {
@@ -1746,7 +1773,7 @@ export function installMockHost(): void {
           // Like the real host (PompSession.History): a completed switch also answers the page's pending new-session request.
           post('session/newResult', { requestId, status: 'completed' });
           mockTools.resetConversation(sessionId);
-          conversations.changedSession(entry.partner);
+          conversations.changedSession();
           sessionName = entry.name;
           tokens = contextTokens.get(sessionId) ?? (entry.messageCount ?? 0) * 145;
           entry.visitedUtc = new Date().toISOString();
@@ -1762,10 +1789,6 @@ export function installMockHost(): void {
     }
   };
 
-  // Context presets kept in memory; ?presets=N seeds N of them to check the table with thousands of rows.
-  let contextPresets: NonNullable<HostToUi['workspace/contextPresetsState']['presets']> = Array.from({ length: Math.max(0, Math.min(5000, Number(new URLSearchParams(window.location.search).get('presets')) || 0)) },
-    (_, i) => ({ id: 'preset-seed-' + i, name: (opts.locale.startsWith('ko') ? '프리셋 ' : 'Preset ') + String(i + 1).padStart(4, '0'), includeEditorContext: i % 2 === 0, files: WORKSPACE_FILES.slice(0, 1 + (i % WORKSPACE_FILES.length)) }));
-  let presetSeq = 0;
   let problemItems: HostToUi['workspace/problemsState']['items'] = new URLSearchParams(window.location.search).get('problems') === '1' ? [
     { id: 'mock-agent', source: 'agent', severity: 'warning', code: 'REVIEW', message: 'Null access after cancellation', path: MOCK_ROOT + '/src/Worker.cs', line: 42 },
     { id: 'mock-error', source: 'compiler', severity: 'error', code: 'CS0103', message: "The name 'result' does not exist", path: MOCK_ROOT + '/src/Worker.cs', line: 17 },
@@ -1802,7 +1825,7 @@ export function installMockHost(): void {
   let approvalMode: ApprovalMode = 'alwaysAsk';
   let editorFollow: HostToUi['host/editorFollow'] = { live: false, bookmarks: false };
   const postHello = (): void => {
-    post('host/hello', { version: '0.3.0-mock', vsVersion: '17.12 (mock)', locale: opts.locale, includeEditorContextByDefault: true, composerPredictions: new URLSearchParams(window.location.search).get('composerPredictions') === '1', approvalMode, shortcuts: { ...DEFAULT_SHORTCUTS } });
+    post('host/hello', { version: '0.3.0-mock', vsVersion: '17.12 (mock)', locale: opts.locale, includeEditorContextByDefault: true, composerPredictions: new URLSearchParams(window.location.search).get('composerPredictions') === '1', wordCompletion: new URLSearchParams(window.location.search).get('wordCompletion') !== '0', approvalMode, shortcuts: { ...DEFAULT_SHORTCUTS } });
   };
 
   const sent: unknown[] = [];
@@ -1916,7 +1939,7 @@ export function installMockHost(): void {
         }
         case 'workspace/countDraftTokens': {
           const request = payload as unknown as UiToHost['workspace/countDraftTokens'];
-          window.setTimeout(() => post('workspace/tokenCount', { requestId: request.requestId, root: request.root, modelId: request.modelId, provider: request.provider, tokens: Math.ceil(request.text.length / 3), method: 'byte-estimate', estimated: true }), 60);
+          window.setTimeout(() => post('workspace/tokenCount', { requestId: request.requestId, root: request.root, modelId: request.modelId, provider: request.provider, tokens: Math.ceil(request.text.length / 3) + 40 * (request.attachments?.length ?? 0), method: 'byte-estimate', estimated: true }), 60);
           return;
         }
         case 'workspace/countBasketTokens': {
@@ -1924,18 +1947,6 @@ export function installMockHost(): void {
           const editorContext = includeEditorContext ? 650 : 0;
           const files = 180 * attachments.length;
           window.setTimeout(() => post('workspace/basketTokens', { requestId, ok: true, tokens: files + editorContext, editorContext, attachments: files }), 60);
-          break;
-        }
-        case 'workspace/contextPresets': {
-          const request = payload as unknown as UiToHost['workspace/contextPresets'];
-          if (request.action === 'save') {
-            const name = (request.name ?? '').trim();
-            const existing = request.id ? contextPresets.find(preset => preset.id === request.id) : contextPresets.find(preset => preset.name.toLowerCase() === name.toLowerCase());
-            const preset = { id: existing?.id ?? 'preset-' + ++presetSeq, name, includeEditorContext: !!request.includeEditorContext, files: request.files ?? [] };
-            contextPresets = existing ? contextPresets.map(item => item === existing ? preset : item) : [...contextPresets, preset];
-          }
-          if (request.action === 'delete') contextPresets = contextPresets.filter(preset => preset.id !== request.id);
-          window.setTimeout(() => post('workspace/contextPresetsState', { requestId: request.requestId, root: MOCK_ROOT, presets: contextPresets }), 60);
           break;
         }
         case 'workspace/pickFiles': {
@@ -1956,38 +1967,25 @@ export function installMockHost(): void {
         case 'session/history':
           void handleHistory(payload as unknown as SessionHistoryCommand).catch((error: unknown) => console.error('[mock host] history', error));
           break;
-        case 'session/new': {
-          const { requestId } = (payload ?? {}) as Partial<UiToHost['session/new']>;
-          if (sessionChanging) {
-            post('session/newResult', { requestId, status: 'failed', message: 'A session operation is still running.' });
+        case 'session/new':
+          newConversation(((payload ?? {}) as Partial<UiToHost['session/new']>).requestId, conversations.tabs.current());
+          break;
+        case 'conversation/tab': {
+          const command = payload as unknown as UiToHost['conversation/tab'];
+          if (command.action === 'close' && command.sessionId !== sessionId) {
+            conversations.tabs.close(command.sessionId ?? '');
+            post('conversation/tabReply', { requestId: command.requestId, ok: true });
             break;
           }
-          if (opts.newSession !== 'completed') {
-            // The real host answers exactly once; on failure / veto nothing changes on the omp side.
-            post('session/newResult', {
-              requestId,
-              status: opts.newSession,
-              message:
-                opts.newSession === 'failed'
-                  ? 'Could not start a new session: mock failure'
-                  : 'An extension cancelled the new session.',
-            });
+          if (sessionChanging || streaming || permissionWaiters.size > 0 || dialogWaiters.size > 0) {
+            post('session/newResult', { requestId: command.requestId, status: 'failed', message: 'Finish or stop the reply before switching tabs.' });
             break;
           }
-          abortRun(current);
-          current = null;
-          currentEntry = { id: nextId('mock-entry-new'), sessionId: nextId('mock-session-new'), title: '새 대화', modifiedUtc: new Date().toISOString(), visitedUtc: new Date().toISOString(), messageCount: 0, current: true };
-          sessionId = currentEntry.sessionId!;
-          mockTools.resetConversation(sessionId);
-          conversations.changedSession();
-          sessionName = undefined;
-          transcripts.set(currentEntry.id, []);
-          touchSession();
-          tokens = 0;
-          postSession(false);
-          knowledge.snapshot();
-          post('session/newResult', { requestId, status: 'completed' });
-          postHistory();
+          if (command.action === 'close') conversations.tabs.close(command.sessionId!);
+          const target = command.action === 'open' ? conversations.tabs.openSession(command.partner!) : command.action === 'activate' && command.sessionId ? command.sessionId : conversations.tabs.main();
+          const entry = target ? sessions.find(item => item.sessionId === target) : undefined;
+          if (entry) void handleHistory({ action: 'switch', requestId: command.requestId, root: MOCK_ROOT, id: entry.id }).catch((error: unknown) => console.error('[mock host] tab', error));
+          else newConversation(command.requestId, command.action === 'open' ? command.partner : undefined);
           break;
         }
         case 'bridge/restart':
