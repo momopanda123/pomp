@@ -42,18 +42,21 @@ runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+)
 <table>
   <tr>
     <td align="center" valign="top" width="50%"><b>Slash commands, @ mentions, permission mode, send target</b><br>Pick commands and files in the input; choose the permission mode and who receives the message.<br><br><img src="docs/media/howto-slash.gif" width="400" alt="Slash commands, @ mentions, permission mode, send target"></td>
+    <td align="center" valign="top" width="50%"><b>Steer and BTW while it works</b><br>Send a queued message into the running turn with Send now, and ask a side question with /btw without touching the work.<br><br><img src="docs/media/howto-steer.gif" width="400" alt="Steer and BTW while it works"></td>
+  </tr>
+  <tr>
     <td align="center" valign="top" width="50%"><b>Delegating to an agent</b><br>Open a role agent as a partner tab and hand it work.<br><br><img src="docs/media/howto-partner.gif" width="400" alt="Delegating to an agent"></td>
-  </tr>
-  <tr>
     <td align="center" valign="top" width="50%"><b>Advisors</b><br>&nbsp;<br>An advisor watches the main agent and comments on its work.<br><br><img src="docs/media/howto-advisor.gif" width="400" alt="Advisors"></td>
+  </tr>
+  <tr>
     <td align="center" valign="top" width="50%"><b>Role pictures and POMP's instructions</b><br>Give each role a picture and edit POMP's own instructions.<br><br><img src="docs/media/howto-roles.gif" width="400" alt="Role pictures and POMP's instructions"></td>
-  </tr>
-  <tr>
     <td align="center" valign="top" width="50%"><b>Creating a team</b><br>Group roles into a team.<br><br><img src="docs/media/howto-team.gif" width="400" alt="Creating a team"></td>
-    <td align="center" valign="top" width="50%"><b>Automation rules</b><br>Attach a notice, a chat message or a script to events such as a failed build.<br><br><img src="docs/media/howto-automation.gif" width="400" alt="Automation rules"></td>
   </tr>
   <tr>
+    <td align="center" valign="top" width="50%"><b>Automation rules</b><br>Attach a notice, a chat message or a script to events such as a failed build.<br><br><img src="docs/media/howto-automation.gif" width="400" alt="Automation rules"></td>
     <td align="center" valign="top" width="50%"><b>Tools tab</b><br>&nbsp;<br>Conversation tools, permissions, skills, MCP, rules, workflows and knowledge in one place.<br><br><img src="docs/media/howto-tools.gif" width="400" alt="Tools tab"></td>
+  </tr>
+  <tr>
     <td align="center" valign="top" width="50%"><b>Accounts, models and thinking level</b><br>Connect accounts, then pick the model and the thinking level under the input.<br><br><img src="docs/media/howto-accounts.gif" width="400" alt="Accounts, models and thinking level"></td>
   </tr>
 </table>
@@ -71,9 +74,10 @@ runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+)
 |---|---|
 | Right from the editor | Explain, review, fix or write tests for the selected code from the right-click **POMP** menu or a shortcut; **Ask POMP** asks in place. |
 | Only what you approve | Changes are shown as a diff; only what you allow goes into the editor buffer. Saving stays with you. |
-| Live marks | The editor follows the agent's edits and marks changed lines with `+`/`−`; click one for a before/after comparison and **Revert**. |
+| Live marks | The editor follows the agent's edits in any language and marks changed lines with `+`/`−`; click one for a before/after comparison and **Revert**. |
 | POMP bookmarks | Each request leaves the first changed line of each file in a per-conversation folder of the Bookmarks window. |
 | Context basket · knowledge | Put files, folders and symbols in the basket as the scope of a question; keep selected lines as knowledge to send along. |
+| Steer · BTW | While the agent works, **Send now** on a queued message (or `/steer`) delivers it to the running turn; `/btw` asks a side question without touching the work. |
 | Agents · teams · advisors | Hand work to role agents and teams; advisors watch the work and comment. |
 | Work and Tools tabs | Plan, change history and code check; permissions, skills, MCP, rules, workflows and knowledge. |
 | Accounts · models | Subscription sign-in, API keys or your own model server; pick a model per chat and agent and see usage. |
