@@ -372,27 +372,34 @@ const ENGINE_COMMANDS: CommandInfo[] = [
 ];
 
 const MOCK_ROOT = 'C:\\repo\\Pomp';
-const SESSION_TITLES = [
+const SESSION_TITLES_KO = [
   'Pomp 개발 세션', '빌드 오류를 확인하고 최소 수정으로 고쳐 주세요', '채팅 탭 접근성 검토',
   '이 솔루션의 프로젝트 구조를 설명해 줘', '모델 선택 UI 개선', '실패한 테스트 원인 확인',
   '세션 목록 검색과 빠른 전환 설계', '문서의 프로토콜 예제를 검토해 줘', 'WebView2 재연결 문제 조사',
   '변경 내용에서 잠재적인 null 참조를 찾아 줘', '한국어 UI 문구 정리', '터미널 작업 결과를 요약해 줘',
 ];
+const SESSION_TITLES_EN = [
+  'Pomp development', 'Check the build errors and fix them with the smallest change', 'Chat tab accessibility review',
+  'Explain the project structure of this solution', 'Model picker improvements', 'Find why the test fails',
+  'Conversation list search and quick switching', 'Review the protocol examples in the docs', 'WebView2 reconnect investigation',
+  'Find possible null references in the changes', 'Tidy the UI wording', 'Summarize the terminal job results',
+];
 
-/** Named and unnamed sessions, all with first-message titles, newest first. */
+/** Named and unnamed sessions, all with first-message titles, newest first, in the page's language (`?locale=`). */
 /** ?sessions=N lists N conversations (scale check of the paged list; there is no count limit). */
 function buildSessions(): SessionEntry[] {
   const now = Date.now();
   const count = Math.max(1, Math.min(20000, Number(new URLSearchParams(window.location.search).get('sessions')) || 25));
+  const titles = (new URLSearchParams(window.location.search).get('locale') ?? 'ko').startsWith('ko') ? SESSION_TITLES_KO : SESSION_TITLES_EN;
   return Array.from({ length: count }, (_, index) => {
-    const title = SESSION_TITLES[index % SESSION_TITLES.length]!;
+    const title = titles[index % titles.length]!;
     const named = index === 0 || index % 3 === 2;
     const modifiedUtc = new Date(now - index * index * 35 * 60_000).toISOString();
     return {
       id: `mock-entry-${index + 1}`,
       sessionId: index === 0 ? 'mock-session' : `mock-session-${index + 1}`,
-      title: index >= SESSION_TITLES.length ? `${title} (${index + 1})` : title,
-      ...(named ? { name: index >= SESSION_TITLES.length ? `${title} (${index + 1})` : title } : {}),
+      title: index >= titles.length ? `${title} (${index + 1})` : title,
+      ...(named ? { name: index >= titles.length ? `${title} (${index + 1})` : title } : {}),
       modifiedUtc,
       visitedUtc: new Date(now - index * index * 35 * 60_000 - index * 5 * 60_000).toISOString(),
       messageCount: index === 0 ? 86 : 4 + ((index * 7) % 31) * 2,
