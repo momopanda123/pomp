@@ -31,7 +31,7 @@ namespace Pomp.Hosting
             catch (Exception) { throw new SessionDeletionException(PompLanguage.Pick("이 작업 영역의 대화 파일을 확인할 수 없어요.", "Could not validate this workspace's conversation file.")); }
             if (target.SessionId == id || SameSessionPath(target.Path, path))
             {
-                await HandleNewSessionAsync(null).ConfigureAwait(false);
+                await HandleNewInTabAsync(null).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
                 lock (_stateLock)
                     if (_sessionSwitchUncertain || !ReferenceEquals(connection, _epochConnection) || string.IsNullOrEmpty(_info.SessionId) || string.IsNullOrEmpty(_sessionFile) || _info.SessionId == target.SessionId || SameSessionPath(_sessionFile, target.Path))

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { sentCaseFeedbackSummary } from '../caseFeedbackMessage';
 import { useT } from '../i18n';
 import type { SessionHistoryController } from '../sessionHistory';
-import { useRoleTitle, useTeamTitle } from '../teamsCache';
 import type { ConversationPartner } from '../conversationProtocol';
 import { ConfirmPopover } from './ConfirmPopover';
 import { Icon } from './Icon';
@@ -10,15 +9,13 @@ import { revealControls } from './RevealControls';
 import { SessionRename } from './SessionHeader';
 import { Pager, usePaged } from './ui';
 
-function PartnerBadge({ partner }: { partner: ConversationPartner }) {
-  const t = useT(); const role = useRoleTitle(partner.id || ''); const team = useTeamTitle(partner.id || '');
-  const name = partner.kind === 'main' ? t('partner.main') : partner.kind === 'agent' ? role : team;
-  return <span className="session-partner-badge" data-testid="session-partner-badge">{revealControls(t('partner.badge', { name }))}</span>;
-}
-
-/** The conversation list: a dropdown under the session header that closes on an outside press, Escape or a choice; previews expand under their row. */
-export function SessionHistory({ locale, sessionId, sessionName, history, disabled, onNew, onOpened, onClose }: {
-  locale: string; sessionId?: string; sessionName?: string; history: SessionHistoryController;
+/**
+ * The conversation list of the current tab: a dropdown under the session header that closes on an outside press, Escape or a choice; previews
+ * expand under their row. It lists only the conversations with the tab's partner (POMP conversations in the Default tab), and a chosen one
+ * opens in this tab.
+ */
+export function SessionHistory({ locale, sessionId, sessionName, partner, history, disabled, onNew, onOpened, onClose }: {
+  locale: string; sessionId?: string; sessionName?: string; partner: ConversationPartner; history: SessionHistoryController;
   disabled: boolean; onNew: () => void; onOpened: () => void; onClose?: () => void;
 }) {
   const t = useT(); const [query, setQuery] = useState(''); const [editing, setEditing] = useState(false);
@@ -32,14 +29,15 @@ export function SessionHistory({ locale, sessionId, sessionName, history, disabl
   // A short list needs no filter field (like the other pickers): the search appears only past ten conversations. Opening puts the
   // keyboard on the search when there is one, else on the current conversation's row.
   // A filter in use keeps its field, so a list that shrinks to ten or fewer while filtered can still be cleared.
-  const searchable = history.state.entries.length > 10 || query !== '';
+  const tabEntries = history.state.entries.filter(entry => (entry.partner?.kind ?? 'main') === partner.kind && (partner.kind === 'main' || entry.partner?.id === partner.id));
+  const searchable = tabEntries.length > 10 || query !== '';
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const root = panel.current;
     (root?.querySelector<HTMLElement>('[data-testid="session-search"]') ?? root?.querySelector<HTMLElement>('li.current [data-testid="session-open"]') ?? root?.querySelector<HTMLElement>('[data-testid="session-open"]'))?.focus({ preventScroll: true });
   }, [searchable]);
   useEffect(() => { setEditing(false); setDeleting(undefined); setMenu(undefined); setPreviewId(undefined); }, [sessionId]);
-  const entries = history.state.entries.filter(entry => `${entry.title ?? ''} ${entry.name ?? ''} ${entry.sessionId ?? ''} ${entry.partner?.id ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const entries = tabEntries.filter(entry => `${entry.title ?? ''} ${entry.name ?? ''} ${entry.sessionId ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const paged = usePaged(entries, query);
   const date = (value?: string) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString(locale) : '';
   return <div ref={panel} className="sessions-panel" data-testid="sessions-panel" onKeyDown={event => {
@@ -61,7 +59,6 @@ export function SessionHistory({ locale, sessionId, sessionName, history, disabl
           <button className="session-row-open" type="button" data-testid="session-open" disabled={history.pending || (!current && disabled)} onClick={() => { if (current) onOpened(); else if (history.command('switch', entry.id)) onOpened(); }}>
             <strong className="session-title">{current && <Icon name="check" size={12} />}{revealControls(entry.title || entry.name || entry.sessionId || entry.id)}</strong>
             <span className="session-meta">{date(entry.modifiedUtc || entry.visitedUtc)}{entry.messageCount !== undefined && <> · {t('session.messages', { count: entry.messageCount })}</>}</span>
-            <PartnerBadge partner={entry.partner ?? { kind: 'main' }} />
           </button>
           <button type="button" className="icon-btn" data-testid="session-row-menu" disabled={history.pending} title={t('session.actions')} aria-label={t('session.actions')} aria-expanded={menu === entry.id} aria-haspopup="menu" onClick={event => { opener.current = event.currentTarget; setMenu(menu === entry.id ? undefined : entry.id); }}><Icon name="more" /></button>
         </div>

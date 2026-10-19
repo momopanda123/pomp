@@ -74,8 +74,7 @@ namespace Pomp.Hosting
                         if (partner == null || partner.Kind == "main") throw new ArgumentException(PompLanguage.Pick("대화 상대가 비어 있어요.", "The conversation partner is empty."));
                         var open = _tabs.OpenSession(root, partner);
                         if (open == current) throw new InvalidOperationException(PompLanguage.Pick("이미 열려 있는 탭이에요.", "That tab is already open."));
-                        if (open != null) await SwitchToTabAsync(requestId, root, open, partner).ConfigureAwait(false);
-                        else await StartConversationAsync(requestId, partner).ConfigureAwait(false);
+                        await SwitchToTabAsync(requestId, root, open, partner).ConfigureAwait(false);
                         break;
                     case "activate":
                         var tabs = _tabs.Read(root);
@@ -123,18 +122,44 @@ namespace Pomp.Hosting
             finally { lock (_stateLock) _newConversationPartner = null; }
         }
         /// <summary>
-        /// Switches to a tab's conversation like the conversation list does. A conversation the engine never wrote (no message was sent in it)
-        /// cannot be switched to: the tab starts a new conversation for its partner instead, which is what that empty one was.
+        /// session/new (the header's +, /new) and the new conversation after deleting the current one: a new conversation in the current tab,
+        /// for its agent or team (a POMP conversation in the Default tab, or when that agent or team no longer exists).
         /// </summary>
-        private async Task SwitchToTabAsync(string requestId, string root, string sessionId, ConversationPartnerPayload? partner)
+        private async Task HandleNewInTabAsync(string? requestId)
+        {
+            ConversationPartnerPayload partner; lock (_stateLock) partner = CopyPartner(_partner);
+            ConversationPartnerPayload? assign;
+            try { assign = partner.Kind == "main" ? null : ValidatePartner(partner); }
+            catch (InvalidOperationException) { assign = null; }
+            lock (_stateLock) _newConversationPartner = assign;
+            try { await HandleNewSessionAsync(requestId).ConfigureAwait(false); }
+            finally { lock (_stateLock) _newConversationPartner = null; }
+        }
+        /// <summary>
+        /// Switches to a tab's conversation like the conversation list does; without <paramref name="sessionId"/> (a closed tab opened again) to the
+        /// partner's most recently changed conversation. A conversation the engine never wrote (no message was sent in it) cannot be switched to,
+        /// and a partner without conversations has none: the tab starts a new conversation for its partner instead.
+        /// </summary>
+        private async Task SwitchToTabAsync(string requestId, string root, string? sessionId, ConversationPartnerPayload? partner)
         {
             RequireIdleForTabSwitch();
             var workspace = await _environment.GetWorkspaceRootAsync(_disposeCts.Token).ConfigureAwait(false);
             var store = new RecentSessionStore(_environment.DataDirectory, workspace);
             string? file, id, name; lock (_stateLock) { file = _sessionFile; id = _info.SessionId; name = _info.SessionName; }
             var listing = await Task.Run(() => store.List(file, id, name), _disposeCts.Token).ConfigureAwait(false);
-            var handle = (listing["entries"] as JArray)?.OfType<JObject>().FirstOrDefault(e => (string?)e["sessionId"] == sessionId)?.GetString("id");
-            if (handle == null) { _tabs.Remove(root, sessionId); await StartConversationAsync(requestId, partner).ConfigureAwait(false); return; }
+            var entries = (listing["entries"] as JArray)?.OfType<JObject>().ToList() ?? new List<JObject>();
+            if (sessionId == null && partner != null)
+            {
+                // The list is newest first.
+                var partners = _tabs.All(root);
+                sessionId = entries.Select(e => (string?)e["sessionId"]).FirstOrDefault(s => s != null && s != id && partners.TryGetValue(s, out var p) && p.Kind == partner.Kind && p.Id == partner.Id);
+            }
+            var handle = sessionId == null ? null : entries.FirstOrDefault(e => (string?)e["sessionId"] == sessionId)?.GetString("id");
+            if (handle == null)
+            {
+                if (sessionId != null) _tabs.Remove(root, sessionId);
+                await StartConversationAsync(requestId, partner).ConfigureAwait(false); return;
+            }
             _composerAuto?.Stop(PompLanguage.Pick("대화 전환을 요청했어요.", "Conversation switch requested."));
             await HandleRecentSessionsAsync(new JObject { ["action"] = "switch", ["requestId"] = requestId, ["root"] = listing["root"], ["id"] = handle }).ConfigureAwait(false);
         }

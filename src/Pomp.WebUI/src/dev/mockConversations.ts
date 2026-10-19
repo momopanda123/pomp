@@ -55,6 +55,7 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
     pause('대화가 바뀌어 대기열을 멈췄어요.'); snapshot();
   };
   const tabs = {
+    current: () => partners.get(options.sessionId()),
     seed: (id: string, partner: ConversationPartner) => { if (partner.kind !== 'main') partners.set(id, partner); },
     openSession: (partner: ConversationPartner) => open.find(id => same(partners.get(id), partner)),
     main: () => main,

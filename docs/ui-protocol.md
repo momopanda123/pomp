@@ -886,9 +886,11 @@ Every chat tab is its own omp conversation: the Default (POMP) tab's, and one pe
 
 **Actions**
 
-- `open` with `partner`: switches to that partner's open tab, or starts a new, empty conversation for it (`new_session`) and opens its tab. A partner never has two open tabs.
+- `open` with `partner`: switches to that partner's open tab. With no open tab, it switches to the partner's most recently changed conversation (the list's newest), or starts a new, empty conversation for it (`new_session`) when it has none. A partner never has two open tabs.
 - `activate` with `sessionId`: switches to that open tab's conversation. Without `sessionId`: the Default tab's conversation (`main`), or a new POMP conversation when it has none.
 - `close` with `sessionId`: closes the tab; the conversation stays in the conversation list. Closing the current tab then activates the Default tab.
+- `session/new` makes a new conversation in the current tab: a new agent or team conversation in that tab (a POMP conversation in the Default tab, or when the role or team no longer exists). Deleting the current conversation does the same.
+- A `session/history` `switch` to a listed agent or team conversation makes it the current conversation of that partner's tab; the tab keeps its place and the conversation it had stays listed. A POMP conversation becomes the Default tab's.
 - A tab whose conversation the engine never wrote (no message was sent) starts a new conversation for its partner instead of switching.
 - `open`, `activate` and `close` of the current tab change the conversation: they answer with exactly one `session/newResult { requestId, status, message? }` and replay the transcript like a `session/history` switch. They are refused while a reply, approval, question or background work runs.
 
@@ -908,10 +910,10 @@ Every chat tab is its own omp conversation: the Default (POMP) tab's, and one pe
 
 **Persistence**
 
-- `<workspace>\.pomp\local\chat-tabs.json`, written atomically: `{ version: 1, main, conversations: [{ sessionId, partner: { kind, id }, open }] }`.
+- `<workspace>\.pomp\local\chat-tabs.json`, written atomically: `{ version: 1, main, conversations: [{ sessionId, partner: { kind, id }, open }] }`. `open` marks the current conversation of an open tab; every agent or team conversation stays listed with its partner.
 - A conversation that is not listed is a POMP conversation. The engine extension reads the partners from this file.
 - There is no entry count limit. Past 1 MiB, closed conversations listed first are removed first. Damaged files reset with a log warning.
-- Session-list `entries[].partner` is `{ kind, id }` for an agent or team conversation, or `null` for a POMP conversation.
+- Session-list `entries[].partner` is `{ kind, id }` for an agent or team conversation, or `null` for a POMP conversation. The page lists only the entries whose partner is the current tab's.
 - The earlier `.pomp/local/partners.json` is not read any more: those conversations are POMP conversations.
 
 ### Host command queue

@@ -1968,7 +1968,7 @@ export function installMockHost(): void {
           void handleHistory(payload as unknown as SessionHistoryCommand).catch((error: unknown) => console.error('[mock host] history', error));
           break;
         case 'session/new':
-          newConversation(((payload ?? {}) as Partial<UiToHost['session/new']>).requestId);
+          newConversation(((payload ?? {}) as Partial<UiToHost['session/new']>).requestId, conversations.tabs.current());
           break;
         case 'conversation/tab': {
           const command = payload as unknown as UiToHost['conversation/tab'];

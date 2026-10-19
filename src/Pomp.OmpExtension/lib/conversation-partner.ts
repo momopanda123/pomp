@@ -9,9 +9,10 @@ import { directPath, resolveRole, ROLE_REGEX, type RoleInfo } from './agent-role
 
 const MAX_FILE_BYTES = 1024 * 1024;
 
-interface ConversationPartner { kind: 'agent' | 'team'; id: string }
+export interface ConversationPartner { kind: 'agent' | 'team'; id: string }
 
-function conversationPartner(root: string | undefined, sessionId: unknown): ConversationPartner | null {
+/** The agent or team a conversation is with, or null for a POMP conversation. */
+export function conversationPartner(root: string | undefined, sessionId: unknown): ConversationPartner | null {
   if (!root || typeof sessionId !== 'string' || !sessionId) return null;
   try {
     const file = path.join(root, '.pomp', 'local', 'chat-tabs.json');

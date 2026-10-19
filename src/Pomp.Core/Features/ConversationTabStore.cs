@@ -12,10 +12,10 @@ using Pomp.Ui;
 namespace Pomp.Features
 {
     /// <summary>
-    /// The chat tabs of a workspace (docs/architecture.md §8.8), in <c>.pomp/local/chat-tabs.json</c>: the Default (POMP) tab's conversation
-    /// and every agent or team conversation, with its partner and whether it is open as a tab. A conversation that is not listed is a POMP
-    /// conversation. The omp extension reads the partners from this file (lib/conversation-partner.ts) to give an agent conversation that
-    /// agent's instructions, model and tools.
+    /// The chat tabs of a workspace (docs/architecture.md §8.8), in <c>.pomp/local/chat-tabs.json</c>: the Default (POMP) tab's current
+    /// conversation and every agent or team conversation with its partner; <c>open</c> marks the current conversation of an open tab (one per
+    /// partner). A conversation that is not listed is a POMP conversation. The omp extension reads the partners from this file
+    /// (lib/conversation-partner.ts) to give an agent conversation that agent's instructions, model and tools.
     /// </summary>
     internal sealed class ConversationTabStore
     {
@@ -59,8 +59,8 @@ namespace Pomp.Features
 
         /// <summary>
         /// <paramref name="sessionId"/> became the current conversation. <paramref name="assign"/> (an agent or team) makes it that partner's new
-        /// conversation. A listed conversation opens as its partner's tab (replacing another open conversation of that partner); any other
-        /// conversation becomes the Default tab's. Returns the conversation's partner.
+        /// conversation. A listed conversation becomes its partner's tab's current conversation (the tab keeps its place; the conversation it had
+        /// stays listed with its partner); any other conversation becomes the Default tab's. Returns the conversation's partner.
         /// </summary>
         public ConversationPartnerPayload Observe(string root, string sessionId, ConversationPartnerPayload? assign)
         {
@@ -82,10 +82,15 @@ namespace Pomp.Features
                 else
                 {
                     var wasOpen = entry.Open && data.Conversations.Contains(entry);
-                    foreach (var other in data.Conversations.Where(e => e.Open && e != entry && Same(e.Partner, entry.Partner))) other.Open = false;
+                    var replaced = data.Conversations.FirstOrDefault(e => e.Open && e != entry && Same(e.Partner, entry.Partner));
                     entry.Open = true;
-                    // A tab that opens again goes to the right end; one already open keeps its place.
-                    if (!wasOpen) { data.Conversations.Remove(entry); data.Conversations.Add(entry); }
+                    if (!wasOpen)
+                    {
+                        // The partner's open tab keeps its place with this conversation; a tab that opens again goes to the right end.
+                        data.Conversations.Remove(entry);
+                        if (replaced != null) { replaced.Open = false; data.Conversations.Insert(data.Conversations.IndexOf(replaced), entry); }
+                        else data.Conversations.Add(entry);
+                    }
                     if (data.Main == sessionId) data.Main = null;
                 }
                 Write(file, data);

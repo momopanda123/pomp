@@ -1,13 +1,14 @@
 /**
  * An agent conversation (docs/architecture.md §8.8): the chat tab of one agent is its own conversation, and the agent itself is the partner.
  * The role's instructions join the main conversation's system prompt, its model and thinking level are selected (`/pomp-partner`, sent by
- * the host after every change of conversation), and tools.ts limits the tools to the role's. A POMP conversation gets back the model it had.
+ * the host after every change of conversation), and tools.ts limits the tools to the role's. A POMP conversation that inherited an agent's or
+ * team's model gets back the POMP model; agent and team conversations keep their own.
  */
 import type { ThinkingLevel } from '@oh-my-pi/pi-agent-core';
 import type { Model } from '@oh-my-pi/pi-ai';
 import type { ExtensionAPI } from '@oh-my-pi/pi-coding-agent';
-import type { RoleInfo } from '../lib/agent-roles.ts';
-import { partnerRole } from '../lib/conversation-partner.ts';
+import { resolveRole, type RoleInfo } from '../lib/agent-roles.ts';
+import { conversationPartner, partnerRole } from '../lib/conversation-partner.ts';
 import { isPompHost, pick, readVsState } from '../lib/vs-state.ts';
 import { readRoleMemory, roleMemoryBlock } from './role-memory.ts';
 
@@ -35,16 +36,17 @@ export default function partner(pi: ExtensionAPI): void {
   if (!isPompHost()) return;
   const root = (): string | undefined => readVsState()?.solutionRoot ?? process.env.POMP_SOLUTION_ROOT;
   const same = (a: Model | undefined, b: Model | undefined): boolean => !!a && !!b && a.provider === b.provider && a.id === b.id;
-  // The model in force when a POMP conversation and when an agent conversation were last left. A conversation that did not choose its own
-  // model inherits the one in force (a new conversation, or one with no saved model): when that is the agent's, it gets the POMP model back.
+  // The model in force when a POMP conversation and when an agent or team conversation were last left. A conversation that did not choose its
+  // own model inherits the one in force (a new conversation, or one with no saved model): a POMP one that got an agent's or team's model gets
+  // the POMP model back.
   let base: Model | undefined;
-  let agentModel: Model | undefined;
+  let partnerModel: Model | undefined;
 
   pi.on('session_before_switch', (_event, ctx) => {
     try {
       if (ctx?.agent?.kind === 'sub') return undefined;
       const current = ctx.models?.current?.();
-      if (partnerRole(root(), ctx.sessionManager?.getSessionId?.())) agentModel = current; else base = current ?? base;
+      if (conversationPartner(root(), ctx.sessionManager?.getSessionId?.())) partnerModel = current; else base = current ?? base;
     } catch { /* never cancels a switch */ }
     return undefined;
   });
@@ -64,24 +66,26 @@ export default function partner(pi: ExtensionAPI): void {
   });
 
   // `/pomp-partner new`: the conversation was just started for its partner, so the role's model and thinking level are selected. A
-  // conversation the engine switched back to keeps what it saved (the engine restores its model and thinking level itself).
+  // conversation the engine switched back to keeps what it saved (the engine restores its model and thinking level itself). Only a POMP
+  // conversation is ever given another model without asking: the POMP model, when it inherited an agent's or team's.
   pi.registerCommand('pomp-partner', {
     description: "Select the conversation partner's model and thinking level, without inference (POMP host)",
     handler: async (args, ctx) => {
       if (ctx.agent?.kind === 'sub' || !ctx.models) return;
-      const role = partnerRole(root(), ctx.sessionManager?.getSessionId?.());
+      const partner = conversationPartner(root(), ctx.sessionManager?.getSessionId?.());
+      const role = partner?.kind === 'agent' ? resolveRole(partner.id, root()) : null;
       const current = ctx.models.current();
       const fresh = args.trim() === 'new';
       const spec = role && fresh && role.model !== 'default' ? role.model : undefined;
       const target = spec?.split(',').map(item => item.trim()).filter(Boolean).map(item => ctx.models.resolve(item)).find(Boolean);
       if (spec && !target) ctx.ui.notify(pick(`역할 모델(${spec})을 쓸 수 없어 지금 모델로 이어요.`, `The role's model (${spec}) is unavailable; the current model stays.`), 'warning');
       if (target && !same(current, target) && !await pi.setModel(target)) ctx.ui.notify(pick('역할 모델을 선택하지 못했어요.', "The role's model could not be selected."), 'warning');
-      // A POMP conversation, or a new agent conversation whose role names no model, that inherited the last agent conversation's model.
-      if (!target && (!role || fresh) && agentModel && base && same(current, agentModel) && !same(base, agentModel)) await pi.setModel(base);
       if (role && fresh && role.thinkingLevel) {
         try { pi.setThinkingLevel(role.thinkingLevel as ThinkingLevel); } catch { /* a level this model does not offer */ }
       }
-      if (!role) { base = ctx.models.current(); agentModel = undefined; }
+      if (partner) return;
+      if (partnerModel && base && same(current, partnerModel) && !same(base, partnerModel)) await pi.setModel(base);
+      base = ctx.models.current(); partnerModel = undefined;
     },
   });
 }

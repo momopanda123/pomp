@@ -219,7 +219,8 @@ export default function teams(pi: ExtensionAPI): void {
         ctx.ui.notify(`Team title is invalid`, 'warning');
         return;
       }
-      if (typeof team.goal !== 'string' || !team.goal || team.goal.length > 400) {
+      // The goal is optional, as in POMP's team editor (AgentRoster: at most 400 characters); an empty one adds no line to the brief.
+      if (team.goal !== undefined && (typeof team.goal !== 'string' || team.goal.length > 400)) {
         ctx.ui.notify(`Team goal is invalid`, 'warning');
         return;
       }
@@ -282,7 +283,7 @@ export default function teams(pi: ExtensionAPI): void {
       const briefLines = [
         `<!-- pomp-team:${team.id} -->`,
         `# Team Coordination: ${team.title} (ID: ${team.id})`,
-        `Goal: ${team.goal}`,
+        team.goal?.trim() ? `Goal: ${team.goal}` : '',
         `Execution Mode: ${mode} - ${modeDesc}`,
         team.instructions ? `Team Instructions: ${team.instructions}` : '',
         `## Team Members`,

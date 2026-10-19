@@ -217,7 +217,7 @@ namespace Pomp.Hosting
                 case UiMessageTypes.SessionNew:
                     _composerAuto?.Stop(PompLanguage.Pick("새 대화를 요청했어요.", "New conversation requested."));
                     var requestId = message.PayloadAs<SessionNewPayload>()?.RequestId;
-                    _commands.Enqueue(() => HandleNewSessionAsync(requestId));
+                    _commands.Enqueue(() => HandleNewInTabAsync(requestId));
                     break;
                 case UiMessageTypes.BridgeRestart:
                     _composerAuto?.Stop(PompLanguage.Pick("다시 시작을 요청했어요.", "Restart requested."));
