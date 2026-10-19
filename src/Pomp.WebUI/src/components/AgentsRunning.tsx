@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { formatDuration } from '../format';
+import { useNow } from '../hooks';
 import { useT, type MessageKey } from '../i18n';
 import type { BackgroundAgentJob, BackgroundAgentState } from '../protocol';
 import { useRoleTitle, useTeamTitle } from '../teamsCache';
@@ -21,6 +22,7 @@ export function useObservedAgents(sessionId: string | undefined): ObservedAgents
   return useMemo(() => {
     const all = state && (state.state !== 'live' || state.sessionId === sessionId) ? state.jobs : [];
     const running = all.filter(isRunningJob);
+    for (const job of running) noteStart(job);
     const ended = all.filter(job => !isRunningJob(job)).sort((a, b) => (b.lastUpdate ?? 0) - (a.lastUpdate ?? 0));
     return { state, jobs: [...running, ...ended], running: running.length };
   }, [state, sessionId]);
@@ -41,12 +43,34 @@ export function RunningCard({ observed: { state, jobs, running }, sessionId, con
   </ViewSection>;
 }
 
+/**
+ * When each job started, as estimated from its running updates (last update minus the duration reported with it). The engine's duration
+ * stays at its last progress report, so an ended job's own figure can be shorter than the time it ran; the estimate keeps the two views consistent.
+ */
+const startedAt = new Map<string, number>();
+function noteStart(job: BackgroundAgentJob): void {
+  const reported = job.progress?.durationMs; const update = job.lastUpdate;
+  if (reported == null || update == null) return;
+  const start = update - reported; startedAt.set(job.id, Math.min(startedAt.get(job.id) ?? start, start));
+}
+function elapsedMs(job: BackgroundAgentJob, live: boolean, now: number): number | undefined {
+  const reported = job.progress?.durationMs; const update = job.lastUpdate;
+  if (reported == null) return undefined;
+  if (update == null) return reported;
+  if (live) { noteStart(job); return reported + Math.max(0, now - update); }
+  const start = startedAt.get(job.id);
+  return start != null ? Math.max(reported, update - start) : reported;
+}
+
 function RunningRow({ job, state, sessionId, disabled }: { job: BackgroundAgentJob; state: BackgroundAgentState | undefined; sessionId?: string; disabled: boolean }) {
   const t = useT(); const title = useRoleTitle(job.agent); const team = useTeamTitle(job.team ?? '');
   const code = job.status === 'cancelled' ? 'aborted' : job.status === 'queued' ? 'pending' : job.status === 'inProgress' ? 'running' : job.status;
   const status = ['pending', 'running', 'completed', 'failed', 'error', 'aborted'].includes(code) ? code : 'unknown';
   const live = isRunningJob(job);
-  const duration = job.progress?.durationMs != null ? formatDuration(job.progress.durationMs) : '';
+  // A running job keeps counting from its last update until the next one arrives.
+  const now = useNow(live, 1000);
+  const durationMs = elapsedMs(job, live, now);
+  const duration = durationMs != null ? formatDuration(durationMs) : '';
   const ended = !live && job.lastUpdate ? new Date(job.lastUpdate) : undefined;
   const endedLabel = ended ? t('running.endedAt', { time: ended.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) }) : '';
   return <Row testId={`running-row-${job.id}`}>

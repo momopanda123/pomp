@@ -23,18 +23,6 @@ namespace Pomp.Hosting
         /// <summary>The extension's routing brief of a message for a team or one agent (docs/architecture.md §8.2, §8.3).</summary>
         private static readonly Regex RoutingBrief = new Regex(@"^<!-- pomp-(team|agent|dm):[A-Za-z0-9._:-]{1,128} -->[\s\S]*?<!-- /pomp-\1 -->", RegexOptions.CultureInvariant);
 
-        /// <summary>
-        /// The tab marker an earlier POMP put before the composed text of a message sent from an agent or team tab to another target, when
-        /// those tabs were views of one conversation. Nothing writes it any more; conversations from then still carry it, so it is left out.
-        /// </summary>
-        private static readonly Regex OriginPattern = new Regex(@"^<!-- pomp-from:(agent|team):([a-z0-9-]{2,40}) -->", RegexOptions.CultureInvariant);
-
-        private static string WithoutOrigin(string text)
-        {
-            var origin = OriginPattern.Match(text);
-            return origin.Success ? text.Substring(origin.Length).TrimStart() : text;
-        }
-
         /// <summary>The user's saved team notes the host appends to a message for that team (PompSession.Knowledge.cs).</summary>
         internal const string TeamKnowledgeOpen = "<team_knowledge>";
         internal const string TeamKnowledgeClose = "</team_knowledge>";
@@ -64,7 +52,6 @@ namespace Pomp.Hosting
             var text = prompt!.TrimStart();
             var brief = RoutingBrief.Match(text);
             if (brief.Success) text = text.Substring(brief.Length).TrimStart();
-            text = WithoutOrigin(text);
             if (!text.StartsWith(ContextOpen, StringComparison.Ordinal)) return null;
             var end = text.IndexOf(ContextClose, StringComparison.Ordinal);
             if (end < 0) return null;
@@ -112,7 +99,6 @@ namespace Pomp.Hosting
 
         private static string WithoutPompAdditions(string text)
         {
-            text = WithoutOrigin(text);
             if (text.StartsWith(ContextOpen, StringComparison.Ordinal))
             {
                 // The block's content is neutralized when built, so the first closing tag is the real end of the block.

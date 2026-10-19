@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.Threading;
@@ -127,7 +128,7 @@ namespace Pomp.VisualStudio.ToolWindow
         /// <summary>Raised on the UI thread when files or an image were pasted into the chat input.</summary>
         public event EventHandler? PasteFilesRequested;
 
-        /// <summary>Raised on the UI thread with the full paths of the files dropped on the page.</summary>
+        /// <summary>Raised on the UI thread with the full paths of the files dropped on the page; empty for a Solution Explorer drag (the handler reads the selection).</summary>
         public event EventHandler<IReadOnlyList<string>>? FilesDropped;
 
         public event EventHandler<UiMessage>? EditorFollowRequested;
@@ -371,8 +372,15 @@ namespace Pomp.VisualStudio.ToolWindow
 
             if (message.Type == DropFilesMessageType)
             {
-                var paths = DroppedPaths(args);
-                if (paths.Count > 0) FilesDropped?.Invoke(this, paths);
+                // `paths`: the files the page read from a text/uri-list drag (Solution Explorer in VS 2017); the session checks each file exists.
+                // `projectItems`: a Visual Studio drag (later Solution Explorers) the page cannot read; the handler takes the dragged selection.
+                var payload = message.Payload;
+                var projectItems = payload?["projectItems"]?.Type == Newtonsoft.Json.Linq.JTokenType.Boolean && (bool)payload["projectItems"]!;
+                List<string> paths;
+                if (payload?["paths"] is Newtonsoft.Json.Linq.JArray listed)
+                    paths = listed.Where(token => token.Type == Newtonsoft.Json.Linq.JTokenType.String).Select(token => (string)token!).Where(path => path.Length > 0 && path.Length < 2048).Take(500).ToList();
+                else paths = projectItems ? new List<string>() : DroppedPaths(args);
+                if (projectItems || paths.Count > 0) FilesDropped?.Invoke(this, paths);
                 return;
             }
 

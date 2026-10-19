@@ -356,10 +356,38 @@ namespace Pomp.VisualStudio.Commands
             if ((paths.Count > 0 || png != null) && services.Session is PompSession session) await session.PasteIntoBasketAsync(paths, png, package.DisposalToken);
         }
 
-        /// <summary>Files dragged from Explorer onto the chat page: into the context basket, like pasted files.</summary>
+        /// <summary>
+        /// Files dragged onto the chat page: into the context basket, like pasted files. No paths means a Solution Explorer drag (the page
+        /// cannot read Visual Studio's project-item formats): the dragged items are Solution Explorer's selection, taken only while Solution
+        /// Explorer is the active window, where the drag started.
+        /// </summary>
         public async Task DropIntoBasketAsync(IReadOnlyList<string> paths)
         {
-            if (services.Session is PompSession session) await session.PasteIntoBasketAsync(paths, null, package.DisposalToken);
+            if (paths.Count == 0) paths = await SolutionExplorerSelectionAsync();
+            if (paths.Count > 0 && services.Session is PompSession session) await session.PasteIntoBasketAsync(paths, null, package.DisposalToken);
+        }
+
+        private async Task<IReadOnlyList<string>> SolutionExplorerSelectionAsync()
+        {
+            await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+            var paths = new List<string>();
+            if (!(await package.GetServiceAsync(typeof(SDTE)) is DTE2 dte)) return paths;
+            try
+            {
+                if (!string.Equals(dte.ActiveWindow?.ObjectKind, EnvDTE.Constants.vsWindowKindSolutionExplorer, StringComparison.OrdinalIgnoreCase)) return paths;
+                if (!(dte.ToolWindows.SolutionExplorer.SelectedItems is Array items)) return paths;
+                foreach (var entry in items)
+                {
+                    if (!(entry is UIHierarchyItem item) || !(item.Object is ProjectItem projectItem) || projectItem.FileCount < 1) continue;
+                    var file = projectItem.FileNames[1];
+                    if (!string.IsNullOrEmpty(file)) paths.Add(file);
+                }
+            }
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException || ex is ArgumentException || ex is InvalidCastException)
+            {
+                services.Logger.Warn("Reading the Solution Explorer selection for a drop on the chat page failed: " + ex.Message);
+            }
+            return paths;
         }
 
         /// <summary>The active document as a context-basket file (workspace-relative path with forward slashes when inside the workspace).</summary>

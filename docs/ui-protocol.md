@@ -102,6 +102,9 @@ The VS host handles these page messages in the WebView channel. They never reach
 - The VS host reads each `CoreWebView2File.Path` from `AdditionalObjects` and puts the files into the context basket as for `ui/pasteFiles`. Folders and missing files are left out.
 - `AdditionalObjects` needs WebView2 SDK 1.0.1901.177 (earlier SDKs have the property but throw) and Runtime 113. VS 2017/2019 ship that SDK. VS 2022+ use their own copy, read through reflection.
 - Where the runtime lacks the API, the page sends a `ui/status` warning instead. Where the host's WebView2 copy lacks it, the host logs a warning.
+- A `text/uri-list` drag (Solution Explorer in VS 2017) is sent as `ui/dropFiles { paths }` (at most 500). The paths come from its `file:` URIs or, because Chromium hides those from pages, from the absolute paths the drag carries as plain text lines; other lines are ignored.
+- A drag whose data the page cannot read at all (no types: Solution Explorer in later versions uses Visual Studio's own formats) is sent as `ui/dropFiles { projectItems: true }` with a plain `postMessage`.
+  The host then adds Solution Explorer's selected files (the dragged items), only while Solution Explorer is the active window.
 - The page cancels every file drop, so the WebView never navigates to a dropped file. Text dragged from the editor still drops into the chat input.
 
 #### `ui/status`
@@ -448,8 +451,7 @@ Payload fields:
 **Restored history of another session**
 
 - It shows the extension's routing brief, such as `<!-- pomp-team:… -->`, at the start of the user text.
-- An earlier POMP put a tab marker `<!-- pomp-from:<kind>:<id> -->` after it; the host never shows that marker.
-- Session titles, previews and archive pages leave both out.
+- Session titles, previews and archive pages leave it out.
 
 ### chat/assistantNarration
 
@@ -914,7 +916,6 @@ Every chat tab is its own omp conversation: the Default (POMP) tab's, and one pe
 - A conversation that is not listed is a POMP conversation. The engine extension reads the partners from this file.
 - There is no entry count limit. Past 1 MiB, closed conversations listed first are removed first. Damaged files reset with a log warning.
 - Session-list `entries[].partner` is `{ kind, id }` for an agent or team conversation, or `null` for a POMP conversation. The page lists only the entries whose partner is the current tab's.
-- The earlier `.pomp/local/partners.json` is not read any more: those conversations are POMP conversations.
 
 ### Host command queue
 
