@@ -37,7 +37,7 @@ import { useWorkAttention } from './workAttention';
 import { useTabBadges } from './tabBadges';
 import { effectiveRoles, MainRoleContext, RolesContext, targetPayload, TeamsContext } from './teamsCache';
 import { rememberPrompt } from './promptHistory';
-import { reportStatus, useStatusReport } from './statusBar';
+import { useStatusReport } from './statusBar';
 import { UndeliveredStatusBanner } from './components/UndeliveredStatusBanner';
 import './styles/conversations.css';
 
@@ -276,7 +276,9 @@ export function App() {
     if (!canChangeSession() || !send('session/history', { action: 'switch', requestId, root, id })) return false;
     dispatch({ type: 'newSessionRequested', requestId }); return true;
   }, [canChangeSession]);
-  const history = useSessionHistory(workspaceKey, sessionId, connected, state.locale, switchSession);
+  /** A refusal or failure of a slash command (or of the conversation's rename and compaction): a warning in the chat, where the command was typed. */
+  const commandNotice = useCallback((message: string) => dispatch({ type: 'localNotice', level: 'warning', message }), []);
+  const history = useSessionHistory(workspaceKey, sessionId, connected, state.locale, switchSession, commandNotice);
   const historyScope = useRef({ workspaceKey, sessionId });
   useEffect(() => {
     const before = historyScope.current; historyScope.current = { workspaceKey, sessionId };
@@ -352,18 +354,31 @@ export function App() {
     if (next === 'work') openWork();
     else { setTab(next); if (next === 'agents' && connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }
   };
+  /** Says `message` in the chat and keeps the typed command in the input (see commandNotice). */
+  const refuseCommand = (message: string): SendResult => { commandNotice(message); return { ok: false, reason: 'notified' }; };
+  /** /rename and /compact: they wait only for a session request that changes something; the hook tells their own failures in the chat. */
+  const historyCommand = (action: 'rename' | 'compact', value: string): SendResult => {
+    if (!connected) return refuseCommand(translate('error.hostUnavailable'));
+    if (history.busyFor(action)) return refuseCommand(translate('slash.historyBusy'));
+    return history.command(action, value) ? { ok: true } : { ok: false, reason: 'notified' };
+  };
   const handleCommand = (name: BuiltinCommand, args: string): SendResult => {
     switch (name) {
-      case 'new': return newSession() ? { ok: true } : { ok: false, reason: 'busy' };
+      case 'new':
+        if (!canChangeSession()) return refuseCommand(translate('slash.newBlocked'));
+        // newSession tells a failed send itself.
+        return newSession() ? { ok: true } : { ok: false, reason: 'notified' };
       case 'sessions': openList(); return { ok: true };
       case 'accounts': case 'login': case 'usage': changeTab('accounts'); return { ok: true };
       case 'work': openWork(); return { ok: true };
       case 'agents': changeTab('agents'); return { ok: true };
-      case 'rename': return history.command('rename', args) ? { ok: true } : { ok: false, reason: 'busy' };
-      case 'compact': return history.command('compact', args.slice(0, 2000)) ? { ok: true } : { ok: false, reason: 'busy' };
+      case 'rename':
+        if (!args) return refuseCommand(translate('slash.syntax', { reason: translate('slash.renameEmpty'), usage: translate('slash.args.rename') }));
+        return historyCommand('rename', args);
+      case 'compact': return historyCommand('compact', args.slice(0, 2000));
       case 'computer':
         // The button is hidden when the option is off: say so instead of a click nobody sees.
-        if (state.computer?.policy !== 'perConversation') { reportStatus(translate('computer.unavailable'), 'warning'); return { ok: true }; }
+        if (state.computer?.policy !== 'perConversation') return refuseCommand(translate('slash.computerOff'));
         setComputerRequest(previous => ({ revision: (previous?.revision ?? 0) + 1 })); return { ok: true };
       case 'btw': return openBtw(args);
       case 'model': case 'thinking': case 'effort': case 'permissions': case 'agent': case 'team': case 'goal': case 'steer': case 'help': return { ok: true };

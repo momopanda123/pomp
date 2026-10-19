@@ -18,8 +18,9 @@
 .partner-tab-close { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 18px; padding: 0; color: var(--pomp-muted-fg); }
 .partner-tab-close:hover:not(:disabled), .partner-tab-add:hover:not(:disabled) { color: var(--pomp-fg); background: var(--pomp-hover-bg); }
 .partner-tab-add:hover:not(:disabled) { background: linear-gradient(var(--pomp-hover-bg), var(--pomp-hover-bg)), var(--pomp-bg); }
-/* Any number of tabs: the add button stays at the row's right edge while the tabs scroll under it. */
-.partner-tab-add { position: sticky; right: 0; z-index: 1; display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; padding: 0; color: var(--pomp-muted-fg); background: var(--pomp-bg); }
+/* Any number of tabs: the add button stays at the row's right edge while the tabs scroll under it. Its opaque background ends 2px
+   above the row's bottom, where the tab underlines meet the header's border, so it never paints over that border. */
+.partner-tab-add { position: sticky; right: 0; z-index: 1; display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; margin-bottom: 2px; padding: 0; color: var(--pomp-muted-fg); background: var(--pomp-bg); }
 .partner-tab-main:disabled, .partner-tab-close:disabled, .partner-tab-add:disabled { cursor: default; opacity: .5; }
 /* Dimmed by its icon only: a see-through add button would show the tabs scrolled under it. */
 .partner-tab-add:disabled { opacity: 1; color: color-mix(in srgb, var(--pomp-muted-fg) 50%, transparent); }

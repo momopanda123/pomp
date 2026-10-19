@@ -118,6 +118,7 @@ function failureText(t: Translate, failure: SendFailure): string | null {
     case 'hostUnavailable':
       return t('composer.sendFailed');
     case 'busy':
+    case 'notified':
       return null;
   }
 }
@@ -613,36 +614,47 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     if (canSend && !busy) submit(MAIN_TARGET);
   });
 
+  /** A slash command's refusal: a warning in the chat (with the command's syntax when an argument is missing); the typed command stays in the input. */
+  const refuseCommand = (reason: string, usage?: MessageKey): void => {
+    dispatch({ type: 'localNotice', level: 'warning', message: usage ? t('slash.syntax', { reason, usage: t(usage) }) : reason });
+    setTargetError(null); inputRef.current?.focus();
+  };
+  /** A slash command that was not sent: said in the chat, unless the page already did (`notified`). */
+  const commandFailed = (failure: SendFailure): void => {
+    if (failure.reason !== 'notified') dispatch({ type: 'localNotice', level: 'warning', message: failureText(t, failure) ?? t('slash.busy') });
+  };
+  const computerNotice = useCallback((message: string) => dispatch({ type: 'localNotice', level: 'warning', message }), [dispatch]);
+
   const submit = (override?: SendTarget): void => {
     if (!canSend || composing.current) return;
     setTargetLost(null);
-    if (rejection) { setFailure(rejection); inputRef.current?.focus(); return; }
     const command = /^\/([^\s]+)(?:\s+([\s\S]*))?$/u.exec(text);
+    if (rejection) { if (command) commandFailed(rejection); else setFailure(rejection); inputRef.current?.focus(); return; }
     // An old command name whose job a built-in does now runs that built-in (/pomp-compact → /compact).
     const typed = command ? LEGACY_COMMANDS.get(command[1]!) ?? command[1]! : undefined;
     // /plan is POMP's own plan-only command (the host maps it): without a task there is nothing to plan.
     if (command && typed === 'plan' && !(command[2] ?? '').trim() && catalog.some(item => item.name === 'plan')) {
-      setTargetError(t('plan.empty')); inputRef.current?.focus(); return;
+      refuseCommand(t('plan.empty'), 'slash.args.plan'); return;
     }
     if (command && typed && isBuiltinCommand(typed)) {
       const name = typed;
       let result: SendResult;
       if (name === 'model' || name === 'thinking' || name === 'effort') { setPickerRequest(previous => ({ kind: name === 'model' ? 'model' : 'thinking', revision: (previous?.revision ?? 0) + 1 })); result = { ok: true }; }
       else if (name === 'permissions') {
-        if (permissionDisabled) result = { ok: false, reason: busy ? 'busy' : 'hostUnavailable' };
+        if (permissionDisabled) { refuseCommand(t(connected ? 'slash.permissionsBlocked' : 'error.hostUnavailable')); return; }
         else { setTargetOpen(false); setBasketOpen(false); setPermissionConfirm(false); setPermissionOpen(true); result = { ok: true }; }
       }
       else if (name === 'help') { setHelpOpen(true); result = { ok: true }; }
       else if (name === 'goal') {
         const goalText = command[2]?.trim() ?? '';
-        if (!goalText) { setTargetError(t('goal.empty')); inputRef.current?.focus(); return; }
+        if (!goalText) { refuseCommand(t('goal.empty'), 'slash.args.goal'); return; }
         // A goal runs in the main conversation: an agent or team tab has no workflow of its own.
-        if (partnerTab) { setTargetError(t('composer.goalPartnerTab')); inputRef.current?.focus(); return; }
+        if (partnerTab) { refuseCommand(t('composer.goalPartnerTab')); return; }
         setTargetError(null); onGoal?.(goalText); result = { ok: true };
       }
       else if (name === 'steer' || name === 'btw') {
         const rest = command[2]?.trim() ?? '';
-        if (!rest && (name === 'btw' || draft.attachments.length === 0)) { setTargetError(t(name === 'btw' ? 'btw.empty' : 'steer.empty')); inputRef.current?.focus(); return; }
+        if (!rest && (name === 'btw' || draft.attachments.length === 0)) { refuseCommand(t(name === 'btw' ? 'btw.empty' : 'steer.empty'), name === 'btw' ? 'slash.args.btw' : 'slash.args.steer'); return; }
         setTargetError(null);
         result = name === 'steer' ? onSteer?.(rest, draft.attachments) ?? { ok: false, reason: 'hostUnavailable' } : onCommand(name, rest);
       }
@@ -650,8 +662,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
         const args = /^(\S+)(?:\s+([\s\S]*))?$/u.exec(command[2]?.trim() ?? '');
         const target = args ? destinations.find(item => item.target.kind === name && (name === 'team' ? item.target.id.toLowerCase() === args[1]!.toLowerCase() : item.target.id === args[1]))?.target : undefined;
         if (!target) {
-          setTargetError(args ? t('composer.targetUnknown', { name: args[1]! }) : t('composer.targetRequired'));
-          inputRef.current?.focus(); return;
+          refuseCommand(args ? t('composer.targetUnknown', { name: args[1]! }) : t('composer.targetRequired'), name === 'team' ? 'slash.args.team' : 'slash.args.agent');
+          return;
         }
         setTargetError(null);
         // A name alone switches the conversation partner (a tab); with a message it is a one-message target.
@@ -661,7 +673,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
         else { onSelectTarget(target); result = args?.[2]?.trim() ? onSend(args[2].trim(), draft.attachments, true, target) : { ok: true }; }
       }
       else result = onCommand(name, command[2]?.trim() ?? '');
-      setFailure(result.ok ? null : result);
+      setFailure(null);
+      if (!result.ok) commandFailed(result);
       if (result.ok) recalled.current = null;
       if (result.ok) dispatch({ type: 'composerEdit', text: '', caret: 0, selectionEnd: 0 });
     } else {
@@ -669,7 +682,9 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
       const keepBasket = command !== null && !slashTakesReferences(text, commands);
       const destination = override ?? (mainPending ? MAIN_TARGET : undefined);
       const result = onSend(text, keepBasket ? [] : draft.attachments, !keepBasket, destination, false, undefined, destination?.kind === 'main');
-      setFailure(result.ok ? null : result);
+      // A slash command's failure is told in the chat; a message that waits for the switch to the Default (POMP) tab is not a failure.
+      if (!result.ok && command && !(result.reason === 'busy' && destination?.kind === 'main')) { setFailure(null); commandFailed(result); }
+      else setFailure(result.ok ? null : result);
       if (result.ok) recalled.current = null;
       if (result.ok) deferredMain.current = null;
       if (result.ok && keepBasket) dispatch({ type: 'composerEdit', text: '', caret: 0, selectionEnd: 0 });
@@ -906,7 +921,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
             </div>
           </div>
           <LiveEditorControls state={editorFollow} disabled={requestPending || newSessionPending || draft.composing} shortcuts={shortcuts} inputRef={inputRef} t={t} />
-          <ComputerToggle computer={computer} reply={computerReply} request={computerRequest} connected={connected} busy={busy} blocked={requestPending || newSessionPending} inputRef={inputRef} />
+          <ComputerToggle computer={computer} reply={computerReply} request={computerRequest} onCommandNotice={computerNotice} connected={connected} busy={busy} blocked={requestPending || newSessionPending} inputRef={inputRef} />
           <button type="button" className="icon-btn" data-testid="editor-context" aria-pressed={includeEditorContext} title={t('composer.includeContext')} aria-label={t('composer.includeContext')} onClick={() => onIncludeEditorContextChange(!includeEditorContext)}><Icon name="context" size={14} /></button>
         </span>
         <ContextMeter session={session} basketTokens={basketTokens} workspaceKey={workspaceKey} sessionId={sessionId} includeEditorContext={includeEditorContext} attachmentPaths={attachmentPaths} connected={connected} />

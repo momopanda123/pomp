@@ -80,6 +80,10 @@ export default function liveEdits(pi: ExtensionAPI): void {
 		return undefined;
 	});
 
+	const report = (files: DiskEditFile[], error: boolean, ui: ExtensionUi): void => {
+		ui.notify(DISK_EDIT_PREFIX + Buffer.from(JSON.stringify({ files, error })).toString("base64"), "info");
+	};
+
 	pi.on("tool_result", (event, ctx) => {
 		try {
 			const id = field(event, "toolCallId");
@@ -87,13 +91,26 @@ export default function liveEdits(pi: ExtensionAPI): void {
 			const files = pending.get(id);
 			if (!files) return undefined;
 			pending.delete(id);
-			const error = field(event, "isError") === true;
-			(mainUi ?? ctx.ui).notify(DISK_EDIT_PREFIX + Buffer.from(JSON.stringify({ files, error })).toString("base64"), "info");
+			report(files, field(event, "isError") === true, mainUi ?? ctx.ui);
 		} catch {
 			// ignore
 		}
 		return undefined;
 	});
+
+	// A call that was denied or blocked after its tool_call never reports a tool_result: when its turn ends it did not write, and
+	// the host ends the hold of its files at once (instead of after the hold's two minutes).
+	const releaseUnreported = (_event: unknown, ctx: { ui: ExtensionUi }): undefined => {
+		try {
+			for (const files of pending.values()) report(files, true, mainUi ?? ctx.ui);
+			pending.clear();
+		} catch {
+			// ignore
+		}
+		return undefined;
+	};
+	pi.on("turn_end", releaseUnreported);
+	pi.on("agent_end", releaseUnreported);
 }
 
 function delay(ms: number): Promise<void> {

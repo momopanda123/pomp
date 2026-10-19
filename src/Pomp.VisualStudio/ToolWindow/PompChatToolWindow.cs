@@ -74,6 +74,7 @@ namespace Pomp.VisualStudio.ToolWindow
         /// <inheritdoc />
         protected override void Dispose(bool disposing)
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             if (disposing)
             {
                 control.Dispose();

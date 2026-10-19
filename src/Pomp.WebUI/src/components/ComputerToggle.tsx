@@ -14,6 +14,8 @@ export interface ComputerToggleProps {
   reply?: ComputerReplyPayload | null;
   /** The /computer command: each new revision acts like a click (off at once, or the confirmation before turning on). */
   request?: { revision: number };
+  /** Where a refusal or failure of the /computer command is told: the chat (a click on the button reports to the status bar). */
+  onCommandNotice?: (message: string) => void;
   connected: boolean;
   /** A reply is running: it can be switched off, not on. */
   busy: boolean;
@@ -26,7 +28,7 @@ export interface ComputerToggleProps {
  * The composer's screen & input control button (after Live): whether the model may see and drive the screen in this conversation.
  * One conversation on the PC holds it; while another one does, the button is disabled and names it. Hidden when the option is off.
  */
-function ComputerToggleView({ computer, reply, request, connected, busy, blocked, inputRef }: ComputerToggleProps) {
+function ComputerToggleView({ computer, reply, request, onCommandNotice, connected, busy, blocked, inputRef }: ComputerToggleProps) {
   const t = useT();
   const [localPending, setLocalPending] = useState<string | null>(null);
   const pendingRef = useRef<string | null>(null);
@@ -46,16 +48,27 @@ function ComputerToggleView({ computer, reply, request, connected, busy, blocked
   const disabled = !connected || blocked || isPending || (!desktop && (refusal !== null || busy));
   const title = !desktop && refusal ? refusal : label;
   const close = () => { setConfirmOpen(false); focusControlOrInput(buttonRef.current, inputRef.current, { preventScroll: true }); };
+  // The switch the /computer command started: its refusal and its failed reply go to the chat, a click's to the status bar.
+  const fromCommand = useRef(false);
+  const report = (message: string, level: 'warning' | 'error' = 'error') => {
+    if (fromCommand.current && onCommandNotice) onCommandNotice(message); else reportStatus(message, level);
+  };
   const change = (enabled: boolean) => {
     if (disabled || pendingRef.current) return;
     const requestId = newId();
     pendingRef.current = requestId; setLocalPending(requestId);
     if (!send('computer/set', { requestId, desktop: enabled })) {
-      pendingRef.current = null; setLocalPending(null); reportStatus(t('error.hostUnavailable'));
+      pendingRef.current = null; setLocalPending(null); report(t('error.hostUnavailable'));
     }
   };
-  const toggle = () => {
-    if (disabled) { if (refusal) reportStatus(refusal, 'warning'); return; }
+  const toggle = (command = false) => {
+    fromCommand.current = command;
+    if (disabled) {
+      // A click on a disabled button says only why it cannot be switched on; the command always answers.
+      const reason = refusal ?? (command ? t(busy && !desktop ? 'slash.computerBusy' : 'slash.busy') : null);
+      if (reason) report(reason, 'warning');
+      return;
+    }
     if (desktop) change(false);
     else setConfirmOpen(true);
   };
@@ -64,11 +77,11 @@ function ComputerToggleView({ computer, reply, request, connected, busy, blocked
   useEffect(() => {
     if (!reply || reply.requestId !== pendingRef.current) return;
     pendingRef.current = null; setLocalPending(null);
-    if (!reply.ok) reportStatus(reply.error || t('computer.failed'));
+    if (!reply.ok) report(reply.error || t('computer.failed'));
   }, [reply, t]);
   useEffect(() => {
     if (!localPending) return;
-    const timer = window.setTimeout(() => { pendingRef.current = null; setLocalPending(null); reportStatus(t('setup.noReply')); }, FAST_REPLY_TIMEOUT_MS);
+    const timer = window.setTimeout(() => { pendingRef.current = null; setLocalPending(null); report(t('setup.noReply')); }, FAST_REPLY_TIMEOUT_MS);
     return () => window.clearTimeout(timer);
   }, [localPending, t]);
   useEffect(() => {
@@ -79,13 +92,13 @@ function ComputerToggleView({ computer, reply, request, connected, busy, blocked
   useEffect(() => {
     if (!request || seenRequest.current === request.revision) return;
     seenRequest.current = request.revision;
-    toggle();
+    toggle(true);
   }, [request?.revision]);
 
   if (!computer || computer.policy === 'off') return null;
   return <span className="computer-toggle-wrapper" ref={anchorRef} title={title}>
     <button ref={buttonRef} type="button" className="icon-btn computer-toggle" data-testid="computer-toggle" aria-pressed={desktop} aria-label={title} title={title}
-      disabled={disabled} aria-busy={isPending || undefined} onMouseDown={event => event.preventDefault()} onClick={toggle}><Icon name="screen" size={14} /></button>
+      disabled={disabled} aria-busy={isPending || undefined} onMouseDown={event => event.preventDefault()} onClick={() => toggle()}><Icon name="screen" size={14} /></button>
     {confirmOpen && <ConfirmPopover anchorRef={anchorRef} testId="computer-confirm-popover" label={label} question={t('computer.confirmQuestion')}
       cancelLabel={t('dialog.cancel')} confirmLabel={t('computer.turnOn')} cancelTestId="computer-confirm-cancel" confirmTestId="computer-confirm-enable"
       confirmDisabled={disabled} onCancel={close} onConfirm={() => { close(); change(true); }} />}

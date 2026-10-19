@@ -227,10 +227,18 @@ namespace Pomp.VisualStudio.ToolWindow
         }
 
         /// <summary>Moves keyboard focus into the chat and (when the page is up) into its composer.</summary>
-        public void FocusChat() => FocusPage(FocusComposerScript);
+        public void FocusChat()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            FocusPage(FocusComposerScript);
+        }
 
         /// <summary>Moves keyboard focus back into the chat, to the page's field that had it (the composer when none had).</summary>
-        internal void RestoreFocus() => FocusPage(RestoreFocusScript);
+        internal void RestoreFocus()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            FocusPage(RestoreFocusScript);
+        }
 
         private void FocusPage(string script)
         {
@@ -329,6 +337,7 @@ namespace Pomp.VisualStudio.ToolWindow
 
         public void Dispose()
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             if (disposed)
             {
                 return;

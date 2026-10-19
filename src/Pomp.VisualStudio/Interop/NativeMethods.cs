@@ -252,5 +252,29 @@ namespace Pomp.VisualStudio.Interop
 
         /// <summary>True while Ctrl is physically held (Ctrl+Tab, Ctrl+Alt+L and similar window switches).</summary>
         internal static bool IsCtrlDown() => (GetAsyncKeyState(0x11) & 0x8000) != 0;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct CursorPoint { public int X; public int Y; }
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetCursorPos(out CursorPoint point);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr WindowFromPoint(CursorPoint point);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+
+        /// <summary>
+        /// True when the mouse pointer is over <paramref name="topLevel"/> itself (its root window), not over another top-level window
+        /// such as a dialog in front of it: a click there was on Visual Studio's own windows.
+        /// </summary>
+        internal static bool IsCursorOver(IntPtr topLevel)
+        {
+            if (topLevel == IntPtr.Zero || !GetCursorPos(out var point)) return false;
+            var window = WindowFromPoint(point);
+            return window != IntPtr.Zero && GetAncestor(window, 2) == topLevel; // GA_ROOT
+        }
     }
 }

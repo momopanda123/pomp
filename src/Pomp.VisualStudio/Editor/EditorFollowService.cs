@@ -156,6 +156,7 @@ namespace Pomp.VisualStudio.Editor
         /// <summary>A recorded change: its bookmark, the follow to its first line, the views redrawn.</summary>
         private void Committed(string path, ITextBuffer buffer, ITextSnapshot after, int first)
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             var line = after.GetLineNumberFromPosition(Math.Min(first, after.Length)) + 1;
             if (bookmarksEnabled)
             {

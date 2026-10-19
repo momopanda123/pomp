@@ -65,7 +65,7 @@ namespace Pomp.VisualStudio.Commands
         public void Prepare()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            if (bindings == null) Read().Task.Forget(logger, "Reading the Visual Studio key bindings");
+            if (bindings == null) StartReading().Task.Forget(logger, "Reading the Visual Studio key bindings");
         }
 
         /// <summary>Posts the command bound to <paramref name="chord"/> in the Global scope; false when the key is not bound or its command is unavailable now.</summary>
@@ -73,18 +73,18 @@ namespace Pomp.VisualStudio.Commands
         {
             await joinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
             if (!IsForwarded(chord)) return false;
-            var map = bindings ?? await Read();
+            var map = bindings ?? await StartReading();
             try
             {
                 return Post(map, chord);
             }
             finally
             {
-                if (DateTime.UtcNow - readUtc > RereadAfter) Read().Task.Forget(logger, "Reading the Visual Studio key bindings");
+                if (DateTime.UtcNow - readUtc > RereadAfter) StartReading().Task.Forget(logger, "Reading the Visual Studio key bindings");
             }
         }
 
-        private JoinableTask<Dictionary<string, List<BoundCommand>>> Read()
+        private JoinableTask<Dictionary<string, List<BoundCommand>>> StartReading()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             if (reading == null || reading.IsCompleted) reading = joinableTaskFactory.RunAsync(ReadAsync);

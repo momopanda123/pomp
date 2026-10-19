@@ -9,8 +9,12 @@ export const isBuiltinCommand = (name: string): name is BuiltinCommand => (BUILT
 export const HIDDEN_COMMANDS = ['pomp-tools', 'pomp-inline', 'pomp-stop', 'pomp-feedback-guard', 'pomp-agent', 'pomp-dm', 'pomp-team', 'pomp-plan-note'] as const;
 export const isHiddenCommand = (name: string): boolean => name.startsWith('pomp-') || (HIDDEN_COMMANDS as readonly string[]).includes(name);
 
-/** Commands the bundled agent ships outside its builtins (by name and source); POMP's /goal and the onboarding skill do these jobs. A typed name still runs. */
-const ENGINE_SHIPPED: ReadonlyMap<string, string> = new Map([['autoresearch', 'extension'], ['init', 'file']]);
+/**
+ * Commands the bundled agent ships outside its builtins (by name and source) that the palette leaves out. POMP's /goal and the onboarding
+ * skill do the jobs of `autoresearch` and `init`; `annotate` (omp 18.12.1) shows its annotation views only in omp's terminal UI (over RPC
+ * the engine draws nothing), so it would do nothing here. A typed name still goes to the engine.
+ */
+const ENGINE_SHIPPED: ReadonlyMap<string, string> = new Map([['autoresearch', 'extension'], ['init', 'file'], ['annotate', 'custom']]);
 const isEngineShipped = (command: CommandInfo): boolean => command.source !== undefined && ENGINE_SHIPPED.get(command.name) === command.source;
 
 /**

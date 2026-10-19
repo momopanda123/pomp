@@ -222,8 +222,9 @@ namespace Pomp.Hosting
             {
                 if (action == "delete") answer["error"] = ex is SessionDeletionException ? ex.Message : PompLanguage.Pick("대화를 삭제하지 못했어요.", "Could not delete the conversation.");
                 else answer["error"] = (_sessionSwitchUncertain ? PompLanguage.Pick("세션 전환 결과가 확실하지 않아요. ", "Session switch outcome is uncertain. ") : "") + (switched ? PompLanguage.Pick("세션은 바뀌었지만 기록을 불러오지 못했어요: ", "Session changed, but history could not be loaded: ") : "") + ex.Message;
-                // The page shows no session-list error for /compact: the chat says what happened, like the start and the end.
+                // The page shows no session-list error for a rename or /compact: the chat says what happened (for /compact like its start and end).
                 if (action == "compact") PostNotice("warning", PompLanguage.Pick("컨텍스트를 압축하지 못했어요: ", "The context could not be compacted: ") + ex.Message);
+                if (action == "rename") PostNotice("warning", PompLanguage.Pick("대화 이름을 바꾸지 못했어요: ", "The conversation could not be renamed: ") + ex.Message);
                 if (action == "switch" && !switched) _ui.Post(UiMessageTypes.SessionNewResult, new SessionNewResultPayload { RequestId = requestId, Status = "failed", Message = ex.Message });
             }
             // File enumeration/parsing (and reference writes) must not hold the chat/Stop command queue hostage.

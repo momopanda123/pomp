@@ -122,6 +122,7 @@ namespace Pomp.VisualStudio.ToolWindow
 
         private void OnBuildBegin(vsBuildScope scope, vsBuildAction action)
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             if (!active && InDesignMode()) Begin();
         }
 
@@ -133,6 +134,7 @@ namespace Pomp.VisualStudio.ToolWindow
             var delay = new DispatcherTimer(DispatcherPriority.Background) { Interval = BuildEndDelay };
             delay.Tick += (sender, args) =>
             {
+                ThreadHelper.ThrowIfNotOnUIThread();
                 delay.Stop();
                 // F5 enters run mode after its build: that session ends with design mode instead.
                 if (!disposed && active && !ran && generation == buildGeneration && InDesignMode()) End();
@@ -142,6 +144,7 @@ namespace Pomp.VisualStudio.ToolWindow
 
         private void OnEnterRunMode(dbgEventReason reason)
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             if (!active) Begin();
             ran = true;
             Grace();
@@ -162,8 +165,12 @@ namespace Pomp.VisualStudio.ToolWindow
 
         private void OnWindowActivated(Window gotFocus, Window lostFocus)
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             if (!active && !waiting) return;
-            var clicked = NativeMethods.IsMouseButtonDown();
+            // A click counts only on Visual Studio's own windows: a button of a dialog in front ("build?", "run the last successful
+            // build?") is no choice of where to type next, and Visual Studio activates its Output or Error List right after it.
+            var main = System.Windows.Application.Current?.MainWindow;
+            var clicked = NativeMethods.IsMouseButtonDown() && main != null && NativeMethods.IsCursorOver(new WindowInteropHelper(main).Handle);
             if (IsChat(gotFocus))
             {
                 // The user clicked back into the chat: that is where the focus belongs at the end.
@@ -178,8 +185,19 @@ namespace Pomp.VisualStudio.ToolWindow
 
             // Ctrl is still held for a moment after Ctrl+F5 or Ctrl+Shift+B, while Visual Studio activates its own windows.
             var now = DateTime.UtcNow;
-            if (clicked || (now >= graceUntilUtc && (NativeMethods.IsCtrlDown() || now - chatKeyUtc < ChatKeyEffect))) userMoved = true;
+            if (clicked || (now >= graceUntilUtc && (NativeMethods.IsCtrlDown() || now - chatKeyUtc < ChatKeyEffect)))
+            {
+                if (!userMoved) services.Logger.Debug("Chat focus: the user moved the focus to " + WindowCaption(gotFocus) + (clicked ? " (click)." : " (key)."));
+                userMoved = true;
+            }
             else if (waiting) foreignActivationUtc = now;
+        }
+
+        private static string WindowCaption(Window window)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            try { return window?.Caption ?? "a window"; }
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException || ex is InvalidOperationException) { return "a window"; }
         }
 
         private void Begin()

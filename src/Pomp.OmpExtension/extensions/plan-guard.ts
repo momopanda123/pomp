@@ -14,7 +14,7 @@
  * The check is an allowlist: a tool that is not named here (an MCP tool, another extension's tool, a future built-in) is refused.
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { isPompHost, offeredHostTools, type Env } from "../lib/vs-state.ts";
+import { isPompHost, offeredHostTools, pick, type Env } from "../lib/vs-state.ts";
 
 export const PLAN_COMMAND = "pomp-plan";
 export const PLAN_TOOL = "enter_plan_only";
@@ -69,7 +69,7 @@ export function planGuardDecision(toolName: string, input: unknown, env: Env = p
 
 /** The message the plan-only command sends. Static apart from the task; it never grants a tool the guard refuses. */
 export function planPrompt(task: string): string {
-	if (!task.trim() || task.length > 16000) throw new Error("Provide a task of 1–16,000 characters");
+	if (!task.trim() || task.length > 16000) throw new Error(pick("계획할 작업을 1–16,000자로 써 주세요. 사용법: /plan 작업", "Write a task of 1–16,000 characters. Usage: /plan task"));
 	return `POMP plan-only task:\n${task.trim()}\n\nPlan this task; do not carry it out. In this turn you may read files, search the code, use the web and keep the todo list; editing files, running commands, starting agents and every other tool call are refused until the turn ends. Look at the actual code first, then write the plan with the todo tool as phases with concrete tasks (each names the files or symbols it touches and how it is checked). Finish with a short message that lists open questions and risks, then stop: do not start implementing. The user reviews and edits the plan in Work > Progress and runs it from there.`;
 }
 
@@ -106,13 +106,13 @@ export default function planGuard(pi: ExtensionAPI): void {
 		description: "Plan only: read and search, write the plan, change nothing",
 		handler: async (args, ctx) => {
 			try {
-				if ((ctx as { agent?: { kind?: unknown } }).agent?.kind === "sub") throw new Error("Plan-only turns start from the main conversation.");
+				if (ctx.agent?.kind === "sub") throw new Error(pick("계획만 세우기는 기본 대화에서 시작해요.", "Plan-only turns start from the main conversation."));
 				const prompt = planPrompt(args);
 				armPlanOnly(false);
 				pi.sendUserMessage(prompt);
 			} catch (error) {
 				disarmPlanOnly();
-				ctx.ui.notify(String(error), "warning");
+				ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
 			}
 		},
 	});

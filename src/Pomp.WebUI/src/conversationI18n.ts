@@ -105,6 +105,17 @@ export const conversationKo = {
   'btw.note': '작업과 별개인 임시 대화예요. 대화 기록에 남지 않고 도구도 쓰지 않아요.',
   'btw.sending': '보내는 중', 'btw.status.running': '답하는 중', 'btw.status.complete': '완료', 'btw.status.cancelled': '취소됨',
   'btw.status.error': '오류', 'btw.status.interrupted': '중단됨',
+  // slash command refusals: shown in the chat, with the command's syntax where an argument is missing
+  'slash.syntax': '{reason} 사용법: {usage}',
+  'slash.args.plan': '/plan 작업', 'slash.args.goal': '/goal 목표', 'slash.args.steer': '/steer 메시지', 'slash.args.btw': '/btw 질문',
+  'slash.args.agent': '/agent 이름 [메시지]', 'slash.args.team': '/team 이름 [메시지]', 'slash.args.rename': '/rename 새 이름',
+  'slash.renameEmpty': '새 이름이 비어 있어요.',
+  'slash.busy': '지금은 이 명령을 실행할 수 없어요. 승인 요청이나 대화 전환이 끝난 뒤에 다시 해 주세요.',
+  'slash.historyBusy': '다른 요청을 처리하는 중이에요. 잠시 뒤 다시 해 주세요.',
+  'slash.newBlocked': '응답, 승인 요청이나 터미널 작업이 끝난 뒤에 새 대화를 시작할 수 있어요.',
+  'slash.permissionsBlocked': '응답이나 승인 요청이 끝난 뒤에 권한 모드를 바꿀 수 있어요.',
+  'slash.computerOff': '화면 입력 제어를 쓸 수 없어요. 옵션의 컴퓨터 사용이 사용 안 함이에요.',
+  'slash.computerBusy': '응답 중에는 화면 입력 제어를 켤 수 없어요. 응답이 끝난 뒤에 다시 해 주세요.',
 };
 export const conversationEn: Record<keyof typeof conversationKo, string> = {
   'msg.editorContext': 'Included editor context: {path}{lines}',
@@ -212,4 +223,14 @@ export const conversationEn: Record<keyof typeof conversationKo, string> = {
   'btw.note': 'A temporary chat beside the work. It is not added to the conversation and uses no tools.',
   'btw.sending': 'Sending', 'btw.status.running': 'Answering', 'btw.status.complete': 'Done', 'btw.status.cancelled': 'Cancelled',
   'btw.status.error': 'Error', 'btw.status.interrupted': 'Interrupted',
+  'slash.syntax': '{reason} Usage: {usage}',
+  'slash.args.plan': '/plan task', 'slash.args.goal': '/goal goal', 'slash.args.steer': '/steer message', 'slash.args.btw': '/btw question',
+  'slash.args.agent': '/agent name [message]', 'slash.args.team': '/team name [message]', 'slash.args.rename': '/rename new name',
+  'slash.renameEmpty': 'The new name is empty.',
+  'slash.busy': 'This command cannot run now. Try again once the pending approval or conversation change is done.',
+  'slash.historyBusy': 'Another request is being handled. Try again shortly.',
+  'slash.newBlocked': 'A new conversation can start once the reply, approval or terminal job is done.',
+  'slash.permissionsBlocked': 'The permission mode can change once the reply or approval is done.',
+  'slash.computerOff': 'Screen & input control is not available: computer use is off in the options.',
+  'slash.computerBusy': 'Screen & input control cannot be switched on during a reply. Try again once the reply ends.',
 };

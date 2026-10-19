@@ -121,6 +121,9 @@ export function mutationTargets(toolName: string, input: unknown): MutationTarge
 			return { files: editTargets(args), scopes: [] };
 		case "write": {
 			const path = typeof args.path === "string" ? unwrapReadHeader(args.path) : "";
+			// `write` to an internal URL is no file edit: `xd://<tool>` dispatches to a mounted tool (whose own tool_call is judged),
+			// `agent://` sends a message, `local://` / `memory://` and the like are omp's own stores. Only `file://` is a file.
+			if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path) && !/^file:\/\//i.test(path)) return { files: [], scopes: [] };
 			return { files: path ? [path] : [], scopes: [] };
 		}
 		case "ast_edit":

@@ -128,7 +128,9 @@ Payload: `{ text, level: "error"|"warning"|"info" }`.
   - the conversation header;
   - the partner tab strip;
   - the queue.
-- Examples: a failed model, thinking or permission change; why a message was not sent; a lost target; a failed rename or conversation-list request; a failed Live/bookmark change; a failed queue action.
+- Examples: a failed model, thinking or permission change; why a message was not sent; a lost target; a failed conversation-list request; a failed Live/bookmark change; a failed queue action.
+- A slash command's refusal or failure is not a status-bar notice: the page adds it to the chat as a local `warning` notice, see "Slash commands".
+  So is a failed rename of the conversation (also from the header), which the host reports with `chat/notice`.
 - The VS host shows the text as `POMP: <text>` in the VS status bar, on one line and at most 300 characters.
 - The VS host logs errors and warnings. A repeated notice is logged once.
 - Dialog and form field errors stay where they are.
@@ -803,7 +805,8 @@ Payload:
 - Switching on is refused during a reply.
 - Answered by `computer/reply`.
 - The page handles a typed `/computer` itself: it acts like a click on the composer's screen & input control button (`computer-toggle`, after Live).
-  With the option off the button is hidden and the page reports that it is unavailable in the VS status bar.
+  With the option off the button is hidden and the page says in the chat that it is unavailable. A typed `/computer` that cannot switch
+  (another conversation holds it, a reply runs, the host refuses) is told in the chat as well; a click on the button reports to the status bar.
 - Variants such as `/computer:<suffix>` or ones with unusual whitespace that reach the host are intercepted and refused (`send_failed`).
 - One conversation on the PC holds computer use. The host keeps the record in `%LOCALAPPDATA%\Pomp\state\computer-owner.json`
   (`{ instance, pid, processStart, sessionId, label, workspace, updatedAt }`), read and written under the named mutex `Local\Pomp.ComputerOwner`.
@@ -1038,7 +1041,9 @@ A steer is a message for the agent that is working now. omp delivers it at the a
   of the replayed transcript. After a conversation switch, the restored transcript shows the steered message once, as a user message
   of its own.
 - When the run ended before omp took the steer, the host takes it back with `remove_queued_message` (queue `steering`) and sends it
-  normally. If omp had already taken it, omp handles it and the host only logs that.
+  normally. If omp had already taken it, omp handles it and the host only logs that: omp 18.12.1 starts a run with a steer it gets
+  while idle (checked over RPC: `steer` to an idle session answers `success`, then `agent_start` follows and `remove_queued_message`
+  answers `removed: false`), so the message is delivered once, as the start of the next run, and its reply streams into the chat.
 - Stop after a steer uses `abort_and_restore_queue` instead of `abort`, so a steer omp still holds does not start a new run. A steer
   withdrawn this way is not sent; a notice says how many, and `chat/steerWithdrawn` (part of the replayed transcript) marks the newest
   that many steered bubbles of the run 전달 안 됨 / Not delivered (omp delivers steers in order, so the ones it still held are the newest).
@@ -1862,7 +1867,9 @@ catalog/command: { requestId, action: "refresh"|"install", id?, scope?: "project
    `/goal` opens the goal card, see "Goal runs". `/steer` and `/btw` post `chat/steer` and `btw/ask`, see "Steering" and
    "Side questions (/btw)".
 2. POMP's engine commands under plain names, each with a short label, and only when the engine lists the registered name.
-3. The engine's other commands, by name only, with no description and no argument syntax.
+3. The engine's other commands, by name only, with no description and no argument syntax. Left out: `autoresearch` (extension) and
+   `init` (file), whose jobs `/goal` and the onboarding skill do, and `annotate` (custom), whose annotation views omp 18.12.1 draws only in
+   its terminal UI (over RPC `ui.custom` returns nothing, so it would do nothing). Typed, they still go to the engine.
 4. The enabled skills, plain names, after a "스킬" / "Skills" heading. The heading is a row of the list, not an option.
 
 - `/effort` opens the thinking-level picker, like `/thinking`.
@@ -1921,6 +1928,17 @@ The palette lists the plain name; the host sends the registered one.
   - A plain skill name becomes `/skill:name` when the engine lists `skill:name` and no real command has that plain name.
     A command always wins.
   - Anything else is sent untouched: `/skill:name`, a registered name, and unknown names.
+
+### Refusals
+
+- A slash command that cannot run now, or whose argument is missing, is not sent. The page adds a local `warning` notice to the
+  chat and keeps the typed text in the input.
+- A missing argument names the syntax: "목표가 비어 있어요. 사용법: /goal 목표" / "The goal is empty. Usage: /goal goal".
+  The same goes for `/plan`, `/steer`, `/btw`, `/agent`, `/team` (also an unknown name) and `/rename`.
+- The other page refusals: `/new` and `/permissions` while a reply, approval or terminal job runs; `/rename` and `/compact` behind
+  another session request (see "Sessions"); `/computer` with the option off or while it cannot switch; a send that failed.
+- POMP's engine commands refuse in the engine and tell it with a `notify` warning, which the host shows as a chat notice, in the
+  POMP language: an empty `/workflow` or `/plan` task, an empty or unknown `/skill`, `/command` or `/recipe` name.
 
 ### Skills in the palette
 
@@ -2127,6 +2145,10 @@ Word completion has no messages of its own: the page completes words locally whi
 
 `session/history` (UI → host) is answered by exactly one `session/historyState` with the same `requestId`.
 
+- The host runs these requests one after another. The page sends one at a time, except that a `rename` or `compact` may follow
+  pending read-only requests (`refresh`, `preview`, `messages`); behind any other pending request the page refuses it and says
+  "Another request is being handled. Try again shortly." in the chat.
+
 | action | fields | effect |
 |---|---|---|
 | `refresh` | | List only. |
@@ -2155,6 +2177,8 @@ Word completion has no messages of its own: the page completes words locally whi
 **`rename`**
 
 - `name` is 1..120 characters, with no control characters.
+- A failure is told in the chat, not in the status bar: the host posts a `warning` `chat/notice` "The conversation could not be
+  renamed: reason"; the page's own checks (invalid name, no reply, no connection) are a local warning notice.
 
 **`delete`**
 
@@ -2173,7 +2197,8 @@ Word completion has no messages of its own: the page completes words locally whi
     without both only "Context compacted.");
   - `warning` "The context could not be compacted: reason" when it is refused or fails, e.g. while a reply runs, or omp's
     "Nothing to compact (session too small)".
-- The `session/historyState` reply still carries `error`, but the page does not show it again.
+- The `session/historyState` reply still carries `error`, but the page does not show it again. A missing reply (after 6 minutes)
+  or a failed post is a local warning notice in the chat.
 - `session/info` shows the new context usage. The `/context` breakdown measured before is dropped and measured again.
 
 ```

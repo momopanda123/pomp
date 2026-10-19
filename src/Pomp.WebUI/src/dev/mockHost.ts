@@ -1737,10 +1737,11 @@ export function installMockHost(): void {
     const { requestId } = command;
     const mutating = command.action === 'switch' || command.action === 'rename' || command.action === 'compact' || command.action === 'delete';
     const ko = opts.locale.startsWith('ko');
-    // Like the real host (PompSession.History): /compact is told in the chat when it starts, ends and fails.
+    // Like the real host (PompSession.History): /compact is told in the chat when it starts, ends and fails; a failed rename too.
     const refuse = (message: string): void => {
       postHistory(requestId, message);
       if (command.action === 'compact') post('chat/notice', { level: 'warning', message: (ko ? '컨텍스트를 압축하지 못했어요: ' : 'The context could not be compacted: ') + message });
+      if (command.action === 'rename') post('chat/notice', { level: 'warning', message: (ko ? '대화 이름을 바꾸지 못했어요: ' : 'The conversation could not be renamed: ') + message });
     };
     if (mutating && (!bridgeRunning || streaming || sessionChanging || permissionWaiters.size > 0 || dialogWaiters.size > 0)) {
       refuse(!bridgeRunning ? 'Not connected.' : 'Finish the current response, approval or session operation before changing sessions.');
@@ -1805,7 +1806,7 @@ export function installMockHost(): void {
         case 'rename': {
           const name = command.name.trim();
           if (!name || command.name.length > 120 || /[\x00-\x1f\x7f]/.test(command.name)) {
-            postHistory(requestId, 'The session name must be 1 to 120 characters without control characters.');
+            refuse('The session name must be 1 to 120 characters without control characters.');
             break;
           }
           sessionName = name;

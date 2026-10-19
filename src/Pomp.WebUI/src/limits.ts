@@ -51,7 +51,9 @@ export type SendFailure =
   /** The host could not be reached (`postMessage` threw or there is no host). */
   | { reason: 'hostUnavailable' }
   /** Another action (a new session) is still in progress. */
-  | { reason: 'busy' };
+  | { reason: 'busy' }
+  /** Refused, and the page already said why in the chat (a slash command's refusal notice). */
+  | { reason: 'notified' };
 
 /** Outcome of handing a message to the host: on failure nothing was posted and no local state changed. */
 export type SendResult = { ok: true } | ({ ok: false } & SendFailure);
