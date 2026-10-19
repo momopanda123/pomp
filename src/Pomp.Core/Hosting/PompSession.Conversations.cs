@@ -281,9 +281,10 @@ namespace Pomp.Hosting
         {
             if (string.IsNullOrWhiteSpace(send.Text) && (send.Attachments == null || send.Attachments.Count == 0)) throw new ArgumentException(PompLanguage.Pick("메시지가 비어 있어요.", "Message is empty."));
             if (send.Attachments?.Any(a => a.Path == null || a.Path.Length > 4096 || a.Path.Any(char.IsControl)) == true) throw new ArgumentException(PompLanguage.Pick("첨부 파일 경로가 올바르지 않아요.", "An attachment path is invalid."));
-            // The attached paths go into the same prompt, so their number is bounded only by the frame size.
+            // The attached paths go into the same prompt, so their number is bounded only by the frame size. The read_buffer header is the
+            // longer of the two (PromptDisplay.AttachmentsHeader), so it bounds either.
             var paths = send.Attachments?.Select(a => "- " + a.Path).ToList() ?? new List<string>();
-            var message = paths.Count == 0 ? send.Text : PromptDisplay.AttachmentsHeader + "\n" + string.Join("\n", paths) + "\n\n" + send.Text;
+            var message = paths.Count == 0 ? send.Text : PromptDisplay.AttachmentsHeader(true) + "\n" + string.Join("\n", paths) + "\n\n" + send.Text;
             var probe = new JObject { ["type"] = "prompt", ["id"] = "prompt-queue", ["message"] = message };
             if (Pomp.Transport.NdjsonWriter.Encode(probe).Length > MaxPromptFrameBytes) throw new ArgumentException(PompLanguage.Pick("메시지가 너무 커요.", "Message is too large."));
             if (new[] { send.Team, send.Agent, send.AgentInstance }.Count(t => !string.IsNullOrWhiteSpace(t)) > 1) throw new ArgumentException(PompLanguage.Pick("보낼 대상이 너무 많아요.", "Too many targets."));

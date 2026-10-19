@@ -312,9 +312,16 @@ export function App() {
     const instruction = state.locale.startsWith('ko') ? '현재 작업 계획을 확인하고 미완료 단계부터 이어서 진행해 주세요. 기존 변경과 검증 결과를 먼저 확인하고, 완료하지 않은 작업을 완료했다고 보고하지 마세요.' : 'Review the current work plan and continue from the unfinished step. Check existing changes and verification evidence first; do not report unverified work as complete.';
     const result = sendMessage(task ? instruction + '\n\n' + task : instruction, [], false, MAIN_TARGET); if (result.ok) setTab('chat');
   };
-  /** Work › Progress "run this task": the plan already shows the task in progress; this asks the agent to do that task now and opens Chat. */
-  const runPlanTask = (task: string): SendResult => {
-    const instruction = state.locale.startsWith('ko') ? '작업 계획에서 아래 작업을 지금 진행해 주세요. 계획에 진행 중으로 표시해 두었어요. 기존 변경과 검증 결과를 먼저 확인하고, 완료하지 않은 작업을 완료했다고 보고하지 마세요.' : 'Work on the task below from the work plan now; it is marked in progress in the plan. Check existing changes and verification evidence first; do not report unverified work as complete.';
+  /**
+   * Work › Progress "run this task". `marked`: the plan already shows the task in progress (idle), so the agent is asked to do it now.
+   * Otherwise the agent works: the plan is not changed under its turn, and the request (queued like any message sent while it works,
+   * or delivered into the turn by Send now) asks the agent to start the task with its todo tool once the current step is done.
+   */
+  const runPlanTask = (task: string, marked: boolean): SendResult => {
+    const ko = state.locale.startsWith('ko');
+    const instruction = marked
+      ? ko ? '작업 계획에서 아래 작업을 지금 진행해 주세요. 계획에 진행 중으로 표시해 두었어요. 기존 변경과 검증 결과를 먼저 확인하고, 완료하지 않은 작업을 완료했다고 보고하지 마세요.' : 'Work on the task below from the work plan now; it is marked in progress in the plan. Check existing changes and verification evidence first; do not report unverified work as complete.'
+      : ko ? '지금 단계를 마치면 작업 계획의 아래 작업으로 넘어가 주세요. todo 도구의 start로 이 작업을 진행 중으로 바꾼 뒤 진행해 주세요. 기존 변경과 검증 결과를 먼저 확인하고, 완료하지 않은 작업을 완료했다고 보고하지 마세요.' : 'When you finish the current step, switch to the task below from the work plan: mark it in progress with the todo tool (start), then work on it. Check existing changes and verification evidence first; do not report unverified work as complete.';
     const result = sendMessage(instruction + '\n\n' + task, [], false, MAIN_TARGET); if (result.ok) setTab('chat');
     return result;
   };

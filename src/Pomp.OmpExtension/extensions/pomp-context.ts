@@ -3,8 +3,9 @@
  *
  * Active only under the pomp Visual Studio host (`POMP_HOST=1`); otherwise it registers nothing.
  *  1. Appends a short "Visual Studio host" section to the main agent's system prompt. The text depends only on the guard
- *     mode and on the host tools the host offered (`POMP_HOST_TOOLS`), never names a tool that is not offered, and is
- *     identical for identical environments (keeps the provider prompt-cache prefix stable).
+ *     mode and on the host tools this session can call (offered in `POMP_HOST_TOOLS` and enabled in the session, including
+ *     `xd://`-mounted ones), never names another, and is identical for identical tool sets (keeps the provider prompt-cache
+ *     prefix stable).
  *  2. Announces the open solution to the model once per session, and again whenever the
  *     solution in `${POMP_STATE_DIR}/vs-state.json` changes (checked on each new prompt).
  *     The announcement is a hidden custom message; whether it was already sent is derived
@@ -23,6 +24,7 @@ import { loadRules, RULE_ANNOUNCE_MARKER, RULE_ANNOUNCE_TYPE, type ProjectRule }
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import {
 	buildDirtyIndex,
+	callableHostTools,
 	isPompHost,
 	offeredHostTools,
 	pick,
@@ -36,9 +38,9 @@ import {
 export const GUIDANCE_MARKER = "## Visual Studio host (pomp)";
 
 /**
- * Guidance text. A pure function of the guard mode and of the *set* of offered host tools (the order in `POMP_HOST_TOOLS` does
- * not matter), so the provider prompt-cache prefix stays valid. A tool is only named when it is offered; with no tools known
- * (`POMP_HOST_TOOLS` absent) the text names none.
+ * Guidance text. A pure function of the guard mode and of the *set* of host tools the session can call (the order does not
+ * matter), so the provider prompt-cache prefix stays valid. A tool is only named when it is in the set; with none (`POMP_HOST_TOOLS`
+ * absent, or an agent conversation whose role lists no host tool) the text names none.
  */
 export function guidance(mode: PreEditMode = "block", tools: ReadonlySet<string> = offeredHostTools()): string {
 	const has = (name: string): boolean => tools.has(name);
@@ -131,7 +133,7 @@ export function solutionText(state: VsState, previous: SolutionDetails | undefin
 	}
 	if (!previous) return `Visual Studio solution: ${state.solutionPath}${root}.`;
 	const was = previous.solutionPath ? `; was ${previous.solutionPath}` : "";
-	return `Visual Studio solution changed: now ${state.solutionPath}${root}${was}. Earlier paths and query_solution results may be stale.`;
+	return `Visual Studio solution changed: now ${state.solutionPath}${root}${was}. Earlier paths and solution query results may be stale.`;
 }
 
 /** What a typed /rules shows: the scoped rules that apply to the active document now, and the diagnostics of the rule files. */
@@ -150,7 +152,8 @@ export default function pompContext(pi: ExtensionAPI): void {
 
 	pi.on("before_agent_start", (event, ctx) => {
 		try {
-			// Subagents (task/eval) may not have the host tools; only the main agent gets VS guidance.
+			// Subagents (task/eval) may not have the host tools; only the main agent gets VS guidance. It names only the host tools this
+			// conversation can call: an agent conversation has its role's tools only (tools.ts).
 			if (ctx.agent?.kind === "sub") return;
 
 			const result: {
@@ -159,7 +162,7 @@ export default function pompContext(pi: ExtensionAPI): void {
 			} = {};
 
 			if (!event.systemPrompt.some(part => typeof part === "string" && part.includes(GUIDANCE_MARKER))) {
-				result.systemPrompt = [...event.systemPrompt, guidance(preEditMode())];
+				result.systemPrompt = [...event.systemPrompt, guidance(preEditMode(), callableHostTools(pi))];
 			}
 			// H3: scoped rules no longer touch the system prompt (their active set changes with the active file, which broke
 			// the provider's prompt-cache prefix). A stale rule part from an earlier prompt is removed once; the rules travel
@@ -234,12 +237,13 @@ export default function pompContext(pi: ExtensionAPI): void {
 			const dirty = buildDirtyIndex(state, ctx.cwd).docs.length;
 			const vs = process.env.POMP_VS_VERSION?.trim();
 			const open = state?.openDocuments.length ?? 0;
-			const tools = offeredHostTools().size;
+			const offered = offeredHostTools().size;
+			const callable = callableHostTools(pi).size;
 			ctx.ui.notify(
 				state
 					? pick(
-							`Visual Studio${vs ? ` ${vs}` : ""} 연결: 솔루션 ${state.solutionPath ?? "없음"}, 열린 문서 ${open}개, 저장 안 한 파일 ${dirty}개, VS 도구 ${tools}개`,
-							`Visual Studio${vs ? ` ${vs}` : ""} connection: solution ${state.solutionPath ?? "none"}, ${open} open documents, ${dirty} unsaved files, ${tools} VS tools`,
+							`Visual Studio${vs ? ` ${vs}` : ""} 연결: 솔루션 ${state.solutionPath ?? "없음"}, 열린 문서 ${open}개, 저장 안 한 파일 ${dirty}개, 이 대화에서 쓸 수 있는 VS 도구 ${callable}/${offered}개`,
+							`Visual Studio${vs ? ` ${vs}` : ""} connection: solution ${state.solutionPath ?? "none"}, ${open} open documents, ${dirty} unsaved files, ${callable} of ${offered} VS tools callable in this conversation`,
 						)
 					: pick("Visual Studio 상태를 읽지 못했어요.", "The Visual Studio state could not be read."),
 				state ? "info" : "warning",

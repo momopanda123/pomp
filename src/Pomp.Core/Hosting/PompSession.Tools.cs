@@ -428,6 +428,20 @@ namespace Pomp.Hosting
             catch (Exception ex) when (ex is FormatException or JsonException or InvalidCastException or ArgumentException) { _logger.Debug("Ignored malformed tool-selection result."); }
             return true;
         }
+        /// <summary>
+        /// Whether the current conversation can call <c>read_buffer</c>, so a composed prompt names it only then: the engine's tool snapshot of
+        /// this conversation (active and xd://-mounted tools; an agent conversation has its role's tools only, docs/architecture.md §8.8), or,
+        /// before a snapshot of this conversation arrived, whether the host offers the tool.
+        /// </summary>
+        private bool CanReadBuffer()
+        {
+            lock (_stateLock)
+            {
+                if (_toolsView.Available && _toolsView.SessionId != null && _toolsView.SessionId == _info.SessionId)
+                    return _toolsView.Tools.Any(t => t.Name == Pomp.Tools.HostToolNames.ReadBuffer && t.Active);
+            }
+            return _registry.TryGet(Pomp.Tools.HostToolNames.ReadBuffer, out _);
+        }
         private static bool PlainToolName(string? name) => name != null && name.Length is > 0 and <= 256 && !name.Any(char.IsControl);
         private static HashSet<string> ToolNames(JToken? value) => value is JArray array ? new HashSet<string>(array.Where(t => t.Type == JTokenType.String).Select(t => (string)t!).Where(PlainToolName), StringComparer.Ordinal) : throw new JsonException();
         internal static string? McpServerOf(string name, IEnumerable<string> servers)

@@ -670,7 +670,7 @@ namespace Pomp.Hosting
 
             if (attachments.Count > 0)
             {
-                parts.Add(PromptDisplay.AttachmentsHeader + "\n" + string.Join("\n", attachments.Select(path => "- " + path)));
+                parts.Add(PromptDisplay.AttachmentsHeader(CanReadBuffer()) + "\n" + string.Join("\n", attachments.Select(path => "- " + path)));
             }
 
             if (text.Length > 0)

@@ -300,7 +300,7 @@ namespace Pomp.Hosting
                 var paths = (args["attachments"] as JArray ?? new JArray()).OfType<JObject>().Select(item => item.GetString("path") ?? string.Empty)
                     .Where(path => path.Length > 0 && path.Length <= 4096 && !path.Any(char.IsControl)).ToList();
                 if (paths.Count > 0)
-                    reply.Attachments = EstimateTokens(PromptDisplay.AttachmentsHeader + "\n" + string.Join("\n", paths.Select(path => "- " + path)) + "\n\n");
+                    reply.Attachments = EstimateTokens(PromptDisplay.AttachmentsHeader(CanReadBuffer()) + "\n" + string.Join("\n", paths.Select(path => "- " + path)) + "\n\n");
                 if (args.GetBool("includeEditorContext") == true && _bridge.State == BridgeState.Running)
                 {
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);

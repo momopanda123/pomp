@@ -810,9 +810,11 @@ Payload:
   - Switching on takes the record first. When another live conversation holds it (another tab of this POMP or another POMP), the reply is
     `{ ok: false, error: "In use by another conversation: <name>" }` and nothing changes.
   - A record whose process has ended (or whose process id now names another process) is stale and counts as free.
-  - Leaving the holder's tab switches the engine off but keeps the record; coming back switches it on again without a request.
-  - The record is released when the holder switches it off, when the holder's conversation is no longer in any open tab (tab closed,
-    a new or another conversation in that tab), when omp stops or restarts, and when POMP closes.
+  - The record belongs to the tab that switched it on (the Default tab, or that agent's or team's tab). Leaving that tab switches the engine
+    off but keeps the record; coming back switches it on again without a request. When the tab comes back with a new conversation
+    (an empty conversation is never saved, so the tab starts a new one), the record moves to it in one write and it is switched on there.
+  - The record is released when the holder switches it off, when another conversation replaces the holder's inside its own tab (a new
+    conversation, the conversation list, deleting it), when the holder's agent or team tab is closed, when omp stops or restarts, and when POMP closes.
   - The host watches the file and re-reads it every 3 seconds; any change re-sends `computer/state` with the new `ownerElsewhere`.
 
 #### `workspace/agentPlan`
@@ -902,7 +904,8 @@ Payload:
 - `clearCompleted` (no `phase`/`task`) removes every `completed` task of the whole plan, and each phase it leaves empty; it is refused when there is none. The page result's `completedCount` counts them over the whole plan (not only the query's matches), so the UI disables the button at 0.
 - `moveTask` takes the task at `phase`/`task` out and inserts it at index `toTask` of phase `toPhase` (`toTask` counts the destination's tasks once the task has left; `toTask` equal to that count appends). The same place is refused as "Nothing to change". A phase the move leaves empty is removed. The note tells the model the new place and that the plan's order is the order to work in.
 - Order matters to omp, not to POMP: omp's `todo` tool starts the earliest `pending` task in plan order whenever a mutation leaves no task `in_progress`, keeps only the earliest of several `in_progress` tasks, and never starts a `blocked` one (omp 18.12.1 `src/tools/todo.ts`; `set_todos` itself stores the plan as given). Moving a pending task ahead therefore changes what the agent does next.
-- `startTask` makes the task at `phase`/`task` the task in progress, like the todo tool's `start`: every other `in_progress` task goes back to `pending`, and the task's blocker is dropped. A `completed` task is refused. It is idle-only. The Work tab's per-row run button sends it and, once it is saved, sends an ordinary `chat/send` that asks for that task (the same idle-only rule as the Continue button, which is disabled while the agent works).
+- `startTask` makes the task at `phase`/`task` the task in progress, like the todo tool's `start`: every other `in_progress` task goes back to `pending`, and the task's blocker is dropped. A `completed` task is refused. It is idle-only. While idle, the Work tab's per-row run button sends it and, once it is saved, sends an ordinary `chat/send` that asks for that task.
+- While the agent works, the run button sends no plan edit: the plan must not change under the running turn. It sends only an ordinary `chat/send`, which the host queues like any message sent while busy (`chat/queued`, `chat/queueState`), asking the agent to switch to the task once the current step is done and to mark it `in_progress` itself with the todo tool's `start` (which takes a task of any status by its text). The item can be sent into the running turn with the queue's Send now (`chat/queue` `steer`), like any other queued message. The button is disabled on `completed` tasks and, while the agent works, on the task in progress.
 - An empty plan takes edits without a revision.
 
 **Persistence**
@@ -1890,7 +1893,7 @@ The palette lists the plain name; the host sends the registered one.
 | `/rules` | `pomp-rules` | Shows the scoped rules that apply and their diagnostics. |
 | `/resources` | `pomp-resources` | Lists the `.pomp` skills, commands and agent recipes. |
 | `/guard` | `pomp-guard` | Shows the pre-edit guard mode and the files with unsaved Visual Studio changes. |
-| `/vs-status` | `pomp-context` | Shows the Visual Studio connection: host, solution, unsaved files, offered tools. |
+| `/vs-status` | `pomp-context` | Shows the Visual Studio connection: host, solution, unsaved files, and how many of the offered VS tools this conversation can call (an agent tab has its role's tools only). |
 | `/skill NAME`, `/command NAME`, `/recipe NAME` | `pomp-skill`, `pomp-command`, `pomp-recipe` | Load a `.pomp/skills`, `.pomp/commands` or `.pomp/agents` Markdown resource into the conversation. |
 
 - `/goal` is the page's command; the host never receives it as text.

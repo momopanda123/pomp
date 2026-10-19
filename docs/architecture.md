@@ -304,7 +304,7 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
 |---|---|
 | `POMP_HOST=1` | 필수. 없으면 omp 측 확장이 아무것도 등록하지 않는다. |
 | `POMP_STATE_DIR` | 필수. `vs-state.json`이 있는 폴더. |
-| `POMP_HOST_TOOLS` | 호스트가 실제로 제공한 툴 이름, 쉼표 구분. `set_host_tools`·오버레이와 같은 목록이다. |
+| `POMP_HOST_TOOLS` | 호스트가 실제로 제공한 툴 이름, 쉼표 구분. `set_host_tools`·오버레이와 같은 목록이다. 안내문은 이 목록과 그 대화에서 부를 수 있는 도구(`pi.getActiveTools()`: 켜진 도구와 `xd://`로 마운트된 도구)의 교집합만 쓴다. |
 | `POMP_HOST_VERSION`, `POMP_VS_VERSION`, `POMP_SOLUTION_ROOT` | 호스트·VS 버전, 솔루션 루트 |
 | `POMP_PRE_EDIT_MODE` | 선택. `block\|warn\|off`, 기본 `block`. |
 
@@ -312,10 +312,10 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
 
 - `POMP_STATE_DIR\vs-state.json`은 호스트가 원자적으로 갱신하는 VS 상태다(열린 문서·dirty 여부).
 - omp 측 pre-edit Hook은 이를 보고 **VS에서 수정 중(dirty)인 파일**에 대한 omp 내장 `edit`/`write`/`ast_edit`/`lsp` 변경을 차단한다.
-- 안내 문구는 `POMP_HOST_TOOLS`에 따라 다르다:
-  - `edit_buffer_hashline`이 제공되면(현재 기본): `read_buffer` → `edit_buffer_hashline`을 안내한다.
-  - 제공되지 않으면: "VS에서 저장(Ctrl+S)을 요청한 뒤 일반 도구로 다시 시도, 저장 안 된 변경을 덮어쓰지 말 것"을 안내한다.
-- 제공되지 않은 툴 이름은 어떤 안내문에도 나오지 않는다.
+- 안내 문구는 그 대화에서 부를 수 있는 호스트 툴(`POMP_HOST_TOOLS` ∩ 세션의 켜진 도구, `xd://` 마운트 포함)에 따라 다르다:
+  - `read_buffer`와 `edit_buffer_hashline`을 부를 수 있으면(기본 탭의 기본값): `read_buffer` → `edit_buffer_hashline`을 안내한다.
+  - 아니면: "VS에서 저장(Ctrl+S)을 요청한 뒤 일반 도구로 다시 시도, 저장 안 된 변경을 덮어쓰지 말 것"을 안내한다.
+- 제공되지 않았거나 그 대화에서 부를 수 없는 툴 이름은 어떤 안내문에도 나오지 않는다(§8.8 에이전트 대화는 역할의 도구만 켠다).
 - 설계의 "사전 편집 시 해시 비교" 대신 dirty 상태로 판단한다. 저장 안 된 버퍼 내용은 디스크 해시로 드러나지 않기 때문이다.
 - 상태 갱신 주기는 2초다. 그 사이에 생긴 dirty 상태는 훅이 아직 모를 수 있다.
 
@@ -323,7 +323,7 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
 
 | 구성 요소 | 역할 |
 |---|---|
-| `pomp-context` Extension | 시스템 프롬프트에 VS 안내를 더한다. 제공 툴 수에 따라 약 230토큰 이상, 8개 기준 약 330토큰. 솔루션 변경은 숨김 메시지로 통지한다. |
+| `pomp-context` Extension | 시스템 프롬프트에 VS 안내를 더한다. 그 대화에서 부를 수 있는 호스트 툴만 이름을 댄다. 툴 수에 따라 약 230토큰 이상, 8개 기준 약 330토큰. 툴 집합의 순수 함수라 도구가 같은 동안 바이트가 같다(프롬프트 캐시). 솔루션 변경은 숨김 메시지로 통지한다. |
 | `pre-edit` Hook | `tool_call`에서 `{block:true, reason}`을 돌려준다. |
 | `vs-project` Skill | `skill:vs-project`, 지연 로딩 |
 | `verify-gate` | `session_stop`에서 미확인 소스 편집이 있으면 한 번만 확인을 유도한다. 고정 "완료 전 증거" 안내는 항상 적용된다. |
@@ -590,8 +590,10 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
   - `pid`의 프로세스가 없거나 시작 시각이 다르면 오래된 기록이라 비어 있는 것으로 본다. 같은 프로세스의 기록은 그 POMP 세션이 살아 있는 동안만 유효하다.
   - 호스트는 파일 변경을 감시하고 3초마다 다시 읽는다. 바뀌면 `computer/state`를 다시 보낸다.
 - 켜기: 호스트가 먼저 기록을 가진다. 다른 대화가 가지고 있으면 켜지 않고 "다른 대화에서 사용 중이에요: 이름"으로 답한다.
-- 가진 대화의 탭에서 다른 탭으로 가면 엔진 쪽은 끄되 기록은 남긴다. 다른 탭의 버튼은 눌리지 않는다. 가진 대화로 돌아오면 다시 켠다.
-- 놓기: 그 대화에서 끌 때, 그 탭을 닫거나 그 탭에서 새 대화를 시작해 그 대화가 어느 탭에도 없을 때, 엔진이 멈추거나 다시 시작할 때, POMP가 닫힐 때다.
+- 기록은 켠 탭의 것이다(기본 탭, 또는 그 에이전트·팀의 탭). 호스트는 그 탭을 `main` / `agent:<이름>` / `team:<id>`로 기억한다.
+- 가진 탭에서 다른 탭으로 가면 엔진 쪽은 끄되 기록은 남긴다. 다른 탭의 버튼은 눌리지 않는다. 가진 탭으로 돌아오면 다시 켠다.
+  - 메시지가 없는 대화는 저장되지 않아서, 돌아올 때 그 탭이 새 대화로 시작한다. 이때 기록을 그 새 대화로 옮겨(한 번의 쓰기, 다른 POMP에는 계속 사용 중) 다시 켠다.
+- 놓기: 가진 탭에서 끌 때, 가진 탭 안에서 다른 대화로 바뀔 때(새 대화, 대화 목록, 대화 삭제), 가진 에이전트·팀 탭을 닫았을 때, 엔진이 멈추거나 다시 시작할 때, POMP가 닫힐 때다. 탭을 오가는 것만으로는 놓지 않는다.
 - `computer/state.ownerElsewhere`: 지금 대화가 아닌 소유자의 이름이다. 이 POMP의 다른 탭이면 대화 이름, 다른 POMP면 `대화 이름 · 작업 영역`이다.
 
 **승인**
@@ -1589,7 +1591,7 @@ Team { id, title, goal, members: string[], mode: 'lead' | 'parallel' | 'pipeline
 - 엔진 확장 `extensions/partner.ts`가 `chat-tabs.json`에서 대화의 상대를 읽고 역할을 적용한다. 역할 파일은 omp 순서(사용자, 프로젝트, 내장)로 찾는다(`lib/agent-roles.ts`).
   - 지시문: `before_agent_start`에서 시스템 프롬프트에 `<pomp_conversation_partner>` 블록(이름·설명·역할 본문)과 그 역할의 메모를 더한다. 매 턴 다시 정한다.
   - 모델·생각 수준: 새 대화를 시작한 뒤 호스트가 `/pomp-partner new`를 보내고, 확장이 역할의 모델(`@smol` 같은 별칭 포함)과 생각 수준을 고른다. 엔진이 대화마다 저장하므로 그 대화로 돌아오면 그대로다.
-  - 도구: `tools.ts`가 대화를 바꿀 때와 도구 초기화 때 역할의 도구 목록만 켠다(읽기 전용 역할은 읽기 도구만). 목록이 없으면 기본 도구다.
+  - 도구: `tools.ts`가 대화를 바꿀 때와 도구 초기화 때 역할의 도구 목록만 켠다(읽기 전용 역할은 읽기 도구만). 목록이 없으면 기본 도구다. 역할 목록에 없는 호스트 툴은 켜지지 않으므로(내장 `reviewer`·`scout`·`security-reviewer`는 호스트 툴이 없다) VS 안내(`pomp-context`), 기능 안내(`features-guidance`), pre-edit 차단 사유, `/workflow`·`/review` 문구, 첨부 참조 머리말(호스트 `CanReadBuffer`)은 그 대화에서 부를 수 있는 도구만 이름을 댄다.
 - 기본 탭으로 돌아가면 POMP 대화는 블록이 없고 기본 도구로 돌아간다. 저장한 모델이 없어 에이전트·팀 대화의 모델을 물려받은 POMP 대화만 `/pomp-partner`가 마지막 POMP 모델로 되돌린다. 에이전트·팀 대화의 모델은 건드리지 않는다(새 에이전트 대화에서 역할 모델을 고르는 것만 예외). VS를 다시 시작한 직후 에이전트 대화에서 새 POMP 대화를 만들면 되돌릴 모델을 모른다.
 - 역할을 찾을 수 없으면 그 대화로는 보내지 않는다.
 

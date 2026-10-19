@@ -31,6 +31,7 @@ namespace Pomp.Hosting
         private string? _computerSessionId;
         private TaskCompletionSource<string>? _computerAnswer;
         private ComputerOwnerLock? _computerOwner;
+        private string? _computerOwnerTab; // the tab that took the record: main, agent:<name> or team:<id>
 
         private ComputerUseOptions ComputerOptions => (_settings as IComputerUseSettings)?.ComputerUse ?? ComputerUseOptions.Default;
 
@@ -90,6 +91,8 @@ namespace Pomp.Hosting
             var owner = ownerLock?.Current();
             string? current;
             lock (_stateLock) current = _info.SessionId;
+            // The owner's own tab (also while it shows a new conversation the engine is about to be switched on in) is not "elsewhere".
+            var here = owner != null && owner.Mine && (owner.SessionId == current || (current != null && OwnerTabIs(ComputerTabOf(current))));
             lock (_computerLock)
             {
                 return new UiMessage(UiMessageTypes.ComputerState, new JObject
@@ -103,7 +106,7 @@ namespace Pomp.Hosting
                     ["available"] = _computerGuard && _computerOptions.Policy != ComputerUsePolicy.Off && _bridge.State == BridgeState.Running,
                     ["message"] = _computerMessage,
                     // Another conversation (another tab here, or another POMP on this PC) holds it: this one cannot switch it on.
-                    ["ownerElsewhere"] = owner == null || (owner.Mine && owner.SessionId == current) ? null : ComputerOwnerName(owner),
+                    ["ownerElsewhere"] = owner == null || here ? null : ComputerOwnerName(owner),
                 });
             }
         }
@@ -159,7 +162,7 @@ namespace Pomp.Hosting
         /// Switching on takes the PC-wide owner record first; switching off releases it unless <paramref name="keepOwner"/> (another
         /// tab is shown and the owner's tab stays open).
         /// </summary>
-        private async Task<string?> SetComputerDesktopAsync(bool on, string? reason, bool keepOwner = false)
+        private async Task<string?> SetComputerDesktopAsync(bool on, string? reason, bool keepOwner = false, string? replaces = null)
         {
             string? sessionId;
             bool busy;
@@ -198,11 +201,13 @@ namespace Pomp.Hosting
                 {
                     string root;
                     lock (_stateLock) root = _workingDirectory;
-                    var holder = ownerLock.TryTake(sessionId ?? "", ComputerConversationLabel(), Path.GetFileName(root.TrimEnd('\\', '/')));
+                    var tab = ComputerTabOf(sessionId ?? "");
+                    var holder = ownerLock.TryTake(sessionId ?? "", ComputerConversationLabel(), Path.GetFileName(root.TrimEnd('\\', '/')), replaces);
                     if (holder != null)
                         return holder.SessionId.Length == 0
                             ? PompLanguage.Pick("다른 대화와 동시에 바꿀 수 없어요. 다시 해 주세요.", "Another conversation is changing it. Try again.")
                             : PompLanguage.Pick("다른 대화에서 사용 중이에요: ", "In use by another conversation: ") + ComputerOwnerName(holder);
+                    lock (_computerLock) _computerOwnerTab = tab;
                     taken = true;
                 }
 
@@ -280,8 +285,10 @@ namespace Pomp.Hosting
         }
 
         /// <summary>
-        /// Another conversation (new or switched): computer use does not carry over to it. Leaving the owner keeps the record while the
-        /// owner's tab stays open; coming back to the owner switches it on again.
+        /// Another conversation (new or switched): computer use does not carry over to it. The record belongs to the tab that switched it on
+        /// (the Default tab, or an agent's or team's tab). Showing another tab keeps the record; coming back to that tab switches it on again,
+        /// in the same conversation or, when the tab had to start a new one (an empty conversation is never saved), in that new one. Another
+        /// conversation in the owner's tab itself (new conversation, the list, deleting it) switches it off and releases it.
         /// </summary>
         private void ComputerSessionObserved(string? sessionId)
         {
@@ -296,26 +303,35 @@ namespace Pomp.Hosting
                 else if (left == null) { _computerSessionId = sessionId; return; }
             }
 
+            var inOwnerTab = OwnerTabIs(ComputerTabOf(sessionId!));
             if (!desktop)
             {
                 ComputerOwnerLock? ownerLock;
                 lock (_computerLock) ownerLock = _computerOwner;
                 var owner = ownerLock?.Current();
-                if (owner != null && owner.Mine && owner.SessionId == sessionId) { lock (_stateLock) _commands.Enqueue(() => ResumeComputerAsync()); }
+                if (owner != null && owner.Mine && (owner.SessionId == sessionId || inOwnerTab))
+                {
+                    var replaces = owner.SessionId == sessionId ? null : owner.SessionId;
+                    lock (_stateLock) _commands.Enqueue(() => ResumeComputerAsync(replaces));
+                }
                 else ReleaseClosedComputerOwner();
                 PublishComputerState();
                 return;
             }
 
-            var keep = ComputerConversationOpen(left!);
+            // Leaving the owner's conversation: for another tab the record stays (while the owner's tab is open); within its own tab it goes.
+            var keep = !inOwnerTab && ComputerOwnerTabOpen();
             var reason = keep ? null : PompLanguage.Pick("대화가 바뀌어 화면 입력 제어를 껐어요.", "Screen & input control was switched off because the conversation changed.");
             lock (_stateLock) _commands.Enqueue(() => SetComputerDesktopAsync(false, reason, keepOwner: keep));
         }
 
-        /// <summary>Back in the conversation that holds it: on again (a refusal releases it and says why on the button).</summary>
-        private async Task ResumeComputerAsync()
+        /// <summary>
+        /// Back in the tab that holds it: on again (<paramref name="replaces"/>: the record's conversation, when the tab now shows a new one).
+        /// A refusal releases it and says why on the button.
+        /// </summary>
+        private async Task ResumeComputerAsync(string? replaces)
         {
-            var error = await SetComputerDesktopAsync(true, reason: null).ConfigureAwait(false);
+            var error = await SetComputerDesktopAsync(true, reason: null, replaces: replaces).ConfigureAwait(false);
             if (error == null) return;
             ComputerOwnerLock? ownerLock;
             lock (_computerLock) { _computerMessage = error; ownerLock = _computerOwner; }
@@ -323,30 +339,57 @@ namespace Pomp.Hosting
             PublishComputerState();
         }
 
-        /// <summary>True when <paramref name="sessionId"/> is the current conversation or an open tab's (the Default tab's included).</summary>
-        private bool ComputerConversationOpen(string sessionId)
+        /// <summary>
+        /// The tab a conversation belongs to: <c>main</c> (the Default tab), <c>agent:&lt;name&gt;</c> or <c>team:&lt;id&gt;</c>. A conversation
+        /// the engine has just reported for a tab that is starting a new one is that tab's (it is listed once the tab store observed it).
+        /// </summary>
+        private string ComputerTabOf(string sessionId)
         {
-            string root, current;
-            lock (_stateLock) { root = _workingDirectory; current = _info.SessionId ?? ""; }
-            if (sessionId == current) return true;
-            try
+            ConversationPartnerPayload? partner;
+            string root;
+            lock (_stateLock)
             {
-                var tabs = _tabs.Read(root);
-                return tabs.Main == sessionId || tabs.Conversations.Any(e => e.Open && e.SessionId == sessionId);
+                root = _workingDirectory;
+                partner = _partnerSession == sessionId ? CopyPartner(_partner) : _newConversationPartner == null ? null : CopyPartner(_newConversationPartner);
             }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is InvalidOperationException || ex is ArgumentException)
+
+            if (partner == null)
             {
-                return false;
+                try { partner = _tabs.Get(root, sessionId); }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is InvalidOperationException || ex is ArgumentException) { partner = new ConversationPartnerPayload(); }
             }
+
+            return ComputerTabKey(partner);
         }
 
-        /// <summary>After the tabs changed: this POMP's record for a conversation no longer open (its tab closed, a new conversation in it) goes.</summary>
+        private static string ComputerTabKey(ConversationPartnerPayload partner) => partner.Kind == "agent" || partner.Kind == "team" ? partner.Kind + ":" + partner.Id : "main";
+
+        private bool OwnerTabIs(string tab)
+        {
+            lock (_computerLock) return _computerOwnerTab == tab;
+        }
+
+        /// <summary>The tab that holds it is open: the Default tab always is; an agent's or team's tab while it is not closed.</summary>
+        private bool ComputerOwnerTabOpen()
+        {
+            string? owner;
+            lock (_computerLock) owner = _computerOwnerTab;
+            if (owner == null) return false;
+            if (owner == "main") return true;
+            string root, current;
+            lock (_stateLock) { root = _workingDirectory; current = _info.SessionId ?? ""; }
+            if (current.Length > 0 && ComputerTabOf(current) == owner) return true;
+            try { return _tabs.Read(root).Conversations.Any(e => e.Open && ComputerTabKey(e.Partner) == owner); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is InvalidOperationException || ex is ArgumentException) { return false; }
+        }
+
+        /// <summary>After the tabs changed: this POMP's record goes when the tab that holds it is no longer open (closed, or its conversation deleted).</summary>
         private void ReleaseClosedComputerOwner()
         {
             ComputerOwnerLock? ownerLock;
             lock (_computerLock) ownerLock = _computerOwner;
             var owner = ownerLock?.Current();
-            if (owner == null || !owner.Mine || ComputerConversationOpen(owner.SessionId)) return;
+            if (owner == null || !owner.Mine || ComputerOwnerTabOpen()) return;
             ownerLock!.Release(owner.SessionId);
         }
 

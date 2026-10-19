@@ -25,9 +25,10 @@ interface TaskDraft { mode: 'add' | 'edit'; phase: number | 'new'; task?: number
 /**
  * The whole agent plan, one page at a time: the host keeps the plan and answers pages (query, clamped page) and single-task or
  * single-phase edits checked against the revision the page showed, so any number of tasks stays usable. A task is run on its own
- * (`startTask`, then the chat request of `onRunTask`) and moved by dragging its handle or with Alt+Up/Down on it (`moveTask`).
+ * (idle: `startTask`, then the chat request of `onRunTask`; while the agent works: only the request, queued after the current turn)
+ * and moved by dragging its handle or with Alt+Up/Down on it (`moveTask`).
  */
-export function AgentPlan({ session, sessionId, locale, disabled, busy, onContinue, onRunTask, onStop, layout = 'details', inert = false }: { session: SessionInfoPayload | null; sessionId?: string; locale: string; disabled: boolean; busy: boolean; onContinue: () => void; onRunTask: (task: string) => SendResult; onStop: () => void; layout?: WorkLayout; inert?: boolean }) {
+export function AgentPlan({ session, sessionId, locale, disabled, busy, onContinue, onRunTask, onStop, layout = 'details', inert = false }: { session: SessionInfoPayload | null; sessionId?: string; locale: string; disabled: boolean; busy: boolean; onContinue: () => void; onRunTask: (task: string, marked: boolean) => SendResult; onStop: () => void; layout?: WorkLayout; inert?: boolean }) {
   const ko = locale.toLowerCase().startsWith('ko'); const t = useT();
   const total = session?.planTaskCount ?? 0; const open = session?.planOpenCount ?? 0; const revision = session?.planRevision ?? '';
   const [view, setView] = useState<'tasks' | 'phases'>('tasks');
@@ -69,7 +70,7 @@ export function AgentPlan({ session, sessionId, locale, disabled, busy, onContin
     if (!message.payload.ok) { focusMove.current = undefined; setError(message.payload.error ?? (ko ? '계획을 저장하지 못했어요.' : 'The plan was not saved.')); return; }
     setDraft(null); setRenaming(null); setError('');
     if (!run) return;
-    const result = runTask.current(run.content);
+    const result = runTask.current(run.content, true);
     if (!result.ok) setError(result.reason === 'hostUnavailable' ? t('error.hostUnavailable') : ko ? '작업을 진행 중으로 표시했지만 요청을 보내지 못했어요. 이어가기로 다시 시도해 주세요.' : 'The task is marked in progress, but the request was not sent. Try Continue.');
   }), [ko, t]);
   useEffect(() => {
@@ -108,10 +109,18 @@ export function AgentPlan({ session, sessionId, locale, disabled, busy, onContin
     if (!send('workspace/agentPlanEdit', { ...op, requestId: id, sessionId, revision: data.revision ?? '' } as AgentPlanEdit)) { editRequest.current = undefined; setPending(false); setError(t('error.hostUnavailable')); return undefined; }
     return id;
   };
-  // Run: only while the agent is idle (like Continue); the task becomes the one in progress, then the chat asks for it.
+  // Run while idle: the task becomes the one in progress, then the chat asks for it. While the agent works the plan is not changed
+  // under its turn: the request alone goes to the chat queue (or into the turn with Send now) and has the agent start the task itself.
+  const scheduling = !canEdit && canEditWorking;
   const run = (row: PlanRow) => {
-    const id = edit({ op: 'startTask', phase: row.phase, task: row.task });
-    if (id) runRequest.current = { id, content: row.content };
+    if (!scheduling) {
+      const id = edit({ op: 'startTask', phase: row.phase, task: row.task });
+      if (id) runRequest.current = { id, content: row.content };
+      return;
+    }
+    setError('');
+    const result = onRunTask(row.content, false);
+    if (!result.ok) setError(result.reason === 'hostUnavailable' ? t('error.hostUnavailable') : ko ? '지금은 실행을 예약할 수 없어요. 잠시 뒤 다시 눌러 주세요.' : 'The run cannot be scheduled now. Try again shortly.');
   };
   // Move: like an edit of the row, so the task in progress stays put while the agent works (the host checks again).
   const taskCounts = new Map(phases.map(phase => [phase.index, phase.taskCount]));
@@ -209,7 +218,9 @@ export function AgentPlan({ session, sessionId, locale, disabled, busy, onContin
             <Cell className="ui-muted" title={name}>{revealControls(name)}</Cell>
             <Cell><Badge tone={tone(row.status)}>{revealControls(stateLabel(row.status, locale))}</Badge></Cell>
             <Actions>
-              <IconButton icon="play" label={ko ? '이 작업 실행' : 'Run this task'} disabled={!canEdit || row.status === 'completed'} onClick={() => run(row)} testId={`plan-run-${key}`} />
+              {/* While the agent works, the task it is on needs no run of its own. */}
+              <IconButton icon="play" label={scheduling ? (ko ? '작업 후 실행 예약' : 'Run after the current turn') : (ko ? '이 작업 실행' : 'Run this task')}
+                disabled={!canAdd || row.status === 'completed' || (scheduling && inProgress(row.status))} onClick={() => run(row)} testId={`plan-run-${key}`} />
               <IconButton icon="edit" label={ko ? '작업 편집' : 'Edit task'} disabled={!canEditRow(row)} onClick={() => startEdit(row)} testId={`plan-edit-${key}`} />
               {deleteButton(key, ko ? '작업 삭제' : 'Delete task', canEditRow(row), () => edit({ op: 'deleteTask', phase: row.phase, task: row.task }))}
             </Actions>

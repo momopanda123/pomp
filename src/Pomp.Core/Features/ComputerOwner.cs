@@ -102,15 +102,18 @@ namespace Pomp.Features
 
         /// <summary>
         /// Takes computer use for <paramref name="sessionId"/> of this POMP. Null when it is now this conversation's (also when it
-        /// already was); otherwise the conversation that holds it. Taking from this POMP's other conversation is refused too.
+        /// already was); otherwise the conversation that holds it. Taking from this POMP's other conversation is refused too, except
+        /// <paramref name="replaces"/>: this POMP's record for that conversation moves to <paramref name="sessionId"/> in one write
+        /// (the owner's tab shows a new conversation), so other POMPs never see it free.
         /// </summary>
-        public ComputerOwner? TryTake(string sessionId, string label, string workspace)
+        public ComputerOwner? TryTake(string sessionId, string label, string workspace, string? replaces = null)
         {
             ComputerOwner? holder = null;
             var taken = Locked(() =>
             {
                 var record = Read();
-                if (record != null && Live(record) && !(Mine(record) && (string?)record["sessionId"] == sessionId))
+                var held = (string?)record?["sessionId"];
+                if (record != null && Live(record) && !(Mine(record) && (held == sessionId || (replaces != null && held == replaces))))
                 {
                     holder = Owner(record);
                     return;

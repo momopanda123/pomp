@@ -24,8 +24,8 @@ export interface WorkTabProps {
   connected: boolean; busy: boolean; newSessionPending?: boolean; inert?: boolean; attention: WorkAttention;
   requestedView?: RequestedWorkView; onViewChange?: (view: WorkView) => void;
   onContinue: (task?: string) => void; onStop: () => void; onSolve: (text: string) => SendResult;
-  /** Run one plan task now (the plan already marks it in progress). */
-  onRunTask: (task: string) => SendResult;
+  /** Run one plan task: `marked` when the plan already marks it in progress (idle), else it is scheduled after the current step. */
+  onRunTask: (task: string, marked: boolean) => SendResult;
   onOpenWorkflows?: () => void;
 }
 export function normalizeWorkView(view: RequestedWorkView): WorkView { return view === 'plan' || view === 'workflow' ? 'progress' : view === 'history' ? 'review' : view === 'terminal' ? 'progress' : view; }

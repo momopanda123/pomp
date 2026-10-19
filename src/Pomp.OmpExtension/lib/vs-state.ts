@@ -68,6 +68,33 @@ export function offeredHostTools(env: Env = process.env): ReadonlySet<string> {
 	return tools;
 }
 
+/**
+ * Every tool this session can call, or undefined when the engine does not say. omp 18.12.1's `pi.getActiveTools()` returns the
+ * session's enabled names (`AgentSession.getEnabledToolNames`): the top-level active tools plus the tools mounted under `xd://`
+ * (discoverable tools the model calls by writing to `xd://<tool>`), so a tool reachable only through `xd://` still counts. An agent
+ * conversation enables only its role's tools (tools.ts).
+ */
+export function enabledTools(session: { getActiveTools?: () => string[] }): ReadonlySet<string> | undefined {
+	if (typeof session.getActiveTools !== "function") return undefined;
+	try {
+		const names: unknown = session.getActiveTools();
+		return Array.isArray(names) ? new Set(names.filter((name): name is string => typeof name === "string")) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The offered host tools (`POMP_HOST_TOOLS`) this session can call (`enabledTools`); all offered ones when the engine does not say.
+ * Texts that name host tools use this set, so an agent conversation whose role lists no host tool is never told about one. A pure
+ * function of the two sets: such texts change only when the session's tool set changes, which changes the cached prompt prefix anyway.
+ */
+export function callableHostTools(session: { getActiveTools?: () => string[] }, env: Env = process.env): ReadonlySet<string> {
+	const offered = offeredHostTools(env);
+	const enabled = enabledTools(session);
+	return enabled ? new Set([...offered].filter(name => enabled.has(name))) : offered;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }

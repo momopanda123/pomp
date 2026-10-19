@@ -14,8 +14,8 @@ mode and skill discovery (see "Verification" and "Open questions").
 
 | Piece | File | What it does |
 |---|---|---|
-| **pomp-context** extension | `extensions/pomp-context.ts` | Under pomp (`POMP_HOST=1`): appends a short "Visual Studio host" section to the main agent's system prompt. It names only the host tools the host offered (`POMP_HOST_TOOLS`): read files open in VS with `read_buffer`, use `query_solution` / `read_error_list` / `build_solution`, add files/packages with `add_project_file` / `manage_nuget`, and, when no buffer-edit tool is offered, ask the user to save a file with unsaved changes before editing it. Announces the open solution once per session and again when `vs-state.json` reports a different one, and announces the applicable scoped `.mdc` rules as a hidden message re-sent only when their text changes (both keep the system prompt byte-stable for the provider's prompt cache). Registers `/pomp-context` (status) and `/pomp-rules`: typed, it notifies the rules that apply now and the rule-file diagnostics; the host's `--request <id>` read gets only the hidden `pomp-rules-result:` notice. |
-| **pre-edit** hook | `extensions/pre-edit.ts` | `tool_call` handler that blocks omp's disk-writing tools on files that are **open and dirty in VS**. The reason tells the model to use `read_buffer` + `edit_buffer_hashline` when both are offered, otherwise to ask the user to save the file (Ctrl+S) and retry with the normal tools. Registers `/pomp-guard` (status). |
+| **pomp-context** extension | `extensions/pomp-context.ts` | Under pomp (`POMP_HOST=1`): appends a short "Visual Studio host" section to the main agent's system prompt. It names only the host tools this conversation can call (offered in `POMP_HOST_TOOLS` **and** enabled in the session, `xd://`-mounted ones included; an agent conversation has its role's tools only, so a Reviewer tab is told about none): read files open in VS with `read_buffer`, use `query_solution` / `read_error_list` / `build_solution`, add files/packages with `add_project_file` / `manage_nuget`, and, when no buffer-edit tool is callable, ask the user to save a file with unsaved changes before editing it. Announces the open solution once per session and again when `vs-state.json` reports a different one, and announces the applicable scoped `.mdc` rules as a hidden message re-sent only when their text changes (both keep the system prompt byte-stable for the provider's prompt cache). Registers `/pomp-context` (status, including how many offered VS tools this conversation can call) and `/pomp-rules`: typed, it notifies the rules that apply now and the rule-file diagnostics; the host's `--request <id>` read gets only the hidden `pomp-rules-result:` notice. |
+| **pre-edit** hook | `extensions/pre-edit.ts` | `tool_call` handler that blocks omp's disk-writing tools on files that are **open and dirty in VS**. The reason tells the model to use `read_buffer` + `edit_buffer_hashline` when the session can call both, otherwise to ask the user to save the file (Ctrl+S) and retry with the normal tools. Registers `/pomp-guard` (status). |
 | **live-edits** | `extensions/live-edits.ts` | Live for omp's own file tools. `tool_call` reads each target of `edit` / `write` / `ast_edit` / `apply_patch` from disk (files up to 2 MiB) and asks the host to hold the existing ones (hidden confirm `pomp-disk-edit-hold`, waited for 3 s at most), so VS neither reloads an open file nor asks about the outside change while the tool writes. `tool_result` sends those texts to the host (hidden notice `pomp-disk-edit:`, with `error` for a failed call), over the main conversation's channel, so subagent calls count too. The host ends the hold and shows the difference to the new text in the editor like a host edit (follow, +/- marks, bookmarks), in any language. Never blocks a call: every failure is swallowed. |
 | **network** hook | `extensions/network.ts` | With `POMP_NETWORK=block`, blocks recognized network tool calls and URL reads in addition to the host overlay. Not a shell/MCP network sandbox. |
 | **verify-gate** | `extensions/verify-gate.ts` | Appends a fixed "Evidence before completion" section to the main agent's system prompt, and, with the "Verify after edits" option on (`POMP_VERIFY_GATE=1`, default), continues a settling turn once via `session_stop` when source edits were not verified afterwards. Skips docs-only edits, missing solutions, workflow runs and turns that already report evidence. |
@@ -23,8 +23,8 @@ mode and skill discovery (see "Verification" and "Open questions").
 | **compaction-context** | `extensions/compaction-context.ts` | `session.compacting` hook that adds POMP/VS facts (solution, unsaved buffers, workflow phase, denied approvals) to automatic compaction summaries. It is why POMP has no compaction command of its own: the chat's `/compact` runs the engine's. |
 | **plan-guard** | `extensions/plan-guard.ts` | The plan-only turn: the `pomp-plan` command (the chat lists it as `/plan`), the `enter_plan_only` tool (the model puts the turn it is in under the same guard) and the `tool_call` guard. During that run only reading, searching, the web, `todo` and read-only host tools are allowed; everything else is refused with a short reason. Only the end of the run (or a new/switched session, or a two-hour ceiling) lifts it; no tool or command does. A cooperative filter, not an OS sandbox. |
 | **plan-edits** | `extensions/plan-edits.ts` | The `pomp-plan-note` command: the host sends what the user changed in the work plan (Work > Progress). The note reaches the main agent once, with its next tool result while it works (`tool_result` additional context) or before its next run (`before_agent_start` hidden message), and tells it to keep the plan as it is now instead of writing back the plan it remembers. |
-| **workflows** | `extensions/workflows.ts` | The `pomp-workflow`, `pomp-map`, `pomp-review` and `pomp-max` commands; a `tool_call` hook that tells the host (hidden notice `pomp-review-reporter:`, sent over the main conversation's channel) which agent makes each `report_review_findings` call, so Work › 코드 점검 shows who reported a finding. Never blocks a tool. |
-| **features-guidance** | `extensions/features-guidance.ts` | Appends one fixed section to the main agent's system prompt: what `/plan`, `/goal`, `/workflow` and Work > Progress do and when to suggest them, naming the model-callable tools `enter_plan_only` and `request_goal_run` (the latter is a host tool: it only shows the user a confirmation card); and where a requested skill must be written (`.pomp/skills/<name>/SKILL.md` in the workspace or the user's home) so Tools › Skills lists it. No per-request text. |
+| **workflows** | `extensions/workflows.ts` | The `pomp-workflow`, `pomp-map`, `pomp-review` and `pomp-max` commands (their texts name only host tools the conversation can call; `/pomp-map` refuses without `build_codebase_context`); a `tool_call` hook that tells the host (hidden notice `pomp-review-reporter:`, sent over the main conversation's channel) which agent makes each `report_review_findings` call, so Work › 코드 점검 shows who reported a finding. Never blocks a tool. |
+| **features-guidance** | `extensions/features-guidance.ts` | Appends one section to the main agent's system prompt: what `/plan`, `/goal`, `/workflow` and Work > Progress do and when to suggest them, naming the model-callable tools `enter_plan_only`, `request_goal_run` (a host tool: it only shows the user a confirmation card) and `propose_knowledge` only when the conversation can call them; and where a requested skill must be written (`.pomp/skills/<name>/SKILL.md` in the workspace or the user's home) so Tools › Skills lists it. A pure function of the conversation's tool set; no per-request text. |
 | **reply-style** | `extensions/reply-style.ts` | While the built-in `chat-style` skill is on (listed in the engine's `<skills>` block; Tools › Skills switches it off), appends its instructions to the main agent's system prompt, because a formatting rule is not a task the model matches by description. A user's own `.pomp/skills/chat-style/SKILL.md` (project, then home) wins over the built-in file. |
 | **local-models** | `extensions/local-models.ts` | Registers the model servers saved in the account tab (any OpenAI-compatible server: name, address, optional key; the host passes them as `POMP_LOCAL_MODELS`) as providers `local-...` whose models are the server's `/models` (or `/v1/models`) list, read at start and on catalog refresh (`fetchDynamicModels`). |
 
@@ -67,7 +67,7 @@ omp --mode rpc
 | `POMP_HOST=1` | **Required.** Without it both modules register nothing (safe when the folder is loaded outside pomp). |
 | `POMP_STATE_DIR` | **Required for the guard and the solution notice.** Directory holding `vs-state.json`. |
 | `POMP_PRE_EDIT_MODE` | Optional: `block` (default), `warn`, `off`. |
-| `POMP_HOST_TOOLS` | Comma-separated names of the host tools offered to omp in this process (e.g. `get_editor_context,read_buffer,query_solution,…`). Decides which tools the guidance and the block reason may name. **Absent = none known** (conservative wording that names no host tool). The text only depends on the *set*, so it stays identical for identical environments (prompt cache). |
+| `POMP_HOST_TOOLS` | Comma-separated names of the host tools offered to omp in this process (e.g. `get_editor_context,read_buffer,query_solution,…`). The texts name a host tool only when it is in this list **and** the session can call it (`lib/vs-state.ts` `callableHostTools`: `pi.getActiveTools()`, which in omp 18.12.1 is `AgentSession.getEnabledToolNames()`, the active tools plus the `xd://`-mounted ones). **Absent = none known** (conservative wording that names no host tool). The text only depends on the two *sets*, so it stays identical while the conversation's tools stay the same (prompt cache); changing the tools already changes the cached prefix. |
 | `POMP_VERIFY_GATE` | `1` (default) lets the verification gate continue a settling turn once after unverified source edits; `0` turns the nudge off (the static evidence section still applies). |
 | `POMP_HOST_VERSION`, `POMP_VS_VERSION` | Only shown by `/pomp-context`. |
 | `POMP_SOLUTION_ROOT` | Not read by these two modules (the state file carries `solutionRoot`); the permission guard compares the engine's working directory with it. |
@@ -93,7 +93,8 @@ no sibling discovery.
 * The overlay's `allow` entries stop omp from prompting for them under `always-ask`; omp's own tools keep the mode.
 * The host may offer a subset of these names (a tool that is not ready yet — currently `remove_project_file` pending Windows recycle safety checks — is not offered;
   `edit_buffer_hashline` and `add_project_file` are) and lists the offered ones in `POMP_HOST_TOOLS`; the texts in this
-  package never name a tool that is not in that list. Test discovery, like test execution, needs host approval because it may build and execute project code.
+  package never name a tool that is not in that list, nor one the session cannot call (an agent conversation enables only its
+  role's tools, `extensions/tools.ts`). Test discovery, like test execution, needs host approval because it may build and execute project code.
 
 ### `vs-state.json` obligations
 
@@ -109,8 +110,8 @@ fail open.
 * `get_available_commands` (and the `available_commands_update` frame) lists `pomp-context` and `pomp-guard`
   (`source: "extension"`) when both modules loaded, and `skill:vs-project` (`source: "skill"`) when the skill was
   discovered. Sending `/pomp-guard` or `/pomp-context` as a `prompt` finishes locally (`agentInvoked: false`) and
-  shows mode, state availability, the unsaved-file count (and, for `/pomp-context`, the number of offered host tools)
-  through an `extension_ui_request` `notify`.
+  shows mode, state availability, the unsaved-file count (and, for `/pomp-context`, how many of the offered host tools
+  this conversation can call) through an `extension_ui_request` `notify`.
 * Load failures of an `-e` module are written to omp's **stderr** (RPC mode is non-interactive); runtime handler errors
   arrive as `extension_error` frames. The hidden solution announcement is a `custom` message with
   `customType: "pomp-solution"` and `display: false`: do not render it.
@@ -136,7 +137,7 @@ fail open.
 * **How it blocks.** The handler returns `{ block: true, reason }` from the `tool_call` event. omp fires this at
   argument-prep time, before scheduling and before the approval prompt, so nothing is written and the user is never asked
   to approve a call that will be refused; `reason` is returned to the model as the tool error. The reason names the files
-  and, when the host offers `read_buffer` and `edit_buffer_hashline`, says to use them; otherwise it tells the model to ask
+  and, when the session can call `read_buffer` and `edit_buffer_hashline`, says to use them; otherwise it tells the model to ask
   the user to save the files in Visual Studio (Ctrl+S), then retry with the normal tools, and never to overwrite unsaved
   changes. `POMP_PRE_EDIT_MODE=warn` lets the call run and returns `{ additionalContext }` instead (omp delivers that only
   after a successful call).
@@ -162,19 +163,21 @@ fail open.
   <old>.` Whether it was already sent is derived from the session branch (`custom_message` entries), so the handler is
   stateless, tolerates omp's re-runs of the hook, and works across `new_session` / `switch_session`.
 * Deliberately **not** injected: active file, selection, dirty flags (volatile; the host puts the editor summary into the
-  prompt, and `get_editor_context` exists). The guidance is a pure function of the guard mode and of the set of offered host
-  tools, so it is byte-identical for identical environments and keeps the provider prompt-cache prefix stable. Size
-  (block mode): about 0.9 k characters with no host tool known, 1.3 k for the 8 tools the host offers today, 1.1 k for all
+  prompt, and `get_editor_context` exists). The guidance is a pure function of the guard mode and of the set of host tools
+  the session can call, so it is byte-identical while the conversation's tools stay the same and keeps the provider
+  prompt-cache prefix stable (computed on every prompt, so a role's tools applied right after a conversation starts are
+  respected). Size (block mode): about 0.9 k characters with no host tool callable, 1.3 k for the 8 tools the host offers today, 1.1 k for all
   11 (roughly 230 / 330 / 275 tokens at 4 characters per token).
 * Scoped `.mdc` rules (up to 5 rules / 24,000 chars, chosen by the active file) and the project resource catalog are
   **not** part of the system prompt either: each travels as a hidden custom message (`pomp-rules`, `pomp-catalog`) that is
   re-sent only when its rendered text changes, headed by a line saying it supersedes earlier messages of its kind. What was
   already announced is derived from the session branch, so the messages survive hook re-runs and session switches, and are
   re-announced when compaction drops them.
-* The text follows `POMP_PRE_EDIT_MODE` (it only claims disk edits are blocked in `block` mode) and `POMP_HOST_TOOLS` (it
-  names `edit_buffer_hashline`, `add_project_file`, `manage_nuget`, … only when they are offered; otherwise it says: ask the
-  user to save a file with unsaved changes, SDK-style projects pick up new source files automatically, prefer
-  `dotnet add package` for package changes). With `POMP_HOST_TOOLS` absent no host tool is named at all.
+* The text follows `POMP_PRE_EDIT_MODE` (it only claims disk edits are blocked in `block` mode) and the callable host tools
+  (it names `edit_buffer_hashline`, `add_project_file`, `manage_nuget`, … only when the session can call them; otherwise it
+  says: ask the user to save a file with unsaved changes, SDK-style projects pick up new source files automatically, prefer
+  `dotnet add package` for package changes). With `POMP_HOST_TOOLS` absent, or in an agent conversation whose role lists no
+  host tool (the bundled `reviewer`, `scout`, …), no host tool is named at all.
 * `skills/vs-project/SKILL.md` is static, so it is phrased conditionally ("if `add_project_file` is among your tools …").
   Keep it LF-terminated (omp before 18.4.2 handled CRLF-terminated `SKILL.md` files incorrectly).
 

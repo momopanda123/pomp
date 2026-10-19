@@ -6,8 +6,8 @@
  * the mutating `lsp` actions) write to disk, which would clobber or diverge from those
  * changes. This hook consults `${POMP_STATE_DIR}/vs-state.json` (kept up to date by the
  * host) and, when a call targets a file that is open AND dirty in VS, blocks it. The reason steers the model to
- * `read_buffer` + `edit_buffer_hashline` when the host offers both (`POMP_HOST_TOOLS`), otherwise to asking the user to
- * save the file in Visual Studio and retrying with the normal tools.
+ * `read_buffer` + `edit_buffer_hashline` when this session can call both (offered in `POMP_HOST_TOOLS` and enabled here),
+ * otherwise to asking the user to save the file in Visual Studio and retrying with the normal tools.
  *
  * Why dirtiness and not a hash check (the design sketches "verify the hash, warn on conflict"): omp's built-in `edit` hashes
  * the file on disk, while the host's tags describe the editor buffer, so a hook cannot compare them; the condition that
@@ -27,6 +27,7 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { mutationTargets } from "../lib/tool-targets.ts";
 import {
 	buildDirtyIndex,
+	callableHostTools,
 	isPompHost,
 	matchDirtyFiles,
 	matchDirtyScopes,
@@ -45,8 +46,8 @@ function listFiles(files: readonly string[]): string {
 }
 
 /**
- * Text returned to the model as the tool error when a call is blocked. A host tool is only named when the host offered it
- * (`POMP_HOST_TOOLS`); without `edit_buffer_hashline` the remedy is to have the user save the file and then use the normal tools.
+ * Text returned to the model as the tool error when a call is blocked. A host tool is only named when the session can call it
+ * (`callableHostTools`); without `edit_buffer_hashline` the remedy is to have the user save the file and then use the normal tools.
  */
 export function blockReason(
 	toolName: string,
@@ -113,9 +114,10 @@ export default function preEdit(pi: ExtensionAPI): void {
 			} catch {
 				// logging must never affect the decision
 			}
+			const tools = callableHostTools(pi);
 			return mode === "block"
-				? { block: true, reason: blockReason(event.toolName, hits) }
-				: { additionalContext: warnText(event.toolName, hits) };
+				? { block: true, reason: blockReason(event.toolName, hits, tools) }
+				: { additionalContext: warnText(event.toolName, hits, tools) };
 		} catch (error) {
 			try {
 				pi.logger?.warn?.("pomp pre-edit: check failed, allowing tool call", { error: String(error) });

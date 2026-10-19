@@ -15,10 +15,20 @@ namespace Pomp.Hosting
     /// </summary>
     internal static class PromptDisplay
     {
-        /// <summary>Before the paths a slash command gets from the context basket (PompSession.ComposeSlashCommand).</summary>
-        internal const string CommandReferencesHeader = "Work only on these workspace references, highest priority first (the user checked them for this command). Folder references are metadata, not recursively attached contents; inspect folders with bounded directory tools and select relevant files. Use read_buffer for workspace text to include unsaved editor changes; use read for images:";
+        /// <summary>
+        /// Before the paths a slash command gets from the context basket (PompSession.ComposeSlashCommand). The headers name
+        /// <c>read_buffer</c> only to a conversation that can call it (<see cref="PompSession"/> CanReadBuffer); an agent conversation has
+        /// its role's tools only (docs/architecture.md §8.8) and gets the disk-read wording.
+        /// </summary>
+        internal static string CommandReferencesHeader(bool readBuffer) => "Work only on these workspace references, highest priority first (the user checked them for this command). " + ReferencesNote + (readBuffer ? BufferReadNote : DiskReadNote);
 
-        internal const string AttachmentsHeader = "Attached workspace references, highest priority first. Folder references are metadata, not recursively attached contents; inspect folders with bounded directory tools and select relevant files. Use read_buffer for workspace text to include unsaved editor changes; use read for images:";
+        internal static string AttachmentsHeader(bool readBuffer) => readBuffer ? BufferAttachmentsHeader : DiskAttachmentsHeader;
+
+        private const string ReferencesNote = "Folder references are metadata, not recursively attached contents; inspect folders with bounded directory tools and select relevant files. ";
+        private const string BufferReadNote = "Use read_buffer for workspace text to include unsaved editor changes; use read for images:";
+        private const string DiskReadNote = "Use read for workspace text (the saved file, without unsaved editor changes) and images:";
+        private const string BufferAttachmentsHeader = "Attached workspace references, highest priority first. " + ReferencesNote + BufferReadNote;
+        private const string DiskAttachmentsHeader = "Attached workspace references, highest priority first. " + ReferencesNote + DiskReadNote;
 
         /// <summary>The extension's routing brief of a message for a team or one agent (docs/architecture.md §8.2, §8.3).</summary>
         private static readonly Regex RoutingBrief = new Regex(@"^<!-- pomp-(team|agent|dm):[A-Za-z0-9._:-]{1,128} -->[\s\S]*?<!-- /pomp-\1 -->", RegexOptions.CultureInvariant);
@@ -109,7 +119,7 @@ namespace Pomp.Hosting
                 }
             }
 
-            if (text.StartsWith(AttachmentsHeader, StringComparison.Ordinal))
+            if (text.StartsWith(BufferAttachmentsHeader, StringComparison.Ordinal) || text.StartsWith(DiskAttachmentsHeader, StringComparison.Ordinal))
             {
                 var lines = text.Split('\n');
                 var index = 1;
