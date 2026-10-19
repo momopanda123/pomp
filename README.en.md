@@ -7,7 +7,7 @@ runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+)
 
 | Component | Version | What it does |
 |---|---|---|
-| POMP | 0.5.6 | The Visual Studio extension: chat UI, Visual Studio tools, approval cards, agents and teams |
+| POMP | 0.5.7 | The Visual Studio extension: chat UI, Visual Studio tools, approval cards, agents and teams |
 | omp | 18.12.1 | The bundled conversation and agent engine, [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT) |
 
 ![POMP intro](docs/media/pomp-intro.gif)
@@ -129,10 +129,10 @@ Steps
 4. **Approve changes.** When the agent wants to change a file or run something, an approval card shows the diff: **Allow**,
    **Deny**, **Always allow** or **Allow for this session** (the last two apply to every request of that tool, and the card
    says so). Applied edits undo with one `Ctrl+Z` per file; POMP never saves for you.
-5. **Hand work to an agent.** Click `+` in the partner tab row of the chat and pick a role (for example **reviewer**). Messages in
-   that tab start the agent as a subagent after an approval card; once allowed it runs to the end without asking per tool,
-   including any agents it delegates to. Follow member status and individual stop controls on the task card in the chat or
-   partner tab. Create roles and teams in **Agents > Roles / Teams**; advisors live in **Advisors**, event rules and project hooks in **Automation**.
+5. **Hand work to an agent.** Click `+` in the partner tab row of the chat and pick a role (for example **reviewer**). The tab is its own
+   conversation with that agent: you talk to it directly, its `+` starts a new conversation with it and its list keeps its earlier ones.
+   Running agents show in **Agents > Running**. Create roles and teams in **Agents > Roles / Teams**; advisors live in **Advisors**,
+   event rules and project hooks in **Automation**.
 
 ## Shortcuts
 

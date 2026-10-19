@@ -22,12 +22,12 @@ to install.
 ## Agents and teams
 
 * Open a role agent (for example a reviewer or the built-in scout) as its own partner tab in the chat and talk to it directly.
-  An agent can hand parts of a task to other agents; the approval card says that an approved subagent runs without asking
-  again per tool.
+  Each tab is its own conversation with its own list; `+` in the tab starts a new conversation with that agent or team.
+  The main conversation can hand parts of a task to agents; agents do not start further agents.
 * Each role chooses its own model, thinking level and tool scope, from any provider you connected.
 * Teams of 2–6 roles run with a goal and a mode (leader decides, in parallel, in order). Member status, tool count, time,
-  recent tools and individual stop controls appear on the chat task card and in the partner tab. Manage definitions and
-  event handling in **Agents > Roles · Teams · Advisors · Automation** (advisors watch the main agent's work and comment).
+  recent tools and individual stop controls appear on the chat task card, in the partner tab and in **Agents > Running**.
+  Manage definitions and event handling in **Agents > Roles · Teams · Advisors · Automation** (advisors watch the main agent's work and comment).
 * **Work > Progress · Changes · Code check** brings together plans/workflows/automatic continuation, pending proposals and
   isolated results with applied history/restore, and agent findings with Visual Studio compiler errors/warnings. Select
   items to send one request to the current target without editor context (50 items / 12,000 characters).

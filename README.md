@@ -7,7 +7,7 @@ Visual Studio 2017(15.9) · 2019(16.10+) · 2022 · 2026을 지원하고, 화면
 
 | 구성 요소 | 버전 | 맡는 일 |
 |---|---|---|
-| POMP | 0.5.6 | Visual Studio 확장: 채팅 화면, VS 도구, 승인 카드, 에이전트·팀 관리 |
+| POMP | 0.5.7 | Visual Studio 확장: 채팅 화면, VS 도구, 승인 카드, 에이전트·팀 관리 |
 | omp | 18.12.1 | 함께 들어 있는 대화·에이전트 엔진 [oh-my-pi](https://github.com/can1357/oh-my-pi)(MIT) |
 
 ![POMP 소개](docs/media/pomp-intro.gif)
