@@ -88,6 +88,18 @@ The VS host handles these page messages in the WebView channel. They never reach
 - Meta and AltGr do not match. IME composition, key repeat and keyCode 229 are ignored.
 - The page app does not send it.
 
+#### `ui/vsKey`
+
+Payload: `{ chord }`, for example `"F5"`, `"Ctrl+F5"`, `"Ctrl+Shift+B"`, `"Ctrl+Break"` (modifiers in the order Ctrl, Alt, Shift).
+
+- Keystrokes inside the WebView never reach Visual Studio's key bindings. The page passes on the Visual Studio keys it does not use itself.
+- The page sends it from a bubbling window `keydown` listener for a key no element handled (`defaultPrevented` is false), and prevents the key's default:
+  - `F1` to `F12` and `Break` with any Ctrl, Alt and Shift;
+  - `Ctrl+Shift+B`.
+- Not sent: a chord of `host/hello.shortcuts`, bare `F12` (developer tools), `Shift+F10` (a field's context menu), `Alt+F4`, key repeat, IME composition (keyCode 229), Meta and AltGr.
+- The VS host runs the command bound to the chord in the Global scope of the current key bindings (Tools > Options > Environment > Keyboard), through `IVsUIShell.PostExecCommand`. It does nothing when no command is bound or the bound command is unavailable.
+- The host accepts only the chords listed above.
+
 #### `ui/pasteFiles`
 
 - The chat input sends it for a paste of files or an image without plain text. A page cannot read their paths.
@@ -282,7 +294,7 @@ Host text the page shows says what happened, the current state or a reason.
 | `chat/replayEnd` | `{}` | End of the replayed transcript; live messages follow. |
 | `agents/state` | `{ root?, roles: Role[], teams: Team[], diagnostics: string[], main, rolesHidden?, teamsHidden? }` | Agent roles and teams state. |
 | `agents/reply` | `{ requestId, ok, error?, name?, transcript?, template?, preview? }` | Answer to `agents/command`. |
-| `computer/state` | `{ policy: "off"\|"perConversation", browser, confirmReads, desktop, pending, available, message? }` | Computer use of this conversation. |
+| `computer/state` | `{ policy: "off"\|"perConversation", browser, confirmReads, desktop, pending, available, message?, ownerElsewhere? }` | Computer use of this conversation. `ownerElsewhere`: the name of the conversation that holds it on this PC when that is not this one (see `computer/set`). |
 | `computer/reply` | `{ requestId, ok, error? }` | Exactly one answer per `computer/set`. |
 | `error` | `{ code, message, retryable }` | A host-level error not tied to a turn. |
 | `btw/record` | `{ record: BtwRecord }` | A side question's full record at each lifecycle change. See "Side questions (/btw)". |
@@ -790,8 +802,18 @@ Payload:
 - It runs in order with the chat commands.
 - Switching on is refused during a reply.
 - Answered by `computer/reply`.
-- The page handles a typed `/computer` itself.
+- The page handles a typed `/computer` itself: it acts like a click on the composer's screen & input control button (`computer-toggle`, after Live).
+  With the option off the button is hidden and the page reports that it is unavailable in the VS status bar.
 - Variants such as `/computer:<suffix>` or ones with unusual whitespace that reach the host are intercepted and refused (`send_failed`).
+- One conversation on the PC holds computer use. The host keeps the record in `%LOCALAPPDATA%\Pomp\state\computer-owner.json`
+  (`{ instance, pid, processStart, sessionId, label, workspace, updatedAt }`), read and written under the named mutex `Local\Pomp.ComputerOwner`.
+  - Switching on takes the record first. When another live conversation holds it (another tab of this POMP or another POMP), the reply is
+    `{ ok: false, error: "In use by another conversation: <name>" }` and nothing changes.
+  - A record whose process has ended (or whose process id now names another process) is stale and counts as free.
+  - Leaving the holder's tab switches the engine off but keeps the record; coming back switches it on again without a request.
+  - The record is released when the holder switches it off, when the holder's conversation is no longer in any open tab (tab closed,
+    a new or another conversation in that tab), when omp stops or restarts, and when POMP closes.
+  - The host watches the file and re-reads it every 3 seconds; any change re-sends `computer/state` with the new `ownerElsewhere`.
 
 #### `workspace/agentPlan`
 
@@ -806,14 +828,14 @@ Payload:
 - Answered by `workspace/agentPlanPageResult`:
 
 ```
-{ requestId, ok, error?, revision, editable, editableWhileWorking, page, size, total,
+{ requestId, ok, error?, revision, editable, editableWhileWorking, page, size, total, completedCount,
   phases: [{ index, name, taskCount }],
   rows: [{ phase, task, content, status, blocker? }] }
 ```
 
 - `phase`/`task` index the whole plan.
 - `query` filters task content, blocker and phase name.
-- `total` counts the matches.
+- `total` counts the matches; `completedCount` counts the `completed` tasks of the whole plan.
 - `page` is clamped.
 
 #### `workspace/agentPlanEdit`
@@ -822,8 +844,8 @@ Payload:
 
 ```
 { requestId, sessionId, revision,
-  op: "addTask"|"updateTask"|"deleteTask"|"addPhase"|"renamePhase"|"deletePhase",
-  phase?, task?, name?, content?, status?, blocker? }
+  op: "addTask"|"updateTask"|"deleteTask"|"addPhase"|"renamePhase"|"deletePhase"|"clearCompleted"|"moveTask"|"startTask",
+  phase?, task?, toPhase?, toTask?, name?, content?, status?, blocker? }
 ```
 
 - Refused unless `revision` is the plan omp holds now.
@@ -867,7 +889,7 @@ Payload:
 - The page asks `workspace/agentPlanPage` again whenever the revision changes.
 - Each row is edited or deleted with `workspace/agentPlanEdit`, under the same guards as above, except while the agent works:
   - `editable` says the guards above pass; `editableWhileWorking` says only the conversation and the connection are right.
-  - While a turn, a tool, an approval/question or background work is active, or queued messages are about to run, an edit is taken only when it leaves the task in progress alone: changing or deleting a task that is not in progress, adding a task, adding or renaming a phase. No edit may set `in_progress`. A phase holding the task in progress is not deleted.
+  - While a turn, a tool, an approval/question or background work is active, or queued messages are about to run, an edit is taken only when it leaves the task in progress alone: changing, deleting or moving a task that is not in progress, adding a task, adding or renaming a phase, clearing the completed tasks. No edit may set `in_progress` (so `startTask` is refused). A phase holding the task in progress is not deleted.
   - The reason: the model names its tasks by their text in its todo calls; the task it works on must stay as it knows it.
   - The host reads the plan once more just before `set_todos` and refuses the edit when the model changed it meanwhile.
   - The page asks for the page again when the work starts or ends, so both flags are current.
@@ -877,6 +899,10 @@ Payload:
 - Text limits still apply: names ≤ 200, content ≤ 600, blocker ≤ 300 characters.
 - Only a plan whose `set_todos` frame would exceed about 1 MiB is refused.
 - Deleting the last task of a phase removes the phase.
+- `clearCompleted` (no `phase`/`task`) removes every `completed` task of the whole plan, and each phase it leaves empty; it is refused when there is none. The page result's `completedCount` counts them over the whole plan (not only the query's matches), so the UI disables the button at 0.
+- `moveTask` takes the task at `phase`/`task` out and inserts it at index `toTask` of phase `toPhase` (`toTask` counts the destination's tasks once the task has left; `toTask` equal to that count appends). The same place is refused as "Nothing to change". A phase the move leaves empty is removed. The note tells the model the new place and that the plan's order is the order to work in.
+- Order matters to omp, not to POMP: omp's `todo` tool starts the earliest `pending` task in plan order whenever a mutation leaves no task `in_progress`, keeps only the earliest of several `in_progress` tasks, and never starts a `blocked` one (omp 18.12.1 `src/tools/todo.ts`; `set_todos` itself stores the plan as given). Moving a pending task ahead therefore changes what the agent does next.
+- `startTask` makes the task at `phase`/`task` the task in progress, like the todo tool's `start`: every other `in_progress` task goes back to `pending`, and the task's blocker is dropped. A `completed` task is refused. It is idle-only. The Work tab's per-row run button sends it and, once it is saved, sends an ordinary `chat/send` that asks for that task (the same idle-only rule as the Continue button, which is disabled while the agent works).
 - An empty plan takes edits without a revision.
 
 **Persistence**
@@ -1820,6 +1846,9 @@ catalog/command: { requestId, action: "refresh"|"install", id?, scope?: "project
 - `source` is absent from an older host.
 - The page merges the list with its own commands into the palette: the `/` button and typed `/` completion.
 - The page sends any other `/name` text as a normal `chat/send`; omp runs extension, skill and prompt commands itself.
+- omp (18.12.1) lists only the builtins that run without its terminal UI, and runs those from prompt text: their answer is a
+  `command_output` frame, which the host shows as a `chat/notice` (`format: "pre"`). A terminal-only builtin, such as `/new`, `/resume`,
+  `/login` or `/extensions`, is not listed and would reach the model as plain text, which is why the page handles those jobs itself.
 
 ### Palette
 
@@ -2135,7 +2164,14 @@ Word completion has no messages of its own: the page completes words locally whi
 **`compact`**
 
 - Custom instructions are at most 2000 characters.
-- `session/info` shows the new context usage.
+- omp sends no event for a compaction it was asked for, so the host tells the chat itself with `chat/notice`:
+  - `info` "Compacting context" when it sends omp `compact`;
+  - `info` "Context compacted: N → M tokens" when it is done (N is omp's `tokensBefore`, M the new `contextUsage.tokens`;
+    without both only "Context compacted.");
+  - `warning` "The context could not be compacted: reason" when it is refused or fails, e.g. while a reply runs, or omp's
+    "Nothing to compact (session too small)".
+- The `session/historyState` reply still carries `error`, but the page does not show it again.
+- `session/info` shows the new context usage. The `/context` breakdown measured before is dropped and measured again.
 
 ```
 session/historyState: { requestId?, error?, root,
@@ -2556,6 +2592,8 @@ The page's own chords come from `host/hello.shortcuts`, set in Tools > Options >
 - They are applied to the IDE key bindings.
 - Inside the page the same chord arrives as `host/hello.shortcuts.toggleFocus`; the page then sends `ui/toggleFocus`.
 - Reason: WebView2 keeps keystrokes from reaching VS.
+- Visual Studio's own keys (F5, Ctrl+F5, Ctrl+Shift+B) reach VS through `ui/vsKey`.
+- When a build or run started while the chat had the focus ends, the VS host puts the focus back into the page's field that had it (Visual Studio activates the code editor on leaving debugging). It does not when the user moved the focus meanwhile (see docs/architecture.md).
 
 **Editor commands**
 

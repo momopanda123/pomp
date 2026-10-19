@@ -23,8 +23,8 @@ const scopeList = (value: unknown): Array<'project' | 'user'> => stringList(valu
 const emptyRules = (): RulesStatePayload => ({ rules: [], diagnostics: [] });
 const emptyWorkflows = (): WorkflowsStatePayload => ({ workflows: [], diagnostics: [] });
 const emptyHooks = (): HooksStatePayload => ({ hooks: [], diagnostics: [], policy: 'none' });
-/** The host domains a sub-view lists besides the ones the Tools tab always keeps fresh: a Tools view id, or `hooks` (the hook definitions of Agents › Rules). */
-const viewDomains = (view: string): ToolsDomain[] => view === 'conversation' ? ['tools', 'skills'] : view === 'skills' ? ['skills'] : view === 'mcp' ? ['mcp', 'catalog', 'tools'] : view === 'rules' ? ['rules'] : view === 'workflows' ? ['workflows'] : view === 'hooks' ? ['hooks'] : [];
+/** The host domains a sub-view lists besides the ones the Tools tab always keeps fresh: a Tools view id, or `hooks` (the hook definitions of Agents › Rules). Permissions offers the conversation's tools in its rule form. */
+const viewDomains = (view: string): ToolsDomain[] => view === 'conversation' ? ['tools', 'skills'] : view === 'permissions' ? ['tools'] : view === 'skills' ? ['skills'] : view === 'mcp' ? ['mcp', 'catalog', 'tools'] : view === 'rules' ? ['rules'] : view === 'workflows' ? ['workflows'] : view === 'hooks' ? ['hooks'] : [];
 /** Every domain this hook handles (the default of `domains`). */
 export const allToolsDomains: readonly ToolsDomain[] = ['tools', 'skills', 'mcp', 'catalog', 'rules', 'workflows', 'hooks'];
 /**

@@ -134,6 +134,17 @@ export function solutionText(state: VsState, previous: SolutionDetails | undefin
 	return `Visual Studio solution changed: now ${state.solutionPath}${root}${was}. Earlier paths and query_solution results may be stale.`;
 }
 
+/** What a typed /rules shows: the scoped rules that apply to the active document now, and the diagnostics of the rule files. */
+export function rulesText(state: VsState | undefined, cwd: string): string {
+	const selected = loadRules(state?.solutionRoot ?? cwd, state?.activeDocument ?? null);
+	const lines = selected.rules.map(rule => {
+		const name = path.basename(rule.file, ".mdc");
+		return `- ${name} (${rule.always ? pick("항상", "always") : rule.globs.join(", ")})`;
+	});
+	const head = lines.length > 0 ? pick(`지금 적용되는 규칙 ${lines.length}개:`, `Rules that apply now (${lines.length}):`) : pick("지금 적용되는 규칙이 없어요.", "No rules apply now.");
+	return [head, ...lines, ...selected.diagnostics.map(diagnostic => `! ${diagnostic}`)].join("\n");
+}
+
 export default function pompContext(pi: ExtensionAPI): void {
 	if (!isPompHost()) return;
 
@@ -207,10 +218,12 @@ export default function pompContext(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => publishRules(ctx));
 	pi.on("session_switch", (_event, ctx) => publishRules(ctx));
 	pi.registerCommand("pomp-rules", {
-		description: "Read applicable scoped rules for the POMP host",
+		description: "Show the scoped rules that apply now (the POMP host also reads them with --request)",
 		handler: async (args, ctx) => {
 			const request = /^\s*--request\s+([a-f0-9]{32})\s*$/.exec(args);
 			publishRules(ctx, request?.[1] ?? "");
+			// The host's own read (--request) is answered by the result above only; a typed /rules is the user asking to see them.
+			if (!request) ctx.ui.notify(rulesText(readVsState(), ctx.cwd), "info");
 		},
 	});
 

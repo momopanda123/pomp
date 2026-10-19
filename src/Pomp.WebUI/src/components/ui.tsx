@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type KeyboardEventHandler, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEventHandler, type KeyboardEvent, type KeyboardEventHandler, type ReactNode } from 'react';
 import { useT } from '../i18n';
 import { Icon, type IconName } from './Icon';
 import '../styles/ui.css';
@@ -47,10 +47,12 @@ export function DataTable({ columns, head, children, empty = false, emptyRows = 
     {empty && <div className="ui-empty-rows" aria-hidden="true" style={{ '--ui-empty-rows': emptyRows } as CSSProperties} />}
   </div>;
 }
-export function Row({ children, selected = false, testId, className = '', onDoubleClick }: {
+/** `onDragOver`/`onDrop`: the row is a drop target (a list reordered by dragging). */
+export function Row({ children, selected = false, testId, className = '', onDoubleClick, onDragOver, onDrop }: {
   children: ReactNode; selected?: boolean; testId?: string; className?: string; onDoubleClick?: () => void;
+  onDragOver?: DragEventHandler<HTMLDivElement>; onDrop?: DragEventHandler<HTMLDivElement>;
 }) {
-  return <div className={`ui-tr${selected ? ' ui-tr-selected' : ''} ${className}`} role="row" data-testid={testId} onDoubleClick={onDoubleClick}>{children}</div>;
+  return <div className={`ui-tr${selected ? ' ui-tr-selected' : ''} ${className}`} role="row" data-testid={testId} onDoubleClick={onDoubleClick} onDragOver={onDragOver} onDrop={onDrop}>{children}</div>;
 }
 export function Cell({ children, className = '', title, wrap = false }: { children?: ReactNode; className?: string; title?: string; wrap?: boolean }) {
   return <span role="cell" className={`ui-cell${wrap ? ' ui-cell-wrap' : ''} ${className}`} title={title}>{children}</span>;

@@ -9,7 +9,7 @@ import { usableKnowledge } from '../knowledge';
 import { useKnowledge } from '../knowledgeState';
 import { promptRejection, type SendFailure, type SendResult } from '../limits';
 import { send, APPROVAL_MODES, DEFAULT_SHORTCUTS, MAIN_TARGET, type AgentsStatePayload, type CommandInfo, type ComposerPrefill, type ApprovalMode, type PageShortcuts, type PermissionModeResult, type BackgroundAgentJob, type BackgroundAgentState, type BasketTokens, type ModelInfo, type SendTarget, type SessionInfoPayload, type WorkspaceFile } from '../protocol';
-import type { EditorFollowState, UiToHost } from '../protocol';
+import type { ComputerReplyPayload, ComputerStatePayload, EditorFollowState, UiToHost } from '../protocol';
 import { matchesShortcut } from '../shortcuts';
 import { useComposerPrediction } from '../useComposerPrediction';
 import { useWordCompletion } from '../useWordCompletion';
@@ -19,6 +19,7 @@ import type { SetupReply, SetupState } from '../setup';
 import type { Action, TranscriptItem } from '../state';
 import { effectiveRoles, isRunnableTeam, targetKey, targetPayload } from '../teamsCache';
 import { useWorkState } from '../work/store';
+import { ComputerToggle } from './ComputerToggle';
 import { ConfirmPopover } from './ConfirmPopover';
 import { markMenuHandled, useContextMenu, type ContextMenuItem } from './ContextMenu';
 import { PickerPopover } from './ModelPickers';
@@ -92,6 +93,10 @@ interface ComposerProps {
   /** The latest permission/modeResult. */
   permissionModeReply?: PermissionModeResult | null;
   editorFollow?: EditorFollowState | null;
+  /** Computer use of this conversation (computer/state, computer/reply); `computerRequest` = the /computer command asked to switch it (each revision once). */
+  computer?: ComputerStatePayload | null;
+  computerReply?: ComputerReplyPayload | null;
+  computerRequest?: { revision: number };
   selectedTarget?: SendTarget;
   onSelectTarget: (target?: SendTarget) => void;
   /** The active partner tab's name (undefined = Default (POMP)): where a message without a one-message target goes. */
@@ -175,7 +180,7 @@ function LiveEditorControls({ state, disabled, shortcuts, inputRef, t }: { state
   </span>;
 }
 
-export function Composer({ locale, workspaceKey, sessionId, model, session, setup, setupReplies, onManageAccounts, inputRef, connected, composerPredictions = false, wordCompletion = false, transcript, busy, queueBlocked = false, insertSkill, insertText, basketRequest = 0, basketTokens, requestPending, newSessionPending, includeEditorContext, onIncludeEditorContextChange, draft, dispatch, onSend, onStop, commands, commandsHidden, onCommand, onGoal, onSteer, skillsOff, prefill, agents, shortcuts = DEFAULT_SHORTCUTS, approvalMode, permissionModeReply, editorFollow, selectedTarget, onSelectTarget, partnerName, partner, onOpenPartner }: ComposerProps) {
+export function Composer({ locale, workspaceKey, sessionId, model, session, setup, setupReplies, onManageAccounts, inputRef, connected, composerPredictions = false, wordCompletion = false, transcript, busy, queueBlocked = false, insertSkill, insertText, basketRequest = 0, basketTokens, requestPending, newSessionPending, includeEditorContext, onIncludeEditorContextChange, draft, dispatch, onSend, onStop, commands, commandsHidden, onCommand, onGoal, onSteer, skillsOff, prefill, agents, shortcuts = DEFAULT_SHORTCUTS, approvalMode, permissionModeReply, editorFollow, computer, computerReply, computerRequest, selectedTarget, onSelectTarget, partnerName, partner, onOpenPartner }: ComposerProps) {
   const t = useT();
   const focusInput = useCallback(() => inputRef.current?.focus(), [inputRef]);
   const [failure, setFailure] = useState<SendFailure | null>(null);
@@ -901,6 +906,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
             </div>
           </div>
           <LiveEditorControls state={editorFollow} disabled={requestPending || newSessionPending || draft.composing} shortcuts={shortcuts} inputRef={inputRef} t={t} />
+          <ComputerToggle computer={computer} reply={computerReply} request={computerRequest} connected={connected} busy={busy} blocked={requestPending || newSessionPending} inputRef={inputRef} />
           <button type="button" className="icon-btn" data-testid="editor-context" aria-pressed={includeEditorContext} title={t('composer.includeContext')} aria-label={t('composer.includeContext')} onClick={() => onIncludeEditorContextChange(!includeEditorContext)}><Icon name="context" size={14} /></button>
         </span>
         <ContextMeter session={session} basketTokens={basketTokens} workspaceKey={workspaceKey} sessionId={sessionId} includeEditorContext={includeEditorContext} attachmentPaths={attachmentPaths} connected={connected} />

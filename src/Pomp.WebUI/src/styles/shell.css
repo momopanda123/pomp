@@ -9,7 +9,12 @@
 .tab-actions { display: flex; flex: none; gap: 0; margin-left: auto; }
 .tab-actions .icon-btn { width: var(--pomp-bar-height); height: var(--pomp-bar-height); }
 .tab-badge { display: inline-flex; justify-content: center; min-width: 13px; padding: 0 3px; border-radius: var(--pomp-radius-sm); background: var(--pomp-active-bg); color: var(--pomp-fg); font-size: 10px; font-variant-numeric: tabular-nums; }
-.tab-attention { width: 5px; height: 5px; border-radius: 50%; background: var(--pomp-warning); flex: none; }
+/* The red mark of what is new on a tab sits on its icon's corner: it takes no room, so the tab row never shifts or wraps. It ends where
+   the label starts and a longer count grows over the icon. The ring in the bar's color keeps it apart from the icon. */
+.tab-icon { position: relative; display: inline-flex; flex: none; }
+.tab-count, .tab-dot { position: absolute; border: 1px solid var(--pomp-panel-bg); background: var(--pomp-badge-bg); pointer-events: none; }
+.tab-count { top: -7px; right: -4px; min-width: 13px; height: 13px; padding: 0 3px; border-radius: 7px; color: var(--pomp-badge-fg); font-size: 9px; font-weight: 700; line-height: 11px; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tab-dot { top: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; }
 .shell-menu, .session-quick-menu { position: absolute; z-index: 35; display: flex; flex-direction: column; max-width: calc(100vw - 12px); padding: 3px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: var(--pomp-panel-bg); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4); }
 .shell-menu { top: 100%; right: 4px; }
 .shell-menu button, .session-quick-menu button { min-width: 0; padding: 5px 8px; border: 0; border-radius: var(--pomp-radius-sm); background: transparent; color: var(--pomp-fg); text-align: left; overflow-wrap: anywhere; cursor: pointer; }
@@ -65,12 +70,12 @@
 .context-row > .context-meter { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
 .context-row .meter-value { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .context-tools { display: flex; flex: none; align-items: center; gap: 2px; }
-/* Mention, slash, attach, bookmark, Live and editor-context are one size: the same square, 14 px icons, never shrunk by the row. */
+/* Mention, slash, attach, bookmark, Live, screen & input control and editor-context are one size: the same square, 14 px icons, never shrunk by the row. */
 .context-tools .icon-btn { flex: none; width: 20px; height: 20px; }
-/* Live · bookmark toggles sit after the basket, before the editor-context toggle, and share its pressed style. */
+/* Live · bookmark toggles and the screen & input control button sit after the basket, before the editor-context toggle, and share its pressed style. */
 .live-editor-controls { position: relative; display: flex; flex: none; align-items: center; gap: 2px; }
-.live-editor-toggle:hover:not(:disabled) { background: var(--pomp-hover-bg); }
-.live-editor-controls button:disabled { opacity: .45; }
+.live-editor-toggle:hover:not(:disabled), .computer-toggle:hover:not(:disabled) { background: var(--pomp-hover-bg); }
+.live-editor-controls button:disabled, .computer-toggle:disabled { opacity: .45; }
 /* Controls the user hid from the composer's background menu (right-click; data-hide on .composer). Only the visible control goes:
    shortcuts, slash commands and the popups anchored next to it keep working. */
 .composer[data-hide~='mention'] [data-testid='mention'],
@@ -78,6 +83,7 @@
 .composer[data-hide~='attach'] [data-testid='attach'],
 .composer[data-hide~='basket'] [data-testid='context-chip'],
 .composer[data-hide~='live'] [data-testid='live-follow'],
+.composer[data-hide~='computer'] [data-testid='computer-toggle'],
 .composer[data-hide~='bookmarks'] [data-testid='live-bookmarks'],
 .composer[data-hide~='editorContext'] [data-testid='editor-context'],
 .composer[data-hide~='contextMeter'] .context-row > .context-meter,

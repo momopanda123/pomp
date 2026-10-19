@@ -58,6 +58,9 @@ namespace Pomp.Hosting
             /// <summary>Tasks that are not completed or abandoned.</summary>
             public readonly int OpenCount;
 
+            /// <summary>Tasks that are completed: what the plan editor's Clear completed removes.</summary>
+            public readonly int CompletedCount;
+
             /// <summary>Whether the strict editor reader (no count caps) takes the plan exactly as it is; read on first use.</summary>
             public readonly Lazy<bool> Editable;
 
@@ -86,6 +89,7 @@ namespace Pomp.Hosting
                         });
                         shown.TaskCount++;
                         if (status != "completed" && status != "abandoned") OpenCount++;
+                        if (status == "completed") CompletedCount++;
                     }
                 }
             }
@@ -135,7 +139,7 @@ namespace Pomp.Hosting
                 ["editable"] = plan.Editable.Value && PlanEditBlock(session, null, out _) == null,
                 // While the agent works: the tasks not in progress (PlanEdit.SafeWhileWorking).
                 ["editableWhileWorking"] = plan.Editable.Value && PlanEditBlock(session, null, out _, whileWorking: true) == null,
-                ["page"] = page, ["size"] = size, ["total"] = rows.Count,
+                ["page"] = page, ["size"] = size, ["total"] = rows.Count, ["completedCount"] = plan.CompletedCount,
                 ["phases"] = new JArray(plan.Phases.Select(phase => new JObject { ["index"] = phase.Index, ["name"] = phase.Name, ["taskCount"] = phase.TaskCount })),
                 ["rows"] = new JArray(rows.Skip(page * size).Take(size).Select(row =>
                 {
@@ -156,6 +160,9 @@ namespace Pomp.Hosting
         {
             public string Op = "";
             public int PhaseIndex, TaskIndex;
+
+            /// <summary>moveTask: the phase the task goes to and its index there once it has left its old place.</summary>
+            public int ToPhase, ToTask;
             public string? Name, Content, Status, Blocker;
 
             /// <summary>A blocker was sent: <see cref="Blocker"/> is its new text, or null when the empty text removed it.</summary>
@@ -166,12 +173,13 @@ namespace Pomp.Hosting
                 var edit = new PlanEdit { Op = args.GetString("op") ?? "" };
                 switch (edit.Op)
                 {
-                    case "addTask": case "updateTask": case "deleteTask": case "addPhase": case "renamePhase": case "deletePhase": break;
+                    case "addTask": case "updateTask": case "deleteTask": case "addPhase": case "renamePhase": case "deletePhase": case "clearCompleted": case "moveTask": case "startTask": break;
                     default: throw new ArgumentException(PompLanguage.Pick("알 수 없는 계획 편집이에요.", "Unknown plan edit."));
                 }
 
-                if (edit.Op != "addPhase") edit.PhaseIndex = ReadIndex(args, "phase");
-                if (edit.Op == "updateTask" || edit.Op == "deleteTask") edit.TaskIndex = ReadIndex(args, "task");
+                if (edit.Op != "addPhase" && edit.Op != "clearCompleted") edit.PhaseIndex = ReadIndex(args, "phase");
+                if (edit.Op == "updateTask" || edit.Op == "deleteTask" || edit.Op == "moveTask" || edit.Op == "startTask") edit.TaskIndex = ReadIndex(args, "task");
+                if (edit.Op == "moveTask") { edit.ToPhase = ReadIndex(args, "toPhase"); edit.ToTask = ReadIndex(args, "toTask"); }
                 if (edit.Op == "addPhase" || edit.Op == "renamePhase") edit.Name = ReadText(args, "name", MaxPlanNameChars, present: true, blankOk: false);
                 if (edit.Op == "addTask" || edit.Op == "addPhase" || edit.Op == "updateTask")
                 {
@@ -193,12 +201,24 @@ namespace Pomp.Hosting
                 return edit;
             }
 
-            /// <summary>Applies the change to <paramref name="phases"/>, the plan as the engine holds it; deleting the last task of a phase removes the phase.</summary>
+            /// <summary>
+            /// Applies the change to <paramref name="phases"/>, the plan as the engine holds it; deleting the last task of a phase removes
+            /// the phase, also when the completed tasks are cleared or its last task is moved to another phase.
+            /// </summary>
             public void Apply(List<AgentPlanPhasePayload> phases)
             {
                 if (Op == "addPhase")
                 {
                     phases.Add(new AgentPlanPhasePayload { Name = Name!, Tasks = { NewTask() } });
+                    return;
+                }
+
+                if (Op == "clearCompleted")
+                {
+                    var cleared = phases.Where(each => each.Tasks.Any(IsCompleted)).ToList();
+                    if (cleared.Count == 0) throw new ArgumentException(PompLanguage.Pick("완료된 작업이 없어요.", "There are no completed tasks."));
+                    foreach (var each in cleared) each.Tasks.RemoveAll(IsCompleted);
+                    phases.RemoveAll(each => each.Tasks.Count == 0 && cleared.Contains(each));
                     return;
                 }
 
@@ -211,6 +231,30 @@ namespace Pomp.Hosting
                     case "addTask": phase.Tasks.Add(NewTask()); break;
                     default:
                         if (TaskIndex >= phase.Tasks.Count) throw Missing();
+                        if (Op == "moveTask")
+                        {
+                            if (ToPhase >= phases.Count) throw Missing();
+                            var target = phases[ToPhase];
+                            if (ReferenceEquals(target, phase) && ToTask == TaskIndex) throw new ArgumentException(PompLanguage.Pick("바꿀 내용이 없어요.", "Nothing to change."));
+                            var moved = phase.Tasks[TaskIndex];
+                            phase.Tasks.RemoveAt(TaskIndex);
+                            if (ToTask > target.Tasks.Count) throw Missing();
+                            target.Tasks.Insert(ToTask, moved);
+                            if (phase.Tasks.Count == 0) phases.Remove(phase);
+                            break;
+                        }
+
+                        if (Op == "startTask")
+                        {
+                            // Like the todo tool's start: the one task in progress, any other goes back to pending; a blocker no longer holds.
+                            var started = phase.Tasks[TaskIndex];
+                            if (IsCompleted(started)) throw new ArgumentException(PompLanguage.Pick("이미 완료된 작업이에요.", "That task is already completed."));
+                            foreach (var other in phases.SelectMany(each => each.Tasks))
+                                if (other.Status == "in_progress" && !ReferenceEquals(other, started)) other.Status = "pending";
+                            started.Status = "in_progress"; started.Blocker = null;
+                            break;
+                        }
+
                         if (Op == "deleteTask")
                         {
                             phase.Tasks.RemoveAt(TaskIndex);
@@ -229,12 +273,14 @@ namespace Pomp.Hosting
             /// <summary>
             /// Whether the change may be made while the agent works: it leaves every task in progress (and the phase holding one) as
             /// it is and makes no task in progress. The model names its tasks by their text, so the one it works on must not change
-            /// under it; a pending task it has not reached yet may.
+            /// under it; a pending task it has not reached yet may, also its place (the todo tool starts the earliest pending task when
+            /// the one in progress is done, so a moved task changes only what comes next).
             /// </summary>
             public bool SafeWhileWorking(List<AgentPlanPhasePayload> phases)
             {
-                if (Status == "in_progress") return false;
-                if (Op == "addPhase" || Op == "addTask" || Op == "renamePhase") return true;
+                if (Status == "in_progress" || Op == "startTask") return false;
+                // Clearing takes only completed tasks: the task in progress and its phase stay.
+                if (Op == "addPhase" || Op == "addTask" || Op == "renamePhase" || Op == "clearCompleted") return true;
                 if (PhaseIndex >= phases.Count) return true; // Apply reports the missing phase.
                 var phase = phases[PhaseIndex];
                 if (Op == "deletePhase") return !phase.Tasks.Any(task => task.Status == "in_progress");
@@ -248,11 +294,22 @@ namespace Pomp.Hosting
                 var task = phase != null && TaskIndex < phase.Tasks.Count ? phase.Tasks[TaskIndex] : null;
                 switch (Op)
                 {
+                    case "clearCompleted":
+                        var done = phases.SelectMany(each => each.Tasks).Where(IsCompleted).Select(each => $"\"{each.Content}\"").ToList();
+                        var emptied = phases.Where(each => each.Tasks.Count > 0 && each.Tasks.All(IsCompleted)).Select(each => $"\"{each.Name}\"").ToList();
+                        return $"removed the {done.Count} completed task(s) {string.Join(", ", done)}" + (emptied.Count == 0 ? "" : $" and with them the phase(s) left empty {string.Join(", ", emptied)}");
                     case "addPhase": return $"added the phase \"{Name}\" with the task \"{Content}\" ({Status ?? "pending"})";
                     case "addTask": return $"added the task \"{Content}\" ({Status ?? "pending"}) to the phase \"{phase?.Name}\"";
                     case "renamePhase": return $"renamed the phase \"{phase?.Name}\" to \"{Name}\"";
                     case "deletePhase": return $"deleted the phase \"{phase?.Name}\" with its tasks";
                     case "deleteTask": return $"deleted the task \"{task?.Content}\"";
+                    case "startTask": return $"started the task \"{task?.Content}\": it is now in progress" + (task?.Status == "blocked" ? " and no longer blocked" : "") + "; any other task in progress went back to pending";
+                    case "moveTask":
+                        var into = ToPhase < phases.Count ? phases[ToPhase] : null;
+                        var others = into?.Tasks.Where(each => !ReferenceEquals(each, task)).ToList() ?? new List<AgentPlanTaskPayload>();
+                        var where = ToTask < others.Count ? $"before the task \"{others[ToTask].Content}\" in the phase \"{into?.Name}\"" : $"to the end of the phase \"{into?.Name}\"";
+                        var left = phase != null && phase.Tasks.Count == 1 && !ReferenceEquals(phase, into) ? $" (its phase \"{phase.Name}\" was left empty and removed)" : "";
+                        return $"moved the task \"{task?.Content}\" {where}{left}; the plan's order is the order to work in";
                     default:
                         var parts = new List<string>();
                         if (Content != null && Content != task?.Content) parts.Add($"its text to \"{Content}\"");
@@ -263,6 +320,8 @@ namespace Pomp.Hosting
             }
 
             private AgentPlanTaskPayload NewTask() => new AgentPlanTaskPayload { Content = Content!, Status = Status ?? "pending", Blocker = Blocker };
+
+            private static bool IsCompleted(AgentPlanTaskPayload task) => task.Status == "completed";
 
             private static ArgumentException Missing() => new ArgumentException(PompLanguage.Pick("계획에 없는 단계나 작업이에요.", "That phase or task is not in the plan."));
 

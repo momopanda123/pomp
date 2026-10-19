@@ -389,6 +389,7 @@ namespace Pomp.Hosting
             _taskApprovalDetails.Clear();
             _providerSetup.Dispose();
             CancelEpoch();
+            DisposeComputerOwner();
             _composerAuto?.Dispose();
             _workspaceReview?.Dispose();
             _isolationResults?.Dispose();
@@ -537,7 +538,7 @@ namespace Pomp.Hosting
             string? pluginDirectory = null;
             try { pluginDirectory = new AgentRoster(root, _options.UserHome, _options.UserTeamsDirectory).SyncEngineAgents(); }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { _logger.Warn("Could not prepare the project roles for the engine: " + ex.Message); }
-            WriteOverlay(overlayPath, root, hostTools, blockNetwork ? OmpNetworkTools.Names : null, computer, _settings.ApprovalMode == OmpApprovalMode.Yolo, worktreeBase);
+            WriteOverlay(overlayPath, root, hostTools, blockNetwork ? OmpNetworkTools.Names : null, computer, _settings.ApprovalMode == OmpApprovalMode.Yolo, _settings.UseRpcUiMode, worktreeBase);
             // omp loads the .env of the folder it is started in (before --cwd moves it into the workspace): start it in POMP's own
             // folder so a repository's .env can never set provider endpoints, proxies or keys for the engine.
             var launchDirectory = Path.Combine(dataDirectory, "workspace");

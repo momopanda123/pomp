@@ -210,7 +210,11 @@ namespace Pomp.Adapters
     /// <summary>Solution/project builds.</summary>
     public interface IBuildAdapter
     {
-        /// <summary>Starts a build and completes when it finishes (without blocking the UI thread).</summary>
+        /// <summary>
+        /// Waits for a build that is already running, starts the build and completes when it is over, without blocking the UI
+        /// thread. Cancellation cancels only a build this call started; the <see cref="OperationCanceledException"/> message
+        /// then tells the model what happened to it.
+        /// </summary>
         Task<BuildResult> BuildAsync(BuildRequest request, CancellationToken cancellationToken);
     }
 

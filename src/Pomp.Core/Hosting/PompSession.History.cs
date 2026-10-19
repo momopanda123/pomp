@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -184,12 +185,17 @@ namespace Pomp.Hosting
                 if (action == "rename" || action == "compact")
                 {
                     var command = action == "rename" ? new JObject { ["type"] = "set_session_name", ["name"] = name } : OmpCommands.Compact(instructions);
+                    // omp sends no event for a compaction it was asked for (only automatic ones have auto_compaction_*): the chat hears it from here.
+                    if (action == "compact") PostNotice("info", PompLanguage.Pick("컨텍스트 압축 중", "Compacting context"));
                     var response = await connection!.SendCommandAsync(command, action == "compact" ? TimeSpan.FromMinutes(5) : TimeSpan.FromSeconds(15), token.Token).ConfigureAwait(false);
                     if (!response.Success) throw new InvalidOperationException(response.Error ?? PompLanguage.Pick("현재 세션을 업데이트하지 못했어요.", "Could not update the current session."));
                     var current = await connection.SendCommandAsync(OmpCommands.GetState(), TimeSpan.FromSeconds(10), token.Token).ConfigureAwait(false);
                     if (!current.Success || current.Data is not JObject currentState) throw new InvalidOperationException(PompLanguage.Pick("현재 세션 상태를 새로고침하지 못했어요.", "Could not refresh the current session state."));
                     token.Token.ThrowIfCancellationRequested();
+                    // The breakdown measured before the compaction is stale: ApplyState measures the conversation again.
+                    if (action == "compact") ForgetContextBreakdown();
                     ApplyState(currentState, currentLocked: () => ReferenceEquals(connection, _epochConnection));
+                    if (action == "compact") PostNotice("info", CompactedNotice((response.Data as JObject)?.GetLong("tokensBefore"), currentState.GetObject("contextUsage")?.GetLong("tokens")));
                 }
                 if (action == "switch" || action == "messages")
                 {
@@ -216,11 +222,20 @@ namespace Pomp.Hosting
             {
                 if (action == "delete") answer["error"] = ex is SessionDeletionException ? ex.Message : PompLanguage.Pick("대화를 삭제하지 못했어요.", "Could not delete the conversation.");
                 else answer["error"] = (_sessionSwitchUncertain ? PompLanguage.Pick("세션 전환 결과가 확실하지 않아요. ", "Session switch outcome is uncertain. ") : "") + (switched ? PompLanguage.Pick("세션은 바뀌었지만 기록을 불러오지 못했어요: ", "Session changed, but history could not be loaded: ") : "") + ex.Message;
+                // The page shows no session-list error for /compact: the chat says what happened, like the start and the end.
+                if (action == "compact") PostNotice("warning", PompLanguage.Pick("컨텍스트를 압축하지 못했어요: ", "The context could not be compacted: ") + ex.Message);
                 if (action == "switch" && !switched) _ui.Post(UiMessageTypes.SessionNewResult, new SessionNewResultPayload { RequestId = requestId, Status = "failed", Message = ex.Message });
             }
             // File enumeration/parsing (and reference writes) must not hold the chat/Stop command queue hostage.
             PublishRecentSessionsAsync(store, answer, action == "preview" ? args.GetString("id") ?? "" : null).Forget(_logger, "session history listing");
         }
+
+        /// <summary>The chat notice after a /compact: the context before and after when the engine reported both.</summary>
+        private static string CompactedNotice(long? before, long? after) =>
+            before is long from && after is long to && from > 0 && to >= 0
+                ? PompLanguage.Pick("컨텍스트를 압축했어요: " + from.ToString("N0", CultureInfo.InvariantCulture) + " → " + to.ToString("N0", CultureInfo.InvariantCulture) + " 토큰",
+                    "Context compacted: " + from.ToString("N0", CultureInfo.InvariantCulture) + " → " + to.ToString("N0", CultureInfo.InvariantCulture) + " tokens")
+                : PompLanguage.Pick("컨텍스트를 압축했어요.", "Context compacted.");
 
         private async Task PublishRecentSessionsAsync(RecentSessionStore? store, JObject answer, string? previewId)
         {

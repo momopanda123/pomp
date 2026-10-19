@@ -28,7 +28,8 @@ export function useSessionHistory(workspaceKey: string, sessionId: string | unde
       if (!id || !requests.current.has(id)) return;
       const action = requests.current.get(id)!.action;
       window.clearTimeout(requests.current.get(id)!.timer); requests.current.delete(id);
-      setPending(requests.current.size > 0); setPendingId(undefined); setError(payload.error ?? '');
+      // A /compact failure is a chat notice of the host (like its start and end), not a session-list error.
+      setPending(requests.current.size > 0); setPendingId(undefined); setError(action === 'compact' ? '' : payload.error ?? '');
       if (!payload.error) setState(previous => ({ ...previous, ...payload,
         root: payload.root || previous.root,
         entries: ['preview', 'messages', 'compact'].includes(action) ? previous.entries : payload.entries,

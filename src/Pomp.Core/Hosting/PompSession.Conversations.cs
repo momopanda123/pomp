@@ -53,7 +53,12 @@ namespace Pomp.Hosting
             state.Tabs = tabs.Conversations.Where(e => e.Open).Select(e => new ConversationTabPayload { SessionId = e.SessionId, Partner = CopyPartner(e.Partner), Title = Title(e.Partner) }).ToList();
             return state;
         }
-        private void PublishTabs() => _ui.Post(UiMessageTypes.ConversationTabsState, TabsView(), UiDelivery.State);
+        private void PublishTabs()
+        {
+            _ui.Post(UiMessageTypes.ConversationTabsState, TabsView(), UiDelivery.State);
+            // A closed tab (or a new conversation in it) no longer holds computer use.
+            ReleaseClosedComputerOwner();
+        }
         /// <summary>
         /// conversation/tab (docs/ui-protocol.md "Conversation tabs"): every tab is its own conversation, so opening, activating and closing the
         /// current tab switch the engine's conversation and answer with one <c>session/newResult</c>; closing another tab answers <c>conversation/tabReply</c>.

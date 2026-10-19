@@ -139,6 +139,12 @@ namespace Pomp.Hosting
             lock (_contextLock) return !string.IsNullOrEmpty(sessionId) && string.Equals(sessionId, _contextBreakdownSession, StringComparison.Ordinal) ? _contextBreakdown : null;
         }
 
+        /// <summary>The conversation was compacted: its breakdown no longer holds, so the next session/info goes without it and ApplyState measures it again.</summary>
+        private void ForgetContextBreakdown()
+        {
+            lock (_contextLock) { _contextBreakdown = null; _contextBreakdownSession = null; }
+        }
+
         /// <summary>
         /// Remembers whether the engine's raw catalog (<paramref name="rows"/>) lists <c>context</c> with <c>source: "builtin"</c>. Only the
         /// builtin is a local command whose output the host can read; a prompt template, skill or extension command named "context" would

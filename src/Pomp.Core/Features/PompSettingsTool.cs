@@ -111,7 +111,7 @@ namespace Pomp.Features
                 {
                     ["accounts"] = "Accounts tab: sign in, API keys, editor model",
                     ["permissions"] = "Tools tab > Permissions: always-allowed entries and the project policy",
-                    ["computerUse"] = "Tools tab > This conversation: the screen-control switch for this conversation",
+                    ["computerUse"] = "Chat composer: the screen & input control button after Live (one conversation on the PC at a time)",
                     ["rulesSkillsHooksWorkflowsMcp"] = "Tools tab",
                     ["agentsAndTeams"] = "Agents tab",
                 },

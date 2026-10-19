@@ -122,7 +122,7 @@ namespace Pomp.VisualStudio.Commands
         /// Line Cut). Several per scope, since the user can remove any one key; the English names are the fallback, which only an
         /// English IDE accepts.
         /// </summary>
-        private static (string Global, string TextEditor) ScopeNames(DTE2 dte)
+        internal static (string Global, string TextEditor) ScopeNames(DTE2 dte)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             return (ScopeOf(dte, new[] { "View.SolutionExplorer", "File.SaveAll", "Edit.Undo" }, "Global"),

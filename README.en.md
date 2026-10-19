@@ -41,23 +41,44 @@ runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+)
 
 <table>
   <tr>
-    <td align="center" valign="top" width="50%"><b>Slash commands, @ mentions, permission mode, send target</b><br>Pick commands and files in the input; choose the permission mode and who receives the message.<br><br><img src="docs/media/howto-slash.gif" width="400" alt="Slash commands, @ mentions, permission mode, send target"></td>
-    <td align="center" valign="top" width="50%"><b>Steer and BTW while it works</b><br>Send a queued message into the running turn with Send now, and ask a side question with /btw without touching the work.<br><br><img src="docs/media/howto-steer.gif" width="400" alt="Steer and BTW while it works"></td>
+    <td align="center" valign="top" width="50%"><b>Slash commands, @ mentions, permission mode, send target</b><br>Pick commands and files in the input; choose the permission mode and who receives the message.</td>
+    <td align="center" valign="top" width="50%"><b>Steer and BTW while it works</b><br>Send a queued message into the running turn with Send now, and ask a side question with /btw without touching the work.</td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="50%"><b>Delegating to an agent</b><br>Open a role agent as a partner tab and hand it work.<br><br><img src="docs/media/howto-partner.gif" width="400" alt="Delegating to an agent"></td>
-    <td align="center" valign="top" width="50%"><b>Advisors</b><br>&nbsp;<br>An advisor watches the main agent and comments on its work.<br><br><img src="docs/media/howto-advisor.gif" width="400" alt="Advisors"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-slash.gif" width="100%" alt="Slash commands, @ mentions, permission mode, send target"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-steer.gif" width="100%" alt="Steer and BTW while it works"></td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="50%"><b>Role pictures and POMP's instructions</b><br>Give each role a picture and edit POMP's own instructions.<br><br><img src="docs/media/howto-roles.gif" width="400" alt="Role pictures and POMP's instructions"></td>
-    <td align="center" valign="top" width="50%"><b>Creating a team</b><br>Group roles into a team.<br><br><img src="docs/media/howto-team.gif" width="400" alt="Creating a team"></td>
+    <td align="center" valign="top" width="50%"><b>Delegating to an agent</b><br>Open a role agent as a partner tab and hand it work.</td>
+    <td align="center" valign="top" width="50%"><b>Advisors</b><br>An advisor watches the main agent and comments on its work.</td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="50%"><b>Automation rules</b><br>Attach a notice, a chat message or a script to events such as a failed build.<br><br><img src="docs/media/howto-automation.gif" width="400" alt="Automation rules"></td>
-    <td align="center" valign="top" width="50%"><b>Tools tab</b><br>&nbsp;<br>Conversation tools, permissions, skills, MCP, rules, workflows and knowledge in one place.<br><br><img src="docs/media/howto-tools.gif" width="400" alt="Tools tab"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-partner.gif" width="100%" alt="Delegating to an agent"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-advisor.gif" width="100%" alt="Advisors"></td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="50%"><b>Accounts, models and thinking level</b><br>Connect accounts, then pick the model and the thinking level under the input.<br><br><img src="docs/media/howto-accounts.gif" width="400" alt="Accounts, models and thinking level"></td>
+    <td align="center" valign="top" width="50%"><b>Role pictures and POMP's instructions</b><br>Give each role a picture and edit POMP's own instructions.</td>
+    <td align="center" valign="top" width="50%"><b>Creating a team</b><br>Group roles into a team.</td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-roles.gif" width="100%" alt="Role pictures and POMP's instructions"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-team.gif" width="100%" alt="Creating a team"></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><b>Automation rules</b><br>Attach a notice, a chat message or a script to events such as a failed build.</td>
+    <td align="center" valign="top" width="50%"><b>Tools tab</b><br>Conversation tools, permissions, skills, MCP, rules, workflows and knowledge in one place.</td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-automation.gif" width="100%" alt="Automation rules"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-tools.gif" width="100%" alt="Tools tab"></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><b>Accounts, models and thinking level</b><br>Connect accounts, then pick the model and the thinking level under the input.</td>
+    <td width="50%"></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-accounts.gif" width="100%" alt="Accounts, models and thinking level"></td>
+    <td width="50%"></td>
   </tr>
 </table>
 <!-- /howto-videos -->

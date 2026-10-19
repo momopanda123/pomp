@@ -48,11 +48,19 @@ namespace Pomp.Features
         public const string StateFileName = "computer-state.json";
 
         /// <summary>
-        /// The approval policy omp gets for its <c>computer</c> helpers: <c>deny</c> when computer use is off, <c>prompt</c> (every call asks)
-        /// when inspection must ask too or when every other tool runs unasked (yolo); null keeps omp's tiers (inspection runs, input asks).
+        /// The approval policy omp gets for its <c>computer</c> helpers (<c>tools.approval.computer</c>). omp asks for a helper call through
+        /// its tool UI, which only <c>--mode rpc-ui</c> connects (<paramref name="toolUi"/>, the option "Show agent questions in chat"); under
+        /// <c>--mode rpc</c> that question can never be answered and the call fails ("requires approval but no interactive UI is available").
+        /// So: <c>deny</c> when computer use is off; with the tool UI, <c>prompt</c> (every call asks) when inspection must ask too, else
+        /// omp's tiers (inspection runs, input asks; yolo runs everything); without it, nothing in yolo (every call runs unasked) and
+        /// <c>allow</c> in the other modes, where the Eval call that drives the screen asks first (Eval is exec).
         /// </summary>
-        public static string? ApprovalPolicy(ComputerUseOptions options, bool yolo) =>
-            options.Policy == ComputerUsePolicy.Off ? "deny" : options.ConfirmReads || yolo ? "prompt" : null;
+        public static string? ApprovalPolicy(ComputerUseOptions options, bool yolo, bool toolUi)
+        {
+            if (options.Policy == ComputerUsePolicy.Off) return "deny";
+            if (toolUi) return options.ConfirmReads ? "prompt" : null;
+            return yolo ? null : "allow";
+        }
 
         /// <summary>
         /// What omp answered to <c>/computer on|off</c> (its <c>command_output</c> text): true = on, false = off, null = not an answer to it.

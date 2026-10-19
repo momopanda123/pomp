@@ -16,6 +16,7 @@ using Microsoft.Web.WebView2.Wpf;
 using Newtonsoft.Json.Linq;
 using Pomp.Diagnostics;
 using Pomp.Ui;
+using Pomp.VisualStudio.Commands;
 using Pomp.VisualStudio.Composition;
 using Pomp.VisualStudio.Interop;
 using Pomp.VisualStudio.Options;
@@ -56,7 +57,8 @@ namespace Pomp.VisualStudio.ToolWindow
         private static readonly TimeSpan FocusProbeTimeout = TimeSpan.FromMilliseconds(500);
 
         // The editor <-> chat focus toggle inside the page is the page's own key handler (host/hello.shortcuts.toggleFocus, the same
-        // chord as the IDE binding), which posts WebViewUiChannel.ToggleFocusMessageType; nothing is injected for it.
+        // chord as the IDE binding), which posts WebViewUiChannel.ToggleFocusMessageType; nothing is injected for it. The Visual Studio
+        // keys the page does not use (F5, Ctrl+Shift+B) come as WebViewUiChannel.VsKeyMessageType and run their bound command (VsGlobalKeys).
 
         // Puts the caret into the chat composer (the page marks it data-pomp-composer; falls back to the first text input).
         // The composer only when it is on screen: on another tab (Tools › Knowledge with the editor's lines) the page keeps its own focus.
@@ -64,12 +66,21 @@ namespace Pomp.VisualStudio.ToolWindow
             "(function(){var el=document.querySelector('[data-pomp-composer]');" +
             "if(el&&el.getClientRects().length){el.focus();}else{window.focus();}})();";
 
+        // Gives the focus back to the page's field the user last put the focus on (focusMemory.ts marks it; with its caret and selection),
+        // else the field that has it now, else the composer.
+        private const string RestoreFocusScript =
+            "(function(){var ok=function(e){return e&&e!==document.body&&e.isConnected&&e.getClientRects().length;};" +
+            "var el=document.querySelector('[data-pomp-last-focus]');if(!ok(el))el=document.activeElement;if(ok(el)){el.focus();return;}" +
+            "el=document.querySelector('[data-pomp-composer]');if(el&&el.getClientRects().length){el.focus();}else{window.focus();}})();";
+
         private readonly PompServices services;
         private readonly JoinableTaskFactory joinableTaskFactory;
         private readonly IPompLogger logger;
         private readonly Grid root = new Grid();
         private readonly WebViewUiChannel channel;
         private readonly OcclusionClip occlusionClip;
+        private readonly VsGlobalKeys vsKeys;
+        private readonly ChatFocusKeeper focusKeeper;
         private ThemeBridge? themeBridge;
         private WebView2? webView;
         private FrameworkElement? fallbackPanel;
@@ -98,6 +109,7 @@ namespace Pomp.VisualStudio.ToolWindow
 
             channel = new WebViewUiChannel(joinableTaskFactory, logger, VirtualHost);
             channel.ToggleFocusRequested += OnToggleFocusRequested;
+            channel.VsKeyRequested += OnVsKeyRequested;
             channel.PasteFilesRequested += OnPasteFilesRequested;
             channel.FilesDropped += OnFilesDropped;
             channel.PageReady += OnPageReady;
@@ -106,6 +118,8 @@ namespace Pomp.VisualStudio.ToolWindow
             channel.LiveFailed += OnLiveFailed;
             channel.ObserveSession = ObserveEditorSession;
             services.Settings.Changed += OnEditorFollowSettingsChanged;
+            vsKeys = new VsGlobalKeys(services.Package, joinableTaskFactory, logger);
+            focusKeeper = new ChatFocusKeeper(services, this);
 
             services.Session.AttachUi(channel);
             Loaded += OnLoaded;
@@ -213,7 +227,12 @@ namespace Pomp.VisualStudio.ToolWindow
         }
 
         /// <summary>Moves keyboard focus into the chat and (when the page is up) into its composer.</summary>
-        public void FocusChat()
+        public void FocusChat() => FocusPage(FocusComposerScript);
+
+        /// <summary>Moves keyboard focus back into the chat, to the page's field that had it (the composer when none had).</summary>
+        internal void RestoreFocus() => FocusPage(RestoreFocusScript);
+
+        private void FocusPage(string script)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -226,7 +245,7 @@ namespace Pomp.VisualStudio.ToolWindow
             if (view != null && view.CoreWebView2 != null && channel.IsReady)
             {
                 view.Focus();
-                view.CoreWebView2.ExecuteScriptAsync(FocusComposerScript).Forget(logger, "Focusing the chat composer");
+                view.CoreWebView2.ExecuteScriptAsync(script).Forget(logger, "Focusing the chat composer");
                 return;
             }
 
@@ -242,6 +261,7 @@ namespace Pomp.VisualStudio.ToolWindow
             CancelReadyWatchdog();
             pageReadyUtc = DateTime.UtcNow;
             PublishEditorFollowAsync().Forget(logger, "Publishing Live editor settings");
+            vsKeys.Prepare();
 
             if (focusWhenReady)
             {
@@ -319,6 +339,7 @@ namespace Pomp.VisualStudio.ToolWindow
             IsVisibleChanged -= OnIsVisibleChanged;
             occlusionClip.Dispose();
             channel.ToggleFocusRequested -= OnToggleFocusRequested;
+            channel.VsKeyRequested -= OnVsKeyRequested;
             channel.PasteFilesRequested -= OnPasteFilesRequested;
             channel.FilesDropped -= OnFilesDropped;
             channel.PageReady -= OnPageReady;
@@ -327,6 +348,7 @@ namespace Pomp.VisualStudio.ToolWindow
             channel.LiveFailed -= OnLiveFailed;
             channel.ObserveSession = null;
             services.Settings.Changed -= OnEditorFollowSettingsChanged;
+            focusKeeper.Dispose();
             CancelReadyWatchdog();
 
             try
@@ -961,8 +983,28 @@ namespace Pomp.VisualStudio.ToolWindow
             }
         }
 
+        private void OnVsKeyRequested(object? sender, string chord)
+        {
+            focusKeeper.NoteChatKey();
+            _ = joinableTaskFactory.RunAsync(async () =>
+            {
+                try
+                {
+                    await vsKeys.RunAsync(chord, services.Package.DisposalToken);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (Exception ex)
+                {
+                    logger.Warn("Running the Visual Studio command of " + chord + " from the chat failed.", ex);
+                }
+            });
+        }
+
         private void OnToggleFocusRequested(object? sender, EventArgs e)
         {
+            focusKeeper.UserLeftChat();
             _ = joinableTaskFactory.RunAsync(async () =>
             {
                 try

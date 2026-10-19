@@ -5,7 +5,7 @@ import { sameRoot } from '../../knowledge';
 import { toolsTranslate } from '../../i18n/toolsStrings';
 import { toolsTabDomains, useToolsState } from '../../toolsState';
 import { normalizeToolsView, toolsViews, type ToolsView } from '../../toolsViews';
-import type { ComputerReplyPayload, ComputerStatePayload, KnowledgeDraft } from '../../protocol';
+import type { KnowledgeDraft } from '../../protocol';
 import { ConversationTools, type ActiveRule } from './ConversationTools';
 import { KnowledgeView } from './KnowledgeView';
 import { McpView } from './McpView';
@@ -21,8 +21,6 @@ export interface ToolsTabProps {
   locale: string; workspaceKey: string; sessionId?: string; connected: boolean; busy: boolean; active: boolean;
   newSessionPending?: boolean; inert?: boolean; rules?: ActiveRule[]; requestedView?: ToolsView;
   onViewChange?: (view: ToolsView) => void; onUseSkill: (name: string) => void;
-  /** Computer use of this conversation (computer/state, computer/reply); `computerRequest` = the /computer command asked to switch it (each revision once). */
-  computer?: ComputerStatePayload | null; computerReply?: ComputerReplyPayload | null; computerRequest?: { revision: number };
   /** The editor's "Add to Knowledge ▸ New" (knowledge/draft; each `seq` once): the Knowledge view opens its new-knowledge form with these lines. */
   knowledgeDraft?: { payload: KnowledgeDraft; seq: number } | null;
   /** Puts the text into the chat input and opens Chat. */
@@ -31,7 +29,7 @@ export interface ToolsTabProps {
   onStartWorkflow?: (text: string) => void;
 }
 export function ToolsTab({ locale, workspaceKey, sessionId, connected, busy, active, newSessionPending = false, inert = false,
-  rules, requestedView, onViewChange, onUseSkill, computer, computerReply, computerRequest, knowledgeDraft, onInsertText, onStartWorkflow }: ToolsTabProps) {
+  rules, requestedView, onViewChange, onUseSkill, knowledgeDraft, onInsertText, onStartWorkflow }: ToolsTabProps) {
   const knowledge = useKnowledge(); const [permissionsCount, setPermissionsCount] = useState(0);
   const [controllerView, setControllerView] = useState<ToolsView>(() => normalizeToolsView(requestedView));
   const t = toolsTranslate(locale);
@@ -49,8 +47,8 @@ export function ToolsTab({ locale, workspaceKey, sessionId, connected, busy, act
     <ViewChips prefix="tools" label={t('tools.nav')} active={view} onChange={change} inert={inert}
       views={toolsViews.map(id => ({ id, label: t(`tools.${id}`), badge: counts[id] }))} />
     <div className="tools-view-stack" key={`${workspaceKey}:${sessionId ?? ''}`}>{toolsViews.map(item => <section key={item} id={`tools-${item}`} role="tabpanel" aria-labelledby={`tools-tab-${item}`} hidden={view !== item} inert={inert || view !== item || undefined} className="tools-view">
-      {item === 'conversation' && <ConversationTools controller={controller} locale={locale} connected={connected} disabled={disabled} busy={busy} computer={computer} computerReply={computerReply} computerRequest={computerRequest} />}
-      {item === 'permissions' && <PermissionRules onCount={setPermissionsCount} locale={locale} root={workspaceKey} sessionId={sessionId} active={active && !inert && view === item} countActive={active && !inert} />}
+      {item === 'conversation' && <ConversationTools controller={controller} locale={locale} disabled={disabled} busy={busy} />}
+      {item === 'permissions' && <PermissionRules onCount={setPermissionsCount} locale={locale} root={workspaceKey} sessionId={sessionId} active={active && !inert && view === item} countActive={active && !inert} tools={controller.tools} />}
       {item === 'skills' && <SkillsView controller={controller} locale={locale} disabled={disabled} busy={busy} onUseSkill={onUseSkill} />}
       {item === 'mcp' && <McpView controller={controller} locale={locale} disabled={disabled} busy={busy} />}
       {item === 'rules' && <RulesView active={rules} controller={controller} locale={locale} disabled={disabled} busy={busy} />}

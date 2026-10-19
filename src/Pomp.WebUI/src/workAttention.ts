@@ -18,13 +18,10 @@ export interface WorkAttention {
  * History = zero. These badges never issue host commands and keep no browser storage.
  */
 export function getWorkAttention(state: WorkState, session: SessionInfoPayload | null): WorkAttention {
-  const review = state.review;
-  const finishedFiles = new Set(review?.outcomes.filter(outcome => outcome.state === 'applied').map(outcome => outcome.path));
   const unfinished = session?.planOpenCount ?? 0;
   const hookEntries = state.hooks?.history.filter(entry => !!entry.error || ['failed', 'error', 'pending', 'queued', 'awaitingApproval', 'awaiting approval', 'blocked or failed'].includes(entry.status)).length ?? 0;
   return {
-    review: (review?.id && !['done', 'discarded', 'cancelled'].includes(review.status) ? review.files.filter(file => file.hunks.length > 0 && !finishedFiles.has(file.path)).length : 0)
-      + state.isolation.filter(item => item.status === 'pending' || item.status === 'blocked').length,
+    review: openReviewFiles(state).length + state.isolation.filter(item => item.status === 'pending' || item.status === 'blocked').length,
     plan: session?.isStreaming || session?.hasPendingAsyncWork ? unfinished : 0,
     codeReview: state.problems.items.length,
     workflow: state.workflow?.id && state.workflow.phase === 'awaitingReview' ? 1 : 0,
@@ -33,6 +30,28 @@ export function getWorkAttention(state: WorkState, session: SessionInfoPayload |
     hooks: Math.max(hookEntries, state.hooks?.running ? 1 : 0),
     history: 0,
   };
+}
+
+function openReviewFiles(state: WorkState) {
+  const review = state.review;
+  if (!review?.id || ['done', 'discarded', 'cancelled'].includes(review.status)) return [];
+  const finishedFiles = new Set(review.outcomes.filter(outcome => outcome.state === 'applied').map(outcome => outcome.path));
+  return review.files.filter(file => file.hunks.length > 0 && !finishedFiles.has(file.path));
+}
+
+/**
+ * What the Work tab header's red count is made of (docs/screen-guide.md "탭 막대"): a key per item that waits for the user. Proposal files
+ * and isolated results as Review counts them, the agent findings and compiler errors of Code check (compiler warnings are not news),
+ * and a workflow awaiting review of its proposal. Plan progress is not an item (Chat's plan chip shows it).
+ */
+export function workBadgeKeys(state: WorkState): string[] {
+  const review = state.review?.id ?? '';
+  return [
+    ...openReviewFiles(state).map(file => `review:${review}:${file.path}`),
+    ...state.isolation.filter(item => item.status === 'pending' || item.status === 'blocked').map(item => `isolation:${item.id}`),
+    ...state.problems.items.filter(item => item.source === 'agent' || item.severity === 'error').map(item => `problem:${item.id}`),
+    ...(state.workflow?.id && state.workflow.phase === 'awaitingReview' ? [`workflow:${state.workflow.id}:${state.workflow.proposalId}`] : []),
+  ];
 }
 
 /** Session identity scopes the shared panel store; switching workspace/session clears stale badges and panel data. */

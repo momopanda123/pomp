@@ -5,7 +5,7 @@ import { useSyncExternalStore } from 'react';
  * Hiding removes only the visible control; its shortcut, slash command and popup keep working. Menu order is this order.
  */
 export const COMPOSER_CONTROLS = [
-  'mention', 'slash', 'attach', 'basket', 'bookmarks', 'live', 'editorContext', 'contextMeter',
+  'mention', 'slash', 'attach', 'basket', 'bookmarks', 'live', 'computer', 'editorContext', 'contextMeter',
   'permission', 'target', 'model', 'thinking', 'fast', 'quota',
 ] as const;
 export type ComposerControl = (typeof COMPOSER_CONTROLS)[number];

@@ -51,17 +51,17 @@ namespace Pomp.Features
             Validate(policy);
             return policy;
         }
-        /// <summary>The checks enforcement applies to a parsed policy; the Tools tab editor runs the same ones before it writes the file.</summary>
+        /// <summary>The checks enforcement applies to a parsed policy (the same as the engine guard's, which treats a policy over its limits as unreadable); the Tools tab editor runs them before it writes the file.</summary>
         internal static void Validate(JObject policy)
         {
-            if(policy["version"]?.Type!=JTokenType.Integer||(int?)policy["version"]!=1||(string?)policy["default"]!="deny"||!(policy["rules"] is JArray rules)||policy.Properties().Any(p=>!new[]{"version","default","rules","requireSandbox","requireReviewedEdits"}.Contains(p.Name)))throw new InvalidOperationException("Invalid project permission policy.");
+            if(policy["version"]?.Type!=JTokenType.Integer||(int?)policy["version"]!=1||(string?)policy["default"]!="deny"||!(policy["rules"] is JArray rules)||rules.Count>100||policy.Properties().Any(p=>!new[]{"version","default","rules","requireSandbox","requireReviewedEdits"}.Contains(p.Name)))throw new InvalidOperationException("Invalid project permission policy.");
             foreach(var flag in new[]{"requireSandbox","requireReviewedEdits"})if(policy[flag]!=null&&policy[flag]!.Type!=JTokenType.Boolean)throw new InvalidOperationException("Invalid project restriction flag.");
             foreach(var item in rules)
             {
                 if(item is not JObject rule || rule["tool"]?.Type!=JTokenType.String || !Regex.IsMatch((string)rule["tool"]!, @"\A(?:\*|[a-zA-Z0-9_.:-]{1,100})\z") || rule["effect"]?.Type!=JTokenType.String || !new[]{"allow","deny"}.Contains((string)rule["effect"]!) || rule.Properties().Any(p=>!new[]{"tool","effect","paths","commands"}.Contains(p.Name))) throw new InvalidOperationException("Invalid project policy rule.");
                 foreach(var key in new[]{"paths","commands"}) if(rule[key]!=null)
                 {
-                    if(rule[key] is not JArray values || values.Count==0 || values.Any(v=>v.Type!=JTokenType.String || v.ToString().Length==0 || v.ToString().Length>4096 || v.ToString().Contains('\0'))) throw new InvalidOperationException("Invalid project policy constraint.");
+                    if(rule[key] is not JArray values || values.Count==0 || values.Count>30 || values.Any(v=>v.Type!=JTokenType.String || v.ToString().Length==0 || v.ToString().Length>4096 || v.ToString().Contains('\0'))) throw new InvalidOperationException("Invalid project policy constraint.");
                     if(key=="paths" && values.Any(v=>Path.IsPathRooted(v.ToString()) || Regex.IsMatch(v.ToString(), @"\A[A-Za-z]:") || v.ToString().StartsWith("\\",StringComparison.Ordinal) || v.ToString().Replace('\\','/').Split('/').Contains(".."))) throw new InvalidOperationException("Policy path is invalid.");
                     if(key=="paths")foreach(var value in values)ValidatePolicyPath(value.ToString());
                 }

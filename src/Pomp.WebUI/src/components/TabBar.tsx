@@ -4,15 +4,21 @@ import { send, WORKSPACE_TRUST_REQUIRED, type BridgeStatePayload, type EngineInf
 import { engineSummary } from './EngineNotice';
 import { Icon, type IconName } from './Icon';
 import { plainControls } from './RevealControls';
+import type { TabBadges } from '../tabBadges';
 
 export type ShellTab = 'chat' | 'work' | 'agents' | 'tools' | 'accounts';
 const tabs: { id: ShellTab; icon: IconName }[] = [
   { id: 'chat', icon: 'chat' }, { id: 'work', icon: 'work' }, { id: 'agents', icon: 'users' }, { id: 'tools', icon: 'tool' }, { id: 'accounts', icon: 'user' },
 ];
 
-export function TabBar({ active, onChange, bridge, required, workCount, accountAttention, chatAttention, inert, engine = null }: {
+/**
+ * `badges`: the red counts of what is new on Chat and Work (zero for the tab on screen); `accountAttention`: a red dot while an account
+ * needs the user, not on the Accounts tab itself. The mark sits on the icon's corner and takes no room, so the row never shifts or wraps
+ * (docs/screen-guide.md "탭 막대").
+ */
+export function TabBar({ active, onChange, bridge, required, badges, accountAttention, inert, engine = null }: {
   active: ShellTab; onChange: (tab: ShellTab) => void; bridge: BridgeStatePayload; required: boolean;
-  workCount: number; accountAttention: boolean; chatAttention: boolean; inert: boolean; engine?: EngineInfo | null;
+  badges: TabBadges; accountAttention: boolean; inert: boolean; engine?: EngineInfo | null;
 }) {
   const t = useT();
   const root = useRef<HTMLDivElement>(null);
@@ -43,12 +49,17 @@ export function TabBar({ active, onChange, bridge, required, workCount, accountA
       {tabs.map(tab => {
         const label = t(`tab.${tab.id}`);
         const disabled = required && tab.id !== 'accounts';
+        const count = tab.id === 'chat' ? badges.chat : tab.id === 'work' ? badges.work : 0;
+        const dot = active !== tab.id && tab.id === 'accounts' && accountAttention;
+        const shown = count > 99 ? '99+' : String(count);
+        const name = count > 0 ? t('tab.unseen', { label, count: shown }) : dot ? t('tab.attention', { label }) : label;
         return <button key={tab.id} id={`tab-${tab.id}`} data-tab={tab.id} data-testid={`tab-${tab.id}`} type="button" role="tab"
           aria-selected={active === tab.id} aria-controls={`page-${tab.id}`} tabIndex={active === tab.id ? 0 : -1}
-          className="shell-tab" disabled={disabled} title={label} aria-label={label} onClick={() => onChange(tab.id)}>
-          <Icon name={tab.icon} size={13} /><span className="tab-label">{label}</span>
-          {tab.id === 'work' && workCount > 0 && <span className="tab-badge" data-testid="work-badge">{workCount}</span>}
-          {((tab.id === 'accounts' && accountAttention) || (tab.id === 'chat' && chatAttention)) && <span className="tab-attention" data-testid={`${tab.id}-attention`} />}
+          className="shell-tab" disabled={disabled} title={name} aria-label={name} onClick={() => onChange(tab.id)}>
+          <span className="tab-icon"><Icon name={tab.icon} size={13} />
+            {count > 0 ? <span className="tab-count" data-testid={`${tab.id}-badge`} aria-hidden="true">{shown}</span>
+              : dot && <span className="tab-dot" data-testid={`${tab.id}-attention`} aria-hidden="true" />}</span>
+          <span className="tab-label">{label}</span>
         </button>;
       })}
     </div>

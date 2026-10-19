@@ -416,6 +416,8 @@ export interface AgentPlanPage {
   requestId: string; ok: boolean; error?: string; revision?: string; editable?: boolean;
   /** While the agent works: the tasks not in progress may be edited (added, changed, deleted) and phases renamed. */
   editableWhileWorking?: boolean; page: number; size: number; total: number;
+  /** Completed tasks of the whole plan (not only the matching ones): what clearCompleted removes. */
+  completedCount?: number;
   phases: { index: number; name: string; taskCount: number }[];
   rows: { phase: number; task: number; content: string; status: string; blocker?: string }[];
 }
@@ -425,7 +427,13 @@ export type AgentPlanEdit = { requestId: string; sessionId: string; revision: st
   | { op: 'deleteTask'; phase: number; task: number }
   | { op: 'addPhase'; name: string; content: string; status?: string }
   | { op: 'renamePhase'; phase: number; name: string }
-  | { op: 'deletePhase'; phase: number });
+  | { op: 'deletePhase'; phase: number }
+  /** Removes every completed task of the whole plan, and a phase it leaves empty. */
+  | { op: 'clearCompleted' }
+  /** Moves the task to index `toTask` of phase `toPhase` (counted once it has left its place); a phase it leaves empty is removed. */
+  | { op: 'moveTask'; phase: number; task: number; toPhase: number; toTask: number }
+  /** Makes the task the one in progress (any other goes back to pending, its blocker is dropped); refused while the agent works. */
+  | { op: 'startTask'; phase: number; task: number });
 /** Answer to workspace/review editorChanges (the candidate files) and fromEditor (staging). */
 export interface EditorChangesReply { requestId: string; action: 'editorChanges' | 'fromEditor'; ok: boolean; error?: string; files?: { path: string; unsaved: boolean }[] }
 
@@ -1135,6 +1143,8 @@ export interface ComputerStatePayload {
   pending: boolean;
   available: boolean;
   message?: string;
+  /** Another conversation holds computer use (another tab, or another POMP on this PC): its name; this one cannot switch it on. */
+  ownerElsewhere?: string | null;
 }
 
 export interface ComputerSetCommand {
@@ -1331,6 +1341,8 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'workspace/countBasketTokens': { requestId: string; root: string; sessionId?: string; includeEditorContext: boolean; attachments?: { path: string }[] };
   /** Host-chrome: move the focus from the page to the editor (the VS host handles it; never reaches the session). */
   'ui/toggleFocus': Record<string, never>;
+  /** Host-chrome: a Visual Studio key the page does not use (F5, Ctrl+Shift+B); the VS host runs the command bound to it (never reaches the session). */
+  'ui/vsKey': { chord: string };
   /** Host-chrome: a short notice (a control action that failed, a draft warning) shown in the VS status bar, not inside the page. */
   'ui/status': { text: string; level: 'error' | 'warning' | 'info' };
   /** Files or an image were pasted into the chat input: the host reads the clipboard and puts them into the context basket (composer/prefill). */

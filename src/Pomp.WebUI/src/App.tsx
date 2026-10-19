@@ -26,7 +26,7 @@ import { useEscapeToComposer, useFileDrops, useGlobalErrorLogging, useHostPump }
 import { I18nContext, LocaleContext, makeTranslate } from './i18n';
 import { dialogResponseRejection, permissionResponseRejection, promptRejection, type SendResult } from './limits';
 import { send, MAIN_TARGET, type PermissionDecision, type SendTarget, type WorkspaceFile } from './protocol';
-import { matchesShortcut, normalizeShortcuts } from './shortcuts';
+import { matchesShortcut, normalizeShortcuts, vsKeyChord } from './shortcuts';
 import { sameRoot } from './knowledge';
 import { KnowledgeProvider } from './knowledgeState';
 import { useSessionHistory } from './sessionHistory';
@@ -34,9 +34,10 @@ import { isSetupRequired } from './setup';
 import type { BuiltinCommand } from './slashCommands';
 import { btwTurns, initialState, isBusy, reducer, type RequestOutcome, type TurnErrorItem } from './state';
 import { useWorkAttention } from './workAttention';
+import { useTabBadges } from './tabBadges';
 import { effectiveRoles, MainRoleContext, RolesContext, targetPayload, TeamsContext } from './teamsCache';
 import { rememberPrompt } from './promptHistory';
-import { useStatusReport } from './statusBar';
+import { reportStatus, useStatusReport } from './statusBar';
 import { UndeliveredStatusBanner } from './components/UndeliveredStatusBanner';
 import './styles/conversations.css';
 
@@ -71,7 +72,7 @@ export function App() {
   const [insertSkill, setInsertSkill] = useState<{ name: string; seq: number }>();
   const [insertText, setInsertText] = useState<{ text: string; seq: number }>();
   const [basketRequest] = useState(0);
-  /** The /computer command: Tools › This conversation switches computer use (each revision once). */
+  /** The /computer command: the composer's screen & input control button switches computer use (each revision once). */
   const [computerRequest, setComputerRequest] = useState<{ revision: number }>();
   /** Agents tab "Message" on a role or team and `/agent name`: open (or switch to) that agent's or team's tab, its own conversation. */
   const [partnerRequest, setPartnerRequest] = useState<{ partner: ConversationPartner; seq: number }>();
@@ -112,6 +113,20 @@ export function App() {
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [shortcuts.toggleFocus]);
+  // Visual Studio keys (F5 starts debugging, Ctrl+Shift+B builds): the page passes on the ones nothing in it handled and that are not
+  // its own shortcuts; the host runs the command Visual Studio binds to them. Bubbling, so a field or a panel that uses the key wins.
+  useEffect(() => {
+    const pageChords: readonly string[] = Object.values(shortcuts);
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented) return;
+      const chord = vsKeyChord(event);
+      if (chord === null || pageChords.includes(chord)) return;
+      event.preventDefault();
+      send('ui/vsKey', { chord });
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [shortcuts]);
   const newSessionPending = state.pendingNewSession !== undefined;
   // A failed queue send is reported in the VS status bar (and the POMP log), not between the queue and the input.
   useStatusReport(state.sendError ? engineAbortText(state.sendError, translate) : null);
@@ -146,6 +161,7 @@ export function App() {
     return !!tabs && tabs.sessionId === current.session?.sessionId && tabs.partner.kind !== 'main';
   }
   const activeTab = setupRequired ? 'accounts' : tab;
+  const tabBadges = useTabBadges(activeTab, { sessionId, items: state.items, replaying: state.replaying, replayRevision: state.replayRevision, requests: state.permissions.length + state.dialogs.length });
   const attentionRef = useRef(attention); attentionRef.current = attention;
   const activeTabRef = useRef(activeTab); activeTabRef.current = activeTab;
   const wasRequired = useRef(false);
@@ -296,6 +312,12 @@ export function App() {
     const instruction = state.locale.startsWith('ko') ? '현재 작업 계획을 확인하고 미완료 단계부터 이어서 진행해 주세요. 기존 변경과 검증 결과를 먼저 확인하고, 완료하지 않은 작업을 완료했다고 보고하지 마세요.' : 'Review the current work plan and continue from the unfinished step. Check existing changes and verification evidence first; do not report unverified work as complete.';
     const result = sendMessage(task ? instruction + '\n\n' + task : instruction, [], false, MAIN_TARGET); if (result.ok) setTab('chat');
   };
+  /** Work › Progress "run this task": the plan already shows the task in progress; this asks the agent to do that task now and opens Chat. */
+  const runPlanTask = (task: string): SendResult => {
+    const instruction = state.locale.startsWith('ko') ? '작업 계획에서 아래 작업을 지금 진행해 주세요. 계획에 진행 중으로 표시해 두었어요. 기존 변경과 검증 결과를 먼저 확인하고, 완료하지 않은 작업을 완료했다고 보고하지 마세요.' : 'Work on the task below from the work plan now; it is marked in progress in the plan. Check existing changes and verification evidence first; do not report unverified work as complete.';
+    const result = sendMessage(instruction + '\n\n' + task, [], false, MAIN_TARGET); if (result.ok) setTab('chat');
+    return result;
+  };
   /** Puts the text into the chat input (not sent) and shows Chat. */
   const insertIntoChat = (text: string) => { setTab('chat'); setListOpen(false); setInsertText(previous => ({ text, seq: (previous?.seq ?? 0) + 1 })); };
   const prefillSeq = state.prefill?.seq;
@@ -332,7 +354,10 @@ export function App() {
       case 'agents': changeTab('agents'); return { ok: true };
       case 'rename': return history.command('rename', args) ? { ok: true } : { ok: false, reason: 'busy' };
       case 'compact': return history.command('compact', args.slice(0, 2000)) ? { ok: true } : { ok: false, reason: 'busy' };
-      case 'computer': setToolsView('conversation'); setTab('tools'); setComputerRequest(previous => ({ revision: (previous?.revision ?? 0) + 1 })); return { ok: true };
+      case 'computer':
+        // The button is hidden when the option is off: say so instead of a click nobody sees.
+        if (state.computer?.policy !== 'perConversation') { reportStatus(translate('computer.unavailable'), 'warning'); return { ok: true }; }
+        setComputerRequest(previous => ({ revision: (previous?.revision ?? 0) + 1 })); return { ok: true };
       case 'btw': return openBtw(args);
       case 'model': case 'thinking': case 'effort': case 'permissions': case 'agent': case 'team': case 'goal': case 'steer': case 'help': return { ok: true };
     }
@@ -349,7 +374,7 @@ export function App() {
         : null;
 
   return <LocaleContext value={state.locale}><I18nContext value={translate}><KnowledgeProvider root={workspaceKey} sessionId={sessionId} connected={connected}><TeamsContext value={state.agents?.teams ?? []}><RolesContext value={state.agents?.roles ?? []}><MainRoleContext value={state.agents?.main}><div className="app">
-    <TabBar active={activeTab} onChange={changeTab} bridge={state.bridge} required={setupRequired} workCount={workCount} accountAttention={accountAttention} chatAttention={modal && activeTab !== 'chat'} inert={false} engine={state.engine} />
+    <TabBar active={activeTab} onChange={changeTab} bridge={state.bridge} required={setupRequired} badges={tabBadges} accountAttention={accountAttention} inert={false} engine={state.engine} />
     <main className="main">
       <section id="page-chat" className="tab-page chat-page" role="tabpanel" aria-labelledby="tab-chat" hidden={activeTab !== 'chat'} inert={activeTab !== 'chat' || undefined}>
         <SessionHeader session={state.session} history={history} disabled={sessionBlocked} onNew={newSession} listOpen={listOpen} onToggleList={() => { if (listOpen) closeList(); else openList(); }}><PartnerPicker tabs={state.tabs} agents={state.agents} replies={state.conversationReplies} sessionId={sessionId} disabled={sessionBlocked} lockedTitle={connected && !recovering && !newSessionPending && sessionBlocked ? translate('partner.locked') : undefined} request={partnerRequest} onSwitch={switchTab} onRefreshRoster={() => { if (connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }} /></SessionHeader>
@@ -373,10 +398,10 @@ export function App() {
         {state.btw && <BtwPanel panel={state.btw} name={partnerName ?? 'POMP'} connected={conversationReady} onAsk={askBtw} onClose={closeBtw} />}
         <LiveAgentProgress disabled={!conversationReady || newSessionPending || state.replaying} sessionId={sessionId} promptId={state.activePromptId} items={state.items} />
         <ChatQueue state={state.queue} replies={state.conversationReplies} sessionId={sessionId} disabled={!conversationReady || newSessionPending || modal} pendingSends={state.pendingQueued} onRecover={item => { dispatch({ type: 'recoverQueueSend', id: item.clientMessageId }); inputRef.current?.focus(); }} />
-        <Composer locale={state.locale} workspaceKey={workspaceKey} sessionId={sessionId} model={state.session?.model} session={state.session} setup={state.setup} setupReplies={state.setupReplies} onManageAccounts={() => changeTab('accounts')} inputRef={inputRef} connected={conversationReady} busy={busy} queueBlocked={state.phase === 'sending' || state.replaying || state.pendingQueued.some(item => !item.failed)} requestPending={modal || activeTab !== 'chat'} newSessionPending={newSessionPending} draft={state.composer} dispatch={dispatch} includeEditorContext={state.includeEditorContext} onIncludeEditorContextChange={value => dispatch({ type: 'setIncludeEditorContext', value })} onSend={sendMessage} onSteer={steerMessage} onStop={() => send('chat/stop', {})} commands={state.commands.commands} commandsHidden={state.commands.hidden} onCommand={handleCommand} onGoal={goal.open} skillsOff={goal.skillsOff} prefill={state.prefill} insertSkill={insertSkill} insertText={insertText} basketRequest={basketRequest} basketTokens={state.basketTokens} agents={state.agents} shortcuts={shortcuts} composerPredictions={state.hello?.composerPredictions === true} wordCompletion={state.hello?.wordCompletion !== false} transcript={state.items} approvalMode={state.hello?.approvalMode} permissionModeReply={state.permissionModeReply} editorFollow={state.editorFollow} selectedTarget={state.selectedTarget} onSelectTarget={target => dispatch({ type: 'selectTarget', target })} partnerName={partnerName} partner={scopedTabs?.partner} onOpenPartner={openPartner} />
+        <Composer locale={state.locale} workspaceKey={workspaceKey} sessionId={sessionId} model={state.session?.model} session={state.session} setup={state.setup} setupReplies={state.setupReplies} onManageAccounts={() => changeTab('accounts')} inputRef={inputRef} connected={conversationReady} busy={busy} queueBlocked={state.phase === 'sending' || state.replaying || state.pendingQueued.some(item => !item.failed)} requestPending={modal || activeTab !== 'chat'} newSessionPending={newSessionPending} draft={state.composer} dispatch={dispatch} includeEditorContext={state.includeEditorContext} onIncludeEditorContextChange={value => dispatch({ type: 'setIncludeEditorContext', value })} onSend={sendMessage} onSteer={steerMessage} onStop={() => send('chat/stop', {})} commands={state.commands.commands} commandsHidden={state.commands.hidden} onCommand={handleCommand} onGoal={goal.open} skillsOff={goal.skillsOff} prefill={state.prefill} insertSkill={insertSkill} insertText={insertText} basketRequest={basketRequest} basketTokens={state.basketTokens} agents={state.agents} shortcuts={shortcuts} composerPredictions={state.hello?.composerPredictions === true} wordCompletion={state.hello?.wordCompletion !== false} transcript={state.items} approvalMode={state.hello?.approvalMode} permissionModeReply={state.permissionModeReply} editorFollow={state.editorFollow} computer={state.computer} computerReply={state.computerReply} computerRequest={computerRequest} selectedTarget={state.selectedTarget} onSelectTarget={target => dispatch({ type: 'selectTarget', target })} partnerName={partnerName} partner={scopedTabs?.partner} onOpenPartner={openPartner} />
       </section>
       <section id="page-work" className="tab-page work-page" role="tabpanel" aria-labelledby="tab-work" hidden={activeTab !== 'work'} inert={activeTab !== 'work' || undefined}>
-        <WorkTab locale={state.locale} session={state.session} workspaceKey={workspaceKey} sessionId={sessionId} connected={conversationReady} busy={busy} newSessionPending={newSessionPending} inert={activeTab !== 'work'} attention={attention} requestedView={workView} onViewChange={setWorkView} onStop={() => send('chat/stop', {})} onContinue={continueWork} onSolve={text => {
+        <WorkTab locale={state.locale} session={state.session} workspaceKey={workspaceKey} sessionId={sessionId} connected={conversationReady} busy={busy} newSessionPending={newSessionPending} inert={activeTab !== 'work'} attention={attention} requestedView={workView} onViewChange={setWorkView} onStop={() => send('chat/stop', {})} onContinue={continueWork} onRunTask={runPlanTask} onSolve={text => {
           const result = sendMessage(text, [], false, undefined, true, false); if (result.ok) setTab('chat');
           return result;
         }} onOpenWorkflows={() => openTools('workflows')} />
@@ -385,7 +410,7 @@ export function App() {
         <AgentsPanel agents={state.agents} replies={state.agentsReplies} setup={state.setup} setupReplies={state.setupReplies} locale={state.locale} connected={connected} inert={activeTab !== 'agents'} sessionId={sessionId} view={agentsView} onViewChange={setAgentsView} onSelectTarget={openPartner} workspaceKey={workspaceKey} busy={busy} newSessionPending={newSessionPending} onShowPermissions={() => openTools('permissions')} />
       </section>
       <section id="page-tools" className="tab-page" role="tabpanel" aria-labelledby="tab-tools" hidden={activeTab !== 'tools'} inert={activeTab !== 'tools' || undefined}>
-        <ToolsTab active={activeTab === 'tools'} locale={state.locale} workspaceKey={workspaceKey} sessionId={sessionId} connected={connected} busy={busy} newSessionPending={newSessionPending} inert={activeTab !== 'tools'} requestedView={toolsView} onViewChange={setToolsView} onUseSkill={name => { setTab('chat'); setListOpen(false); setInsertSkill(previous => ({ name, seq: (previous?.seq ?? 0) + 1 })); }} rules={state.activeRules} computer={state.computer} computerReply={state.computerReply} computerRequest={computerRequest} knowledgeDraft={state.knowledgeDraft} onInsertText={insertIntoChat} />
+        <ToolsTab active={activeTab === 'tools'} locale={state.locale} workspaceKey={workspaceKey} sessionId={sessionId} connected={connected} busy={busy} newSessionPending={newSessionPending} inert={activeTab !== 'tools'} requestedView={toolsView} onViewChange={setToolsView} onUseSkill={name => { setTab('chat'); setListOpen(false); setInsertSkill(previous => ({ name, seq: (previous?.seq ?? 0) + 1 })); }} rules={state.activeRules} knowledgeDraft={state.knowledgeDraft} onInsertText={insertIntoChat} />
       </section>
       <section id="page-accounts" className="tab-page" role="tabpanel" aria-labelledby="tab-accounts" hidden={activeTab !== 'accounts'} inert={activeTab !== 'accounts' || undefined}>
         {activeTab === 'accounts' && <SetupPanel setup={state.setup} replies={state.setupReplies} sessionModel={state.session?.model} required={setupRequired} connected={connected} locale={state.locale} inert={false} />}

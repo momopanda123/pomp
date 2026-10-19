@@ -5,7 +5,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using EnvDTE;
 using EnvDTE80;
+using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.Threading;
 using Pomp.Diagnostics;
 using Pomp.Adapters;
@@ -14,8 +16,15 @@ using Task = System.Threading.Tasks.Task;
 namespace Pomp.VisualStudio.Adapters
 {
     /// <summary>
-    /// Solution/project builds through DTE <c>SolutionBuild</c>. The build is started with WaitForBuildToFinish=false and
-    /// completion is awaited through <c>BuildEvents.OnBuildDone</c>, so the UI thread is never blocked.
+    /// Solution/project builds through DTE <c>SolutionBuild</c>, started with WaitForBuildToFinish=false so the UI thread is never
+    /// blocked. omp never times out a host tool, so every way a build can end must end the call:
+    /// <list type="bullet">
+    /// <item>A build that is already running (the user's, a test run's) is waited for first and never cancelled.</item>
+    /// <item>No build is started during a debug session: Visual Studio does not build then.</item>
+    /// <item>The build is followed through <c>BuildEvents</c> and the build manager's busy state: OnBuildDone ends it, so does a
+    /// build manager that stays idle without that event, and a build that never shows any sign of running counts as not started.</item>
+    /// <item>Cancellation (a stop, or the tool's time limit) cancels only the build this call started.</item>
+    /// </list>
     /// <para>
     /// A solution configuration is a (name, platform) pair: <c>SolutionBuild.SolutionConfigurations</c> holds one entry per pair, so
     /// "Debug" alone is ambiguous when a solution has several platforms. A request names the configuration as <c>Name</c> (the
@@ -26,6 +35,26 @@ namespace Pomp.VisualStudio.Adapters
     internal sealed class BuildAdapter : IBuildAdapter
     {
         private const int MaxReportedErrors = 100;
+        private const string NothingBuilt = "Nothing was built.";
+
+        /// <summary>How often the build manager is read while a build is awaited (OnBuildDone wakes the wait at once).</summary>
+        private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(500);
+
+        /// <summary>
+        /// How long a requested build may go without any sign of running before it counts as not started. Generous, so a slow start
+        /// is not taken for no build: it only delays the report of a build that really did not start.
+        /// </summary>
+        private static readonly TimeSpan StartGracePeriod = TimeSpan.FromSeconds(15);
+
+        /// <summary>
+        /// How long the build manager may stay idle after a build without OnBuildDone before the build counts as over anyway:
+        /// Visual Studio does not raise the event for every way a build ends.
+        /// </summary>
+        private static readonly TimeSpan MissingDoneGracePeriod = TimeSpan.FromSeconds(3);
+
+        /// <summary>How long starting the build may block before the status says that a Visual Studio dialog may be holding it.</summary>
+        private static readonly TimeSpan StartHintDelay = TimeSpan.FromSeconds(10);
+
         private static readonly TimeSpan CancelGracePeriod = TimeSpan.FromSeconds(15);
 
         private readonly VsAdapterContext context;
@@ -41,12 +70,30 @@ namespace Pomp.VisualStudio.Adapters
         public async Task<BuildResult> BuildAsync(BuildRequest request, CancellationToken cancellationToken)
         {
             request ??= new BuildRequest();
+            var call = new BuildCall(request.Progress);
 
             // One agent-initiated build at a time; VS itself refuses concurrent builds.
-            await buildLock.WaitAsync(cancellationToken);
+            if (buildLock.CurrentCount == 0)
+            {
+                call.Report("Waiting for another build_solution call to finish");
+            }
+
             try
             {
-                return await BuildCoreAsync(request, cancellationToken);
+                await buildLock.WaitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw new OperationCanceledException("Nothing was built: another build_solution call was still running.", cancellationToken);
+            }
+
+            try
+            {
+                return await BuildCoreAsync(request, call, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(call.CancelledOutcome, cancellationToken);
             }
             finally
             {
@@ -54,21 +101,38 @@ namespace Pomp.VisualStudio.Adapters
             }
         }
 
-        private async Task<BuildResult> BuildCoreAsync(BuildRequest request, CancellationToken cancellationToken)
+        private async Task<BuildResult> BuildCoreAsync(BuildRequest request, BuildCall call, CancellationToken cancellationToken)
         {
             await context.Jtf.SwitchToMainThreadAsync(cancellationToken);
 
             var dte = context.Dte;
+
+            // A build that something else started is waited for, never cancelled: it is not ours.
+            if (IsBuildRunning(dte))
+            {
+                call.Report("Waiting for the build already running in Visual Studio to finish");
+                call.CancelledOutcome = "Nothing was built: the build already running in Visual Studio had not finished.";
+                do
+                {
+                    await Task.Delay(PollInterval, cancellationToken);
+                    await context.Jtf.SwitchToMainThreadAsync(cancellationToken);
+                }
+                while (IsBuildRunning(dte));
+
+                call.CancelledOutcome = NothingBuilt;
+            }
+
             if (dte.Solution == null || !dte.Solution.IsOpen)
             {
-                return Failure("No solution is open, so there is nothing to build.");
+                return NotBuilt("No solution is open, so there is nothing to build.");
+            }
+
+            if (IsDebugging(dte))
+            {
+                return NotBuilt("Visual Studio is debugging, and it does not build during a debug session. Stop debugging first (the user can press Shift+F5), then build again.");
             }
 
             var solutionBuild = dte.Solution.SolutionBuild;
-            if (solutionBuild.BuildState == vsBuildState.vsBuildStateInProgress)
-            {
-                return Failure("A build is already running in Visual Studio.");
-            }
 
             // Resolve everything that can fail BEFORE the IDE state is touched: a bad request must not change the active configuration.
             ConfigurationPair? wanted = null;
@@ -78,13 +142,13 @@ namespace Pomp.VisualStudio.Adapters
             {
                 if (!TryParseConfiguration(request.Configuration!, out var configurationName, out var requestedPlatform))
                 {
-                    return Failure("The configuration '" + request.Configuration + "' is not valid. Use a configuration name such as Debug, or Name|Platform such as Release|x64.");
+                    return NotBuilt("The configuration '" + request.Configuration + "' is not valid. Use a configuration name such as Debug, or Name|Platform such as Release|x64.");
                 }
 
                 active = ReadActivePair(solutionBuild);
                 if (active == null)
                 {
-                    return Failure("The active solution configuration could not be read, so the configuration was not changed and nothing was built.");
+                    return NotBuilt("The active solution configuration could not be read, so the configuration was not changed and nothing was built.");
                 }
 
                 // Without a platform the active platform is kept (a bare "Release" must not silently switch Debug|x64 to Release|Any CPU).
@@ -92,7 +156,7 @@ namespace Pomp.VisualStudio.Adapters
                 target = FindConfiguration(solutionBuild, wanted);
                 if (target == null)
                 {
-                    return Failure("The solution configuration '" + wanted + "' does not exist. Available: " + ListConfigurations(solutionBuild) + ".");
+                    return NotBuilt("The solution configuration '" + wanted + "' does not exist. Available: " + ListConfigurations(solutionBuild) + ".");
                 }
             }
 
@@ -102,9 +166,11 @@ namespace Pomp.VisualStudio.Adapters
                 projectUniqueName = FindProjectUniqueName(dte, request.Project!);
                 if (projectUniqueName == null)
                 {
-                    return Failure("The project '" + request.Project + "' was not found in the solution.");
+                    return NotBuilt("The project '" + request.Project + "' was not found in the solution.");
                 }
             }
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             // Only a target that differs from the active pair is activated; the exact original pair is what gets restored.
             ConfigurationPair? restoreTo = null;
@@ -120,24 +186,17 @@ namespace Pomp.VisualStudio.Adapters
                 using (var tracker = new BuildTracker(dte, context.Jtf))
                 {
                     tracker.Start();
+                    call.CancelledOutcome = "Nothing was built: Visual Studio had not started the build.";
+                    StartBuild(solutionBuild, call, projectUniqueName, wanted);
 
-                    if (projectUniqueName != null)
+                    if (!await FollowBuildAsync(dte, tracker, call, cancellationToken))
                     {
-                        var configName = ReadActivePair(solutionBuild)?.Name ?? wanted?.Name ?? "Debug";
-                        solutionBuild.BuildProject(configName, projectUniqueName, false);
-                    }
-                    else
-                    {
-                        solutionBuild.Build(false);
+                        context.Log.Warn("Visual Studio did not start the build that build_solution requested: no build event, and the build manager stayed idle.");
+                        return NotBuilt("Visual Studio did not start the build. A prompt to save changes may have been cancelled, or Visual Studio refused to build right now; check Visual Studio, then build again.");
                     }
 
-                    var completed = await AwaitBuildAsync(dte, tracker, cancellationToken);
-                    if (!completed)
-                    {
-                        throw new OperationCanceledException(cancellationToken);
-                    }
-
-                    // Let the Error List settle after OnBuildDone (its table is fed asynchronously).
+                    // Let the Error List settle after the build (its table is fed asynchronously).
+                    call.CancelledOutcome = "The build ended, but its diagnostics were not read; call read_error_list for them.";
                     await Task.Delay(300, CancellationToken.None);
                     await context.Jtf.SwitchToMainThreadAsync(cancellationToken);
 
@@ -154,33 +213,171 @@ namespace Pomp.VisualStudio.Adapters
             }
         }
 
-        /// <summary>Waits for OnBuildDone; on cancellation asks VS to cancel the build and waits a bounded time for it to wind down.</summary>
-        private async Task<bool> AwaitBuildAsync(DTE2 dte, BuildTracker tracker, CancellationToken cancellationToken)
+        /// <summary>
+        /// Starts the build without waiting for it. Starting can block in a modal Visual Studio prompt (save changes before
+        /// building); a status line then says so, from a timer that does not need the UI thread.
+        /// </summary>
+        private static void StartBuild(SolutionBuild solutionBuild, BuildCall call, string? projectUniqueName, ConfigurationPair? wanted)
         {
-            var cancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            using (cancellationToken.Register(() => cancelled.TrySetResult(true)))
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            using (var starting = new CancellationTokenSource())
             {
-                if (await Task.WhenAny(tracker.Completion.Task, cancelled.Task) == tracker.Completion.Task)
+                _ = HintWhileStartingAsync(call, starting.Token);
+                try
                 {
-                    return !cancellationToken.IsCancellationRequested;
+                    if (projectUniqueName != null)
+                    {
+                        var configName = ReadActivePair(solutionBuild)?.Name ?? wanted?.Name ?? "Debug";
+                        solutionBuild.BuildProject(configName, projectUniqueName, false);
+                    }
+                    else
+                    {
+                        solutionBuild.Build(false);
+                    }
+                }
+                finally
+                {
+                    starting.Cancel();
+                }
+            }
+
+            call.Report("Building");
+        }
+
+        private static async Task HintWhileStartingAsync(BuildCall call, CancellationToken starting)
+        {
+            try
+            {
+                await Task.Delay(StartHintDelay, starting).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            call.ReportUnless(starting, "Waiting for Visual Studio to start the build; a Visual Studio dialog may be waiting for an answer");
+        }
+
+        /// <summary>
+        /// Follows the build this call started to its end: OnBuildDone ends it, and so does a build manager that stays idle after
+        /// the build without that event. False when no sign of a build appeared within <see cref="StartGracePeriod"/>. On
+        /// cancellation the build is cancelled before the cancellation propagates.
+        /// </summary>
+        private async Task<bool> FollowBuildAsync(DTE2 dte, BuildTracker tracker, BuildCall call, CancellationToken cancellationToken)
+        {
+            var waited = System.Diagnostics.Stopwatch.StartNew();
+            var idle = new System.Diagnostics.Stopwatch();
+            var seenRunning = false;
+            try
+            {
+                await context.Jtf.SwitchToMainThreadAsync(cancellationToken);
+                while (!tracker.Completion.Task.IsCompleted)
+                {
+                    var running = IsBuildRunning(dte);
+                    seenRunning |= running;
+                    if (running)
+                    {
+                        idle.Reset();
+                    }
+                    else if (seenRunning || tracker.Began)
+                    {
+                        idle.Start();
+                        if (idle.Elapsed >= MissingDoneGracePeriod)
+                        {
+                            context.Log.Warn("A build ended without BuildEvents.OnBuildDone; build_solution read its outcome from the build manager.");
+                            return true;
+                        }
+                    }
+                    else if (waited.Elapsed >= StartGracePeriod)
+                    {
+                        return false;
+                    }
+
+                    await Task.WhenAny(tracker.Completion.Task, Task.Delay(PollInterval, cancellationToken));
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await context.Jtf.SwitchToMainThreadAsync(cancellationToken);
                 }
 
-                await CancelBuildAsync(dte);
-                await Task.WhenAny(tracker.Completion.Task, Task.Delay(CancelGracePeriod));
-                return false;
+                return true;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                await CancelBuildAsync(dte, tracker, call);
+                throw;
             }
         }
 
-        private async Task CancelBuildAsync(DTE2 dte)
+        /// <summary>
+        /// Asks Visual Studio to cancel the build this call started and follows it for a bounded time; the call's cancellation
+        /// outcome says how far that got. A build that is not running (not started yet, or already over) is left alone.
+        /// </summary>
+        private async Task CancelBuildAsync(DTE2 dte, BuildTracker tracker, BuildCall call)
         {
             try
             {
                 await context.Jtf.SwitchToMainThreadAsync();
+                if (tracker.Completion.Task.IsCompleted || !IsBuildRunning(dte))
+                {
+                    if (tracker.Completion.Task.IsCompleted || tracker.Began)
+                    {
+                        call.CancelledOutcome = "The build ended, but its result was not read; call read_error_list for its diagnostics.";
+                    }
+
+                    return;
+                }
+
+                call.CancelledOutcome = "Visual Studio was asked to cancel the build, but it was still running " + (int)CancelGracePeriod.TotalSeconds + " seconds later.";
                 dte.ExecuteCommand("Build.Cancel");
+                var waited = System.Diagnostics.Stopwatch.StartNew();
+                while (!tracker.Completion.Task.IsCompleted && IsBuildRunning(dte))
+                {
+                    if (waited.Elapsed >= CancelGracePeriod)
+                    {
+                        return;
+                    }
+
+                    await Task.WhenAny(tracker.Completion.Task, Task.Delay(PollInterval));
+                    await context.Jtf.SwitchToMainThreadAsync();
+                }
+
+                call.CancelledOutcome = "The build was cancelled in Visual Studio.";
             }
             catch (Exception ex)
             {
                 context.LogUnexpected("Cancelling the build (Build.Cancel)", ex);
+            }
+        }
+
+        /// <summary>True while any build runs: the solution build manager is busy, or DTE reports a build in progress.</summary>
+        private bool IsBuildRunning(DTE2 dte)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var manager = context.GetService<IVsSolutionBuildManager>(typeof(SVsSolutionBuildManager));
+            if (ErrorHandler.Succeeded(manager.QueryBuildManagerBusy(out var busy)) && busy != 0)
+            {
+                return true;
+            }
+
+            var solution = dte.Solution;
+            return solution != null && solution.IsOpen && solution.SolutionBuild.BuildState == vsBuildState.vsBuildStateInProgress;
+        }
+
+        /// <summary>True in run or break mode.</summary>
+        private static bool IsDebugging(DTE2 dte)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            try
+            {
+                var debugger = dte.Debugger;
+                return debugger != null && debugger.CurrentMode != dbgDebugMode.dbgDesignMode;
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                // An unreadable mode does not block the build; a build that does not start is still reported.
+                return false;
             }
         }
 
@@ -220,8 +417,7 @@ namespace Pomp.VisualStudio.Adapters
             };
         }
 
-        private static BuildResult Failure(string message) =>
-            new BuildResult { Succeeded = false, FailedProjects = 0, Summary = message };
+        private static BuildResult NotBuilt(string reason) => new BuildResult { Error = reason };
 
         // ---- solution configurations (name + platform) -----------------------------------------------
 
@@ -420,7 +616,45 @@ namespace Pomp.VisualStudio.Adapters
             private static string Compact(string platform) => platform.Replace(" ", string.Empty);
         }
 
-        /// <summary>Subscribes to <c>BuildEvents</c> for the duration of one build and completes when it is done.</summary>
+        /// <summary>One build_solution call: its status lines, and what a cancellation at the current step means for the model.</summary>
+        private sealed class BuildCall
+        {
+            private readonly object gate = new object();
+            private readonly IProgress<string>? progress;
+
+            public BuildCall(IProgress<string>? progress)
+            {
+                this.progress = progress;
+            }
+
+            /// <summary>The message of the cancellation (a stop, or the time limit) at the current step.</summary>
+            public string CancelledOutcome { get; set; } = NothingBuilt;
+
+            public void Report(string status) => ReportUnless(CancellationToken.None, status);
+
+            /// <summary>Reports unless <paramref name="stale"/> is cancelled; check and report are atomic against other reports.</summary>
+            public void ReportUnless(CancellationToken stale, string status)
+            {
+                lock (gate)
+                {
+                    if (stale.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    try
+                    {
+                        progress?.Report(status);
+                    }
+                    catch (Exception)
+                    {
+                        // Status lines are best effort.
+                    }
+                }
+            }
+        }
+
+        /// <summary>Subscribes to <c>BuildEvents</c> for the duration of one build: whether it began, and when it is done.</summary>
         private sealed class BuildTracker : IDisposable
         {
             private readonly BuildEvents buildEvents;
@@ -440,11 +674,15 @@ namespace Pomp.VisualStudio.Adapters
 
             public int FailedProjectConfigurations { get; private set; }
 
+            /// <summary>OnBuildBegin was raised after <see cref="Start"/>.</summary>
+            public bool Began { get; private set; }
+
             public void Start()
             {
                 ThreadHelper.ThrowIfNotOnUIThread();
 
                 started = true;
+                buildEvents.OnBuildBegin += OnBuildBegin;
                 buildEvents.OnBuildProjConfigDone += OnProjectConfigurationDone;
                 buildEvents.OnBuildDone += OnBuildDone;
             }
@@ -462,6 +700,7 @@ namespace Pomp.VisualStudio.Adapters
                     try
                     {
                         await joinableTaskFactory.SwitchToMainThreadAsync();
+                        buildEvents.OnBuildBegin -= OnBuildBegin;
                         buildEvents.OnBuildProjConfigDone -= OnProjectConfigurationDone;
                         buildEvents.OnBuildDone -= OnBuildDone;
                     }
@@ -470,6 +709,11 @@ namespace Pomp.VisualStudio.Adapters
                         // Shutting down.
                     }
                 });
+            }
+
+            private void OnBuildBegin(vsBuildScope scope, vsBuildAction action)
+            {
+                Began = true;
             }
 
             private void OnProjectConfigurationDone(string project, string projectConfig, string platform, string solutionConfig, bool success)

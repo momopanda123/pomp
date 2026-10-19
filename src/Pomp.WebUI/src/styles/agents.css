@@ -501,20 +501,12 @@
   bottom: calc(100% + 4px);
 }
 
-/* Computer toggle */
+/* Screen & input control (composer, after Live): the wrapper is not positioned, so its confirmation floats above the composer. */
 .computer-toggle-wrapper {
   position: static;
   display: flex;
   flex: none;
   align-items: center;
-}
-.computer-toggle.active {
-  background: var(--pomp-active-bg);
-  color: var(--pomp-fg);
-  box-shadow: inset 0 0 0 1px var(--pomp-focus-border);
-}
-.computer-toggle.failed {
-  color: var(--pomp-error);
 }
 .confirm-popover {
   position: absolute;
@@ -536,13 +528,6 @@
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
-/* Part of the page flow (Tools › This conversation) instead of floating above the composer. */
-.confirm-popover.inline {
-  position: static;
-  max-height: none;
-  margin-top: 6px;
-  box-shadow: none;
-}
 .confirm-popover-head strong {
   font-size: .88rem;
   color: var(--pomp-fg);
@@ -558,10 +543,6 @@
   justify-content: flex-end;
   gap: 4px;
   margin-top: 4px;
-}
-.computer-error-inline {
-  margin-top: 6px;
-  max-width: 100%;
 }
 
 /* Team brief card in Transcript */

@@ -22,6 +22,8 @@
 @container (max-width: 360px) { .workspace-review.review-layout-split .review-comparison { display: flex; } .review-hunks { padding-left: 10px; } }
 /* Plan task and phase forms sit below the table they edit. */
 .agent-plan .plan-task-form { border-top: 1px solid var(--pomp-border); }
+.agent-plan .plan-task-handle { cursor: grab; }
+.agent-plan .plan-task-handle:disabled { cursor: default; }
 .ui-card-foot > .review-generators { white-space: nowrap; min-width: max-content; }
 .interactive-meta { display: flex; flex-wrap: wrap; gap: 6px; }
 .work-interactive .interactive-command-echo { margin: 0; padding: 6px 10px; border-bottom: 1px solid var(--pomp-border); background: var(--pomp-code-bg); white-space: pre-wrap; overflow-wrap: anywhere; }

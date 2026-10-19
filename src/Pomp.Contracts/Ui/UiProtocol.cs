@@ -217,14 +217,17 @@ namespace Pomp.Ui
         public const string AgentPlanPage = "workspace/agentPlanPage";
 
         /// <summary>
-        /// Host → UI page of the plan: <c>{requestId, ok, error?, revision, page, size, total, phases: [{index, name, taskCount}],
-        /// rows: [{phase, task, content, status, blocker?}]}</c>; <c>total</c> counts the tasks that match the query.
+        /// Host → UI page of the plan: <c>{requestId, ok, error?, revision, page, size, total, completedCount, phases: [{index, name, taskCount}],
+        /// rows: [{phase, task, content, status, blocker?}]}</c>; <c>total</c> counts the tasks that match the query, <c>completedCount</c>
+        /// the completed tasks of the whole plan.
         /// </summary>
         public const string AgentPlanPageResult = "workspace/agentPlanPageResult";
 
         /// <summary>
-        /// One change to the whole plan, checked against <c>revision</c>: <c>{requestId, sessionId, revision, op, phase?, task?, name?,
-        /// content?, status?, blocker?}</c> with op <c>addTask | updateTask | deleteTask | addPhase | renamePhase | deletePhase</c>.
+        /// One change to the whole plan, checked against <c>revision</c>: <c>{requestId, sessionId, revision, op, phase?, task?, toPhase?, toTask?,
+        /// name?, content?, status?, blocker?}</c> with op <c>addTask | updateTask | deleteTask | addPhase | renamePhase | deletePhase |
+        /// clearCompleted | moveTask | startTask</c> (<c>clearCompleted</c> removes every completed task, and a phase it leaves empty;
+        /// <c>moveTask</c> puts the task at <c>toTask</c> of <c>toPhase</c>; <c>startTask</c> makes it the task in progress).
         /// </summary>
         public const string AgentPlanEdit = "workspace/agentPlanEdit";
         public const string AgentsHistory = "agents/history";

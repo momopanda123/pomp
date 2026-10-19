@@ -65,6 +65,24 @@ export function matchesShortcut(event: KeyboardEvent, text: string | undefined):
 export const isPageChord = (chord: Chord | null): chord is Chord => chord !== null && (chord.ctrl || chord.alt || /^F([1-9]|1[0-2])$/.test(chord.key));
 
 /**
+ * The chord of a Visual Studio key pressed in the page ("Ctrl+F5", "Ctrl+Shift+B", "Ctrl+Break"), or null. Keystrokes inside the
+ * WebView never reach Visual Studio's key bindings, so the page passes these on (`ui/vsKey`) when it does not use them itself:
+ * F1–F12 and Break with any Ctrl/Alt/Shift, and Ctrl+Shift+B (Build Solution). Not F12 (developer tools), Shift+F10 (the context menu
+ * of a field) or Alt+F4 (closes Visual Studio). Mirror of the host's VsGlobalKeys.IsForwarded.
+ */
+export function vsKeyChord(event: KeyboardEvent): string | null {
+  if (event.repeat || event.isComposing || event.keyCode === 229 || event.metaKey) return null;
+  if (typeof event.getModifierState === 'function' && event.getModifierState('AltGraph')) return null;
+  const code = event.code ?? '';
+  const key = /^F([1-9]|1[0-2])$/.test(code) ? code
+    : code === 'Pause' || event.key === 'Pause' || event.key === 'Cancel' ? 'Break'
+      : code === 'KeyB' && event.ctrlKey && event.shiftKey && !event.altKey ? 'B' : null;
+  if (key === null) return null;
+  const chord = [event.ctrlKey && 'Ctrl', event.altKey && 'Alt', event.shiftKey && 'Shift', key].filter(Boolean).join('+');
+  return chord === 'F12' || chord === 'Shift+F10' || chord === 'Alt+F4' ? null : chord;
+}
+
+/**
  * The host's shortcuts with absent, malformed or modifier-less chords replaced by the defaults ('' stays none); `send` is 'Enter' or
  * 'Ctrl+Enter'. Mirror of the host's UiShortcutChords.NormalizePayload.
  */

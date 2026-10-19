@@ -139,6 +139,7 @@ export function createMockWork(post: Post, root: string, session: () => string, 
           .filter(row => !q || row.content.toLowerCase().includes(q) || (row.blocker ?? '').toLowerCase().includes(q) || plan[row.phase].name.toLowerCase().includes(q));
         const size = Math.min(100, Math.max(1, command.size)); const page = Math.min(Math.max(0, command.page), Math.max(0, Math.ceil(rows.length / size) - 1));
         window.setTimeout(() => post('workspace/agentPlanPageResult', { requestId: command.requestId, ok: true, revision: 'r' + planRevision, editable: true, editableWhileWorking: true, page, size, total: rows.length,
+          completedCount: plan.reduce((count, phase) => count + phase.tasks.filter(task => task.status === 'completed').length, 0),
           phases: plan.map((phase, index) => ({ index, name: phase.name, taskCount: phase.tasks.length })), rows: rows.slice(page * size, page * size + size) }), 60);
         return true;
       }
@@ -153,6 +154,24 @@ export function createMockWork(post: Post, root: string, session: () => string, 
         else if (command.op === 'addPhase') next.push({ name: command.name, tasks: [{ content: command.content, status: command.status ?? 'pending' }] });
         else if (command.op === 'renamePhase') { if (next[command.phase]) next[command.phase].name = command.name; }
         else if (command.op === 'deletePhase') next.splice(command.phase, 1);
+        else if (command.op === 'clearCompleted') {
+          if (!next.some(phase => phase.tasks.some(task => task.status === 'completed'))) { fail(ko ? '완료된 작업이 없어요.' : 'There are no completed tasks.'); return true; }
+          const cleared = next.filter(phase => phase.tasks.some(task => task.status === 'completed'));
+          for (const phase of cleared) phase.tasks = phase.tasks.filter(task => task.status !== 'completed');
+          next.splice(0, next.length, ...next.filter(phase => phase.tasks.length || !cleared.includes(phase)));
+        }
+        else if (command.op === 'moveTask') {
+          const from = next[command.phase]; const into = next[command.toPhase]; const task = from?.tasks[command.task];
+          if (!from || !into || !task) { fail(ko ? '계획에 없는 단계나 작업이에요.' : 'That phase or task is not in the plan.'); return true; }
+          from.tasks.splice(command.task, 1); into.tasks.splice(command.toTask, 0, task);
+          if (!from.tasks.length) next.splice(next.indexOf(from), 1);
+        }
+        else if (command.op === 'startTask') {
+          const task = next[command.phase]?.tasks[command.task];
+          if (!task || task.status === 'completed') { fail(ko ? '이미 완료된 작업이에요.' : 'That task is already completed.'); return true; }
+          for (const other of next.flatMap(phase => phase.tasks)) if (other.status === 'in_progress') other.status = 'pending';
+          task.status = 'in_progress'; delete task.blocker;
+        }
         plan = next; planRevision++; onPlanChanged();
         window.setTimeout(() => post('workspace/agentPlanResult', { requestId: command.requestId, ok: true }), 120); return true;
       }

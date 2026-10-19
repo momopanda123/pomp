@@ -47,6 +47,12 @@ namespace Pomp.VisualStudio.ToolWindow
         /// <summary>Host-chrome message the page sends for the editor ↔ chat focus chord (host/hello.shortcuts.toggleFocus); never forwarded to the session.</summary>
         public const string ToggleFocusMessageType = "ui/toggleFocus";
 
+        /// <summary>
+        /// Host-chrome message the page sends for a Visual Studio key it does not use itself (F1–F12, Break, Ctrl+Shift+B), payload
+        /// <c>{ chord }</c>: keys inside the WebView never reach the IDE's key bindings. Never forwarded to the session.
+        /// </summary>
+        public const string VsKeyMessageType = "ui/vsKey";
+
         /// <summary>Host-chrome message the page sends when files or an image are pasted into the chat input (only VS can read their paths); never forwarded to the session.</summary>
         public const string PasteFilesMessageType = "ui/pasteFiles";
 
@@ -124,6 +130,9 @@ namespace Pomp.VisualStudio.ToolWindow
 
         /// <summary>Raised on the UI thread when the page reports the focus-toggle shortcut.</summary>
         public event EventHandler? ToggleFocusRequested;
+
+        /// <summary>Raised on the UI thread with the chord of a Visual Studio key pressed in the page (<see cref="VsKeyMessageType"/>).</summary>
+        public event EventHandler<string>? VsKeyRequested;
 
         /// <summary>Raised on the UI thread when files or an image were pasted into the chat input.</summary>
         public event EventHandler? PasteFilesRequested;
@@ -361,6 +370,13 @@ namespace Pomp.VisualStudio.ToolWindow
             if (message.Type == ToggleFocusMessageType)
             {
                 ToggleFocusRequested?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+
+            if (message.Type == VsKeyMessageType)
+            {
+                var chord = message.Payload?["chord"];
+                if (chord != null && chord.Type == JTokenType.String && ((string)chord!).Length <= 32) VsKeyRequested?.Invoke(this, (string)chord!);
                 return;
             }
 

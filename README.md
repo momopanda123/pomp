@@ -43,23 +43,44 @@ Visual Studio 2017(15.9) · 2019(16.10+) · 2022 · 2026을 지원하고, 화면
 
 <table>
   <tr>
-    <td align="center" valign="top" width="50%"><b>슬래시 명령 · @ 멘션 · 권한 모드 · 보낼 대상</b><br>입력창에서 명령과 파일을 고르고, 권한 모드와 보낼 대상을 정한다.<br><br><img src="docs/media/howto-slash.gif" width="400" alt="슬래시 명령 · @ 멘션 · 권한 모드 · 보낼 대상"></td>
-    <td align="center" valign="top" width="50%"><b>작업 중 지시 · BTW</b><br>&nbsp;<br>작업이 도는 동안 대기열의 메시지를 지금 보내기로 바로 전하고, /btw로 작업과 별도로 잠깐 묻는다.<br><br><img src="docs/media/howto-steer.gif" width="400" alt="작업 중 지시 · BTW"></td>
+    <td align="center" valign="top" width="50%"><b>슬래시 명령 · @ 멘션 · 권한 모드 · 보낼 대상</b><br>입력창에서 명령과 파일을 고르고, 권한 모드와 보낼 대상을 정한다.</td>
+    <td align="center" valign="top" width="50%"><b>작업 중 지시 · BTW</b><br>작업이 도는 동안 대기열의 메시지를 지금 보내기로 바로 전하고, /btw로 작업과 별도로 잠깐 묻는다.</td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="50%"><b>에이전트에게 위임</b><br>역할 에이전트를 대화 상대 탭으로 열고 일을 맡긴다.<br><br><img src="docs/media/howto-partner.gif" width="400" alt="에이전트에게 위임"></td>
-    <td align="center" valign="top" width="50%"><b>조언자</b><br>조언자를 켜면 주 에이전트의 작업을 지켜보고 의견을 낸다.<br><br><img src="docs/media/howto-advisor.gif" width="400" alt="조언자"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-slash.gif" width="100%" alt="슬래시 명령 · @ 멘션 · 권한 모드 · 보낼 대상"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-steer.gif" width="100%" alt="작업 중 지시 · BTW"></td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="50%"><b>역할 그림과 POMP 지시</b><br>역할마다 그림을 정하고, POMP 자신의 지시를 편집한다.<br><br><img src="docs/media/howto-roles.gif" width="400" alt="역할 그림과 POMP 지시"></td>
-    <td align="center" valign="top" width="50%"><b>팀 만들기</b><br>여러 역할을 묶어 팀을 만든다.<br><br><img src="docs/media/howto-team.gif" width="400" alt="팀 만들기"></td>
+    <td align="center" valign="top" width="50%"><b>에이전트에게 위임</b><br>역할 에이전트를 대화 상대 탭으로 열고 일을 맡긴다.</td>
+    <td align="center" valign="top" width="50%"><b>조언자</b><br>조언자를 켜면 주 에이전트의 작업을 지켜보고 의견을 낸다.</td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="50%"><b>자동화 규칙</b><br>빌드 실패 같은 이벤트에 알림·채팅 전달·스크립트를 건다.<br><br><img src="docs/media/howto-automation.gif" width="400" alt="자동화 규칙"></td>
-    <td align="center" valign="top" width="50%"><b>도구 탭</b><br>대화 설정·권한·스킬·MCP·규칙·워크플로·지식을 한곳에서 관리한다.<br><br><img src="docs/media/howto-tools.gif" width="400" alt="도구 탭"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-partner.gif" width="100%" alt="에이전트에게 위임"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-advisor.gif" width="100%" alt="조언자"></td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="50%"><b>계정 · 모델 · 추론 수준</b><br>계정을 연결하고, 입력창 아래에서 모델과 추론 수준을 고른다.<br><br><img src="docs/media/howto-accounts.gif" width="400" alt="계정 · 모델 · 추론 수준"></td>
+    <td align="center" valign="top" width="50%"><b>역할 그림과 POMP 지시</b><br>역할마다 그림을 정하고, POMP 자신의 지시를 편집한다.</td>
+    <td align="center" valign="top" width="50%"><b>팀 만들기</b><br>여러 역할을 묶어 팀을 만든다.</td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-roles.gif" width="100%" alt="역할 그림과 POMP 지시"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-team.gif" width="100%" alt="팀 만들기"></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><b>자동화 규칙</b><br>빌드 실패 같은 이벤트에 알림·채팅 전달·스크립트를 건다.</td>
+    <td align="center" valign="top" width="50%"><b>도구 탭</b><br>대화 설정·권한·스킬·MCP·규칙·워크플로·지식을 한곳에서 관리한다.</td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-automation.gif" width="100%" alt="자동화 규칙"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-tools.gif" width="100%" alt="도구 탭"></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><b>계정 · 모델 · 추론 수준</b><br>계정을 연결하고, 입력창 아래에서 모델과 추론 수준을 고른다.</td>
+    <td width="50%"></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-accounts.gif" width="100%" alt="계정 · 모델 · 추론 수준"></td>
+    <td width="50%"></td>
   </tr>
 </table>
 <!-- /howto-videos -->
