@@ -4,6 +4,8 @@ import type { AgentHistoryEntry, ConversationPartner, HistoryFilter, QueueState 
 /** Browser-only chat tabs, queue and bounded history fixtures. Never invokes a provider. */
 export function createMockConversations(post: <K extends HostMessageType>(type: K, payload: HostToUi[K]) => void, options: {
   sessionId: () => string; busy: () => boolean; start: (input: UiToHost['chat/send']) => void;
+  /** The queue's "send now": to the running agent (`chat/steered`), or a turn when nothing runs. */
+  steer: (input: UiToHost['chat/send']) => void;
 }) {
   let counter = 0;
   // Agent and team conversations (the host's chat-tabs.json): their partners, the open tabs in order, and the Default tab's conversation.
@@ -37,13 +39,14 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
     const item = queue.items.shift()!; if (!queue.items.length) queue.sessionId = null;
     publishQueue(); options.start({ clientMessageId: `queued-${item.id}`, text: item.text, attachments: item.attachments, includeEditorContext: item.includeEditorContext, team: item.team, agent: item.agent, agentInstance: item.agentInstance });
   };
-  const enqueue = (input: UiToHost['chat/send']): boolean => {
+  const enqueue = (input: UiToHost['chat/send'], canSteer = false): boolean => {
     if (queue.items.length && queue.sessionId !== options.sessionId()) { post('error', { code: 'queue_rejected', message: 'This queue belongs to another conversation.', retryable: false }); return false; }
     const id = `queue-${++counter}`;
-    queue.sessionId = options.sessionId(); queue.items.push({ id, text: input.text, includeEditorContext: input.includeEditorContext, attachments: input.attachments, team: input.team ?? undefined, agent: input.agent ?? undefined, agentInstance: input.agentInstance ?? undefined, createdAt: new Date().toISOString() });
+    queue.sessionId = options.sessionId(); queue.items.push({ id, text: input.text, includeEditorContext: input.includeEditorContext, attachments: input.attachments, team: input.team ?? undefined, agent: input.agent ?? undefined, agentInstance: input.agentInstance ?? undefined, createdAt: new Date().toISOString(), canSteer });
     post('chat/queued', { clientMessageId: input.clientMessageId, itemId: id }); publishQueue(); return true;
   };
-  const tryQueue = (input: UiToHost['chat/send']) => { if (!options.busy() && !queue.items.length) return false; enqueue(route(input)); return true; };
+  // Like the host: an item steers when it goes to this conversation itself (no chosen target) and is no slash command.
+  const tryQueue = (input: UiToHost['chat/send']) => { if (!options.busy() && !queue.items.length) return false; enqueue(route(input), !input.team && !input.agent && !input.agentInstance && !input.text.trimStart().startsWith('/')); return true; };
   const pause = (reason: string) => { if (!queue.items.length) return; queue.paused = true; queue.reason = reason; publishQueue(); };
   /** The current conversation changed; `assign` makes it that partner's new conversation. A listed one opens as its partner's tab, any other becomes Default's. */
   const changedSession = (assign?: ConversationPartner) => {
@@ -84,6 +87,11 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
       else if (p.action === 'remove') queue.items.splice(index, 1);
       else if (p.action === 'edit') { if (!p.text?.trim()) error = 'Message is empty.'; else queue.items[index]!.text = p.text; }
       else if (p.action === 'move') { const item = queue.items.splice(index, 1)[0]!; queue.items.splice(Math.max(0, Math.min(p.index ?? 0, queue.items.length)), 0, item); }
+      else if (p.action === 'steer') {
+        const item = queue.items[index]!;
+        if (!item.canSteer) error = 'A message with a chosen recipient or a command cannot be sent now.';
+        else { queue.items.splice(index, 1); window.setTimeout(() => options.steer({ clientMessageId: `queued-${item.id}`, text: item.text, attachments: item.attachments, includeEditorContext: item.includeEditorContext }), 0); }
+      }
       if (!queue.items.length) queue.sessionId = null;
       post('chat/queueReply', { requestId: p.requestId, ok: !error, error }); publishQueue(); if (!error && p.action === 'resume') drain(); return true;
     }

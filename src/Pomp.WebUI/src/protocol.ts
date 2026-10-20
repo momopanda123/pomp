@@ -416,6 +416,8 @@ export interface AgentPlanPage {
   requestId: string; ok: boolean; error?: string; revision?: string; editable?: boolean;
   /** While the agent works: the tasks not in progress may be edited (added, changed, deleted) and phases renamed. */
   editableWhileWorking?: boolean; page: number; size: number; total: number;
+  /** Completed tasks of the whole plan (not only the matching ones): what clearCompleted removes. */
+  completedCount?: number;
   phases: { index: number; name: string; taskCount: number }[];
   rows: { phase: number; task: number; content: string; status: string; blocker?: string }[];
 }
@@ -425,7 +427,13 @@ export type AgentPlanEdit = { requestId: string; sessionId: string; revision: st
   | { op: 'deleteTask'; phase: number; task: number }
   | { op: 'addPhase'; name: string; content: string; status?: string }
   | { op: 'renamePhase'; phase: number; name: string }
-  | { op: 'deletePhase'; phase: number });
+  | { op: 'deletePhase'; phase: number }
+  /** Removes every completed task of the whole plan, and a phase it leaves empty. */
+  | { op: 'clearCompleted' }
+  /** Moves the task to index `toTask` of phase `toPhase` (counted once it has left its place); a phase it leaves empty is removed. */
+  | { op: 'moveTask'; phase: number; task: number; toPhase: number; toTask: number }
+  /** Makes the task the one in progress (any other goes back to pending, its blocker is dropped); refused while the agent works. */
+  | { op: 'startTask'; phase: number; task: number });
 /** Answer to workspace/review editorChanges (the candidate files) and fromEditor (staging). */
 export interface EditorChangesReply { requestId: string; action: 'editorChanges' | 'fromEditor'; ok: boolean; error?: string; files?: { path: string; unsaved: boolean }[] }
 
@@ -523,6 +531,21 @@ export interface TurnStartedPayload {
   /** The conversation answered itself (no team, agent or instance): a retry keeps that destination. */
   main?: boolean | null;
 }
+
+/** A message the user steered into the running agent (`chat/steered`): shown as a user bubble inside the running turn. */
+export interface SteeredPayload {
+  steerId: string;
+  clientMessageId?: string;
+  text: string;
+  attachments?: { path: string }[];
+  editorContext?: TurnStartedPayload['editorContext'];
+}
+
+/** omp's side question (`/btw`) lifecycle; `interrupted`: the process ended while it ran. */
+export type BtwStatus = 'running' | 'complete' | 'cancelled' | 'error' | 'interrupted';
+export interface BtwTurn { question: string; answer: string; status: BtwStatus; createdAt: number; updatedAt: number; error?: string }
+/** A side-question topic: its first turn, then its follow-ups; the latest turn is the last follow-up, else the record itself. */
+export interface BtwRecord extends BtwTurn { id: string; leafId: string | null; followUps?: BtwTurn[] }
 
 export interface WorkspaceFile {
   kind?: string; symbol?: string; line?: number;
@@ -1120,6 +1143,8 @@ export interface ComputerStatePayload {
   pending: boolean;
   available: boolean;
   message?: string;
+  /** Another conversation holds computer use (another tab, or another POMP on this PC): its name; this one cannot switch it on. */
+  ownerElsewhere?: string | null;
 }
 
 export interface ComputerSetCommand {
@@ -1215,6 +1240,12 @@ export interface HostToUi extends ConversationHostToUi, ToolsHostToUi {
   'chat/advisorNotes': { notes: AdvisorNote[] };
   'chat/replayBegin': { truncated: boolean };
   'chat/replayEnd': Record<string, never>;
+  'chat/steered': SteeredPayload;
+  /** Stop took these steered messages back before the agent read them: their bubbles show "not delivered". */
+  'chat/steerWithdrawn': { steerIds: string[] };
+  'btw/record': { record: BtwRecord };
+  'btw/delta': { recordId: string; delta: string };
+  'btw/reply': { requestId: string; ok: boolean; error?: string; record?: BtwRecord };
   'workspace/files': WorkspaceFilesPayload;
   'workspace/composerState': ComposerWorkflowState;
   'workspace/agentPlanResult': { requestId: string; ok: boolean; error?: string };
@@ -1290,6 +1321,12 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
     main?: true;
   };
   'chat/stop': Empty;
+  /** Same shape as `chat/send`: to the running agent now (omp `steer`); with nothing running it is sent like `chat/send`. */
+  'chat/steer': UiToHost['chat/send'];
+  /** A side question about this conversation; `recordId` follows up that topic. Answered by `btw/reply`, then `btw/record`/`btw/delta`. */
+  'btw/ask': { requestId: string; question: string; recordId?: string };
+  /** Cancels the running side question (of that topic only, when given). */
+  'btw/cancel': { recordId?: string };
   /** start: begin a new run from a saved workflow's task/steps (no active run; unpaused; sends no model request — the page sends the chat message). */
   'workspace/composer': { action: 'refresh' | 'pause' | 'resume' | 'cancel' | 'save' | 'start'; requestId: string; root?: string; sessionId?: string; id?: string; revision?: number; task?: string; steps?: string[] };
   'workspace/agentPlan': { requestId: string; sessionId: string; base: AgentPlanPhase[]; phases: AgentPlanPhase[] };
@@ -1304,6 +1341,8 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'workspace/countBasketTokens': { requestId: string; root: string; sessionId?: string; includeEditorContext: boolean; attachments?: { path: string }[] };
   /** Host-chrome: move the focus from the page to the editor (the VS host handles it; never reaches the session). */
   'ui/toggleFocus': Record<string, never>;
+  /** Host-chrome: a Visual Studio key the page does not use (F5, Ctrl+Shift+B); the VS host runs the command bound to it (never reaches the session). */
+  'ui/vsKey': { chord: string };
   /** Host-chrome: a short notice (a control action that failed, a draft warning) shown in the VS status bar, not inside the page. */
   'ui/status': { text: string; level: 'error' | 'warning' | 'info' };
   /** Files or an image were pasted into the chat input: the host reads the clipboard and puts them into the context basket (composer/prefill). */
@@ -1423,6 +1462,11 @@ const HOST_TYPES: Record<HostMessageType, true> = {
   'computer/reply': true,
   'chat/replayBegin': true,
   'chat/replayEnd': true,
+  'chat/steered': true,
+  'chat/steerWithdrawn': true,
+  'btw/record': true,
+  'btw/delta': true,
+  'btw/reply': true,
   'workspace/files': true,
   'workspace/composerState': true,
   'workspace/agentPlanResult': true,

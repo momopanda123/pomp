@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Pomp.Adapters
@@ -514,6 +515,9 @@ namespace Pomp.Adapters
         /// Without a platform the active solution platform is kept.
         /// </summary>
         public string? Configuration { get; set; }
+
+        /// <summary>Optional status lines while the call waits (for a build that was already running, for the build to start, for it to end).</summary>
+        public IProgress<string>? Progress { get; set; }
     }
 
     public sealed class BuildResult
@@ -532,6 +536,12 @@ namespace Pomp.Adapters
 
         /// <summary>Total warnings in the Error List after the build (not limited by the cap on <see cref="Errors"/>).</summary>
         public int WarningCount { get; set; }
+
+        /// <summary>
+        /// Set when nothing was built (no solution, debugging in progress, Visual Studio did not start the build, invalid request):
+        /// the reason, for the model. The other members carry no outcome then.
+        /// </summary>
+        public string? Error { get; set; }
     }
 
     public sealed class OpenDocumentInfo

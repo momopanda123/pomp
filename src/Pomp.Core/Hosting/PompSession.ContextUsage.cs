@@ -139,6 +139,12 @@ namespace Pomp.Hosting
             lock (_contextLock) return !string.IsNullOrEmpty(sessionId) && string.Equals(sessionId, _contextBreakdownSession, StringComparison.Ordinal) ? _contextBreakdown : null;
         }
 
+        /// <summary>The conversation was compacted: its breakdown no longer holds, so the next session/info goes without it and ApplyState measures it again.</summary>
+        private void ForgetContextBreakdown()
+        {
+            lock (_contextLock) { _contextBreakdown = null; _contextBreakdownSession = null; }
+        }
+
         /// <summary>
         /// Remembers whether the engine's raw catalog (<paramref name="rows"/>) lists <c>context</c> with <c>source: "builtin"</c>. Only the
         /// builtin is a local command whose output the host can read; a prompt template, skill or extension command named "context" would
@@ -294,7 +300,7 @@ namespace Pomp.Hosting
                 var paths = (args["attachments"] as JArray ?? new JArray()).OfType<JObject>().Select(item => item.GetString("path") ?? string.Empty)
                     .Where(path => path.Length > 0 && path.Length <= 4096 && !path.Any(char.IsControl)).ToList();
                 if (paths.Count > 0)
-                    reply.Attachments = EstimateTokens(PromptDisplay.AttachmentsHeader + "\n" + string.Join("\n", paths.Select(path => "- " + path)) + "\n\n");
+                    reply.Attachments = EstimateTokens(PromptDisplay.AttachmentsHeader(CanReadBuffer()) + "\n" + string.Join("\n", paths.Select(path => "- " + path)) + "\n\n");
                 if (args.GetBool("includeEditorContext") == true && _bridge.State == BridgeState.Running)
                 {
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);

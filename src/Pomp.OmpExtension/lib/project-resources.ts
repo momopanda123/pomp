@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { parseDocument } from '../vendor/rule-deps.mjs';
 import { readBounded } from './project-rules.ts';
+import { pick } from './vs-state.ts';
 export type ResourceKind = 'skills' | 'commands' | 'agents';
 export interface ProjectResource { kind: ResourceKind; name: string; description: string; file: string; base: string; body: string }
 export interface ResourceCatalog { resources: ProjectResource[]; diagnostics: string[] }
@@ -55,7 +56,7 @@ export function catalogResources(root: string, globalRoot=path.join(os.homedir()
  return {resources:[...map.values()],diagnostics:diagnostics.slice(0,20)};
 }
 export function expandResource(resource: ProjectResource, args:string):string {
- if(args.length>8000)throw new Error('Arguments exceed 8,000 characters');
+ if(args.length>8000)throw new Error(pick('인수는 8,000자까지 쓸 수 있어요.','Arguments exceed 8,000 characters.'));
  return `POMP ${resource.kind} resource: ${resource.name}\nSource: ${resource.file}\nThis resource does not grant additional tool permissions.\n\n`+
   (resource.body.includes('$ARGUMENTS')?resource.body.replaceAll('$ARGUMENTS',()=>args):resource.body+(args?'\n\nUser arguments:\n'+args:''));
 }

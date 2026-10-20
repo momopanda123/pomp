@@ -38,6 +38,8 @@ namespace Pomp.VisualStudio.Editor
         private bool disposed;
         private bool bookmarksEnabled;
         public event EventHandler? Changed;
+        /// <summary>Set while POMP saves a file whose disk text an omp tool wrote (TextBufferAdapter.ShowDiskEditAsync): that save keeps the marks.</summary>
+        internal ITextBuffer? QuietSave;
         internal bool Enabled => !disposed && services.Settings.AppliedLiveFollowEnabled;
 
         public EditorFollowService(PompServices services)
@@ -94,17 +96,7 @@ namespace Pomp.VisualStudio.Editor
             if (!state.History.TryGetValue(before.Version.VersionNumber, out var previous))
                 throw new InvalidOperationException("The live edit baseline is no longer available.");
             previous.Sessions.TryGetValue(session, out var old);
-            // A new request's first edit in this conversation: with "last editing request only" the earlier request's marks go, in every file.
-            if (services.Settings.AppliedLiveChangeRetention == LiveChangeRetention.LastRequest && task.Length > 0)
-            {
-                if (markedTask.TryGetValue(session, out var shown) && shown != task)
-                {
-                    var owner = session;
-                    foreach (var other in buffers.Values) Drop(other, name => name == owner);
-                    old = null;
-                }
-                markedTask[session] = task;
-            }
+            old = DropEarlierRequest(old);
             var changes = before.Version.Changes;
             if (changes.Count == 0) return;
             if (!state.History.ContainsKey(after.Version.VersionNumber))
@@ -116,7 +108,55 @@ namespace Pomp.VisualStudio.Editor
             var next = LiveChangeTracker.Record(old ?? new List<LiveChange>(), before, after, changes);
             state.Sessions[session] = next;
             state.Save(after);
-            var first = changes.Min(c => c.NewPosition);
+            Committed(path, buffer, after, changes.Min(c => c.NewPosition));
+        }
+
+        /// <summary>
+        /// The buffer already holds a change POMP did not apply itself (an omp file tool wrote the file and the editor loaded it):
+        /// <paramref name="changes"/> (positions in the current text, each with its text before) become this conversation's change, as
+        /// <see cref="Record"/> would have made it. Earlier marks they overlap give way to them.
+        /// </summary>
+        public void RecordLoaded(string path, ITextBuffer buffer, IReadOnlyList<LiveChange> changes)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (disposed || changes.Count == 0 || (!Enabled && !bookmarksEnabled)) return;
+            if (session.Length == 0) { services.Logger.Warn("Live edit provenance unavailable: no active conversation."); return; }
+            var current = buffer.CurrentSnapshot;
+            if (!buffers.ContainsKey(buffer)) RebindReopenedBuffer(buffer, current);
+            if (!buffers.TryGetValue(buffer, out var state))
+            {
+                state = new BufferState(path, buffer, services.Settings);
+                buffers.Add(buffer, state);
+                Attach(state);
+            }
+            state.Sessions.TryGetValue(session, out var old);
+            old = DropEarlierRequest(old);
+            var next = (old ?? new List<LiveChange>()).Where(e => !changes.Any(c => LiveChangeTracker.Touches(c.Start, c.End, e.Start, e.End))).ToList();
+            next.AddRange(changes);
+            next.Sort((a, b) => a.Start.CompareTo(b.Start));
+            state.Sessions[session] = next;
+            state.Save(current);
+            Committed(path, buffer, current, changes.Min(c => c.Start));
+        }
+
+        /// <summary>With "last editing request only", a new request's first edit in this conversation drops the earlier request's marks in every file.</summary>
+        private List<LiveChange>? DropEarlierRequest(List<LiveChange>? old)
+        {
+            if (services.Settings.AppliedLiveChangeRetention != LiveChangeRetention.LastRequest || task.Length == 0) return old;
+            if (markedTask.TryGetValue(session, out var shown) && shown != task)
+            {
+                var owner = session;
+                foreach (var other in buffers.Values) Drop(other, name => name == owner);
+                old = null;
+            }
+            markedTask[session] = task;
+            return old;
+        }
+
+        /// <summary>A recorded change: its bookmark, the follow to its first line, the views redrawn.</summary>
+        private void Committed(string path, ITextBuffer buffer, ITextSnapshot after, int first)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
             var line = after.GetLineNumberFromPosition(Math.Min(first, after.Length)) + 1;
             if (bookmarksEnabled)
             {
@@ -283,7 +323,7 @@ namespace Pomp.VisualStudio.Editor
         /// <summary>"Until the file is saved": saving a file drops its marks (every conversation's; the saved text is the accepted one).</summary>
         private void OnFileAction(object sender, TextDocumentFileActionEventArgs args)
         {
-            if ((args.FileActionType & FileActionTypes.ContentSavedToDisk) == 0 || !(sender is ITextDocument document)) return;
+            if ((args.FileActionType & FileActionTypes.ContentSavedToDisk) == 0 || !(sender is ITextDocument document) || ReferenceEquals(document.TextBuffer, QuietSave)) return;
             services.JoinableTaskFactory.RunAsync(async () =>
             {
                 await services.JoinableTaskFactory.SwitchToMainThreadAsync();

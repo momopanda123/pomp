@@ -94,6 +94,10 @@ function audit(tool:string,decision:PolicyDecision,pi:ExtensionAPI):void {
 export default function projectPermissions(pi:ExtensionAPI):void {
  if(!isPompHost())return;
  pi.on('tool_call',(event,ctx)=>{
+  // `write xd://<tool>` is omp's transport to a mounted tool (discoverable VS tools, ast_edit, lsp), not a file write: the mounted tool emits
+  // its own tool_call, which is judged by its name. Judging the outer write too would block an allowed VS tool unless `write` were allowed.
+  const target=event.toolName==='write'&&event.input&&typeof event.input==='object'?Reflect.get(event.input,'path'):undefined;
+  if(typeof target==='string'&&/^xd:\/\//i.test(target.trim()))return;
   const hostRoot=process.env.POMP_SOLUTION_ROOT;
   // A member's isolated copy is not the workspace, but its own folder: never the copy's policy file, which the member could edit.
   const isolated=!!hostRoot&&isolatedCopy(ctx.cwd,process.env.POMP_WORKTREE_BASE,(ctx as {agent?:{kind?:unknown}}).agent?.kind);

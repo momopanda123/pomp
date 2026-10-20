@@ -53,7 +53,12 @@ namespace Pomp.Hosting
             state.Tabs = tabs.Conversations.Where(e => e.Open).Select(e => new ConversationTabPayload { SessionId = e.SessionId, Partner = CopyPartner(e.Partner), Title = Title(e.Partner) }).ToList();
             return state;
         }
-        private void PublishTabs() => _ui.Post(UiMessageTypes.ConversationTabsState, TabsView(), UiDelivery.State);
+        private void PublishTabs()
+        {
+            _ui.Post(UiMessageTypes.ConversationTabsState, TabsView(), UiDelivery.State);
+            // A closed tab (or a new conversation in it) no longer holds computer use.
+            ReleaseClosedComputerOwner();
+        }
         /// <summary>
         /// conversation/tab (docs/ui-protocol.md "Conversation tabs"): every tab is its own conversation, so opening, activating and closing the
         /// current tab switch the engine's conversation and answer with one <c>session/newResult</c>; closing another tab answers <c>conversation/tabReply</c>.
@@ -263,7 +268,7 @@ namespace Pomp.Hosting
         }
         private ChatQueueStatePayload QueueView()
         {
-            lock (_stateLock) return new ChatQueueStatePayload { SessionId = _chatQueue.Count == 0 ? null : _queueSession, Paused = _queuePaused, Reason = _queueReason, Items = _chatQueue.Select(q => new ChatQueueItemPayload { Id = q.Id, Text = q.Send.Text, IncludeEditorContext = q.Send.IncludeEditorContext, Attachments = CopySend(q.Send).Attachments, Team = q.Send.Team ?? (q.Partner?.Kind == "team" ? q.Partner.Id : null), Agent = q.Send.Agent ?? (q.Partner?.Kind == "agent" ? q.Partner.Id : null), AgentInstance = q.Send.AgentInstance, CreatedAt = q.CreatedAt }).ToList() };
+            lock (_stateLock) return new ChatQueueStatePayload { SessionId = _chatQueue.Count == 0 ? null : _queueSession, Paused = _queuePaused, Reason = _queueReason, Items = _chatQueue.Select(q => new ChatQueueItemPayload { Id = q.Id, Text = q.Send.Text, IncludeEditorContext = q.Send.IncludeEditorContext, Attachments = CopySend(q.Send).Attachments, Team = q.Send.Team ?? (q.Partner?.Kind == "team" ? q.Partner.Id : null), Agent = q.Send.Agent ?? (q.Partner?.Kind == "agent" ? q.Partner.Id : null), AgentInstance = q.Send.AgentInstance, CreatedAt = q.CreatedAt, CanSteer = CanSteer(q.Send) }).ToList() };
         }
         private int QueueBytes() => System.Text.Encoding.UTF8.GetByteCount(Pomp.Json.PompJson.Serialize(QueueView()));
         private void PublishChatQueue() => _ui.Post(UiMessageTypes.ChatQueueState, QueueView(), UiDelivery.State);
@@ -276,9 +281,10 @@ namespace Pomp.Hosting
         {
             if (string.IsNullOrWhiteSpace(send.Text) && (send.Attachments == null || send.Attachments.Count == 0)) throw new ArgumentException(PompLanguage.Pick("메시지가 비어 있어요.", "Message is empty."));
             if (send.Attachments?.Any(a => a.Path == null || a.Path.Length > 4096 || a.Path.Any(char.IsControl)) == true) throw new ArgumentException(PompLanguage.Pick("첨부 파일 경로가 올바르지 않아요.", "An attachment path is invalid."));
-            // The attached paths go into the same prompt, so their number is bounded only by the frame size.
+            // The attached paths go into the same prompt, so their number is bounded only by the frame size. The read_buffer header is the
+            // longer of the two (PromptDisplay.AttachmentsHeader), so it bounds either.
             var paths = send.Attachments?.Select(a => "- " + a.Path).ToList() ?? new List<string>();
-            var message = paths.Count == 0 ? send.Text : PromptDisplay.AttachmentsHeader + "\n" + string.Join("\n", paths) + "\n\n" + send.Text;
+            var message = paths.Count == 0 ? send.Text : PromptDisplay.AttachmentsHeader(true) + "\n" + string.Join("\n", paths) + "\n\n" + send.Text;
             var probe = new JObject { ["type"] = "prompt", ["id"] = "prompt-queue", ["message"] = message };
             if (Pomp.Transport.NdjsonWriter.Encode(probe).Length > MaxPromptFrameBytes) throw new ArgumentException(PompLanguage.Pick("메시지가 너무 커요.", "Message is too large."));
             if (new[] { send.Team, send.Agent, send.AgentInstance }.Count(t => !string.IsNullOrWhiteSpace(t)) > 1) throw new ArgumentException(PompLanguage.Pick("보낼 대상이 너무 많아요.", "Too many targets."));
@@ -310,6 +316,8 @@ namespace Pomp.Hosting
             try
             {
                 var command = Pomp.Json.PompJson.ToObject<ChatQueueCommandPayload>(args) ?? throw new ArgumentException(PompLanguage.Pick("대기열 명령 형식이 올바르지 않아요.", "The queue command is invalid."));
+                // Sends now: the item goes to the running agent (or, with nothing running, starts a turn) instead of waiting its turn.
+                if (command.Action == "steer") return SteerQueuedAsync(requestId, command.Id);
                 lock (_stateLock)
                 {
                     var item = _chatQueue.FirstOrDefault(q => q.Id == command.Id);

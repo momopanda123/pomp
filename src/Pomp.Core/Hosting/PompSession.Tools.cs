@@ -224,7 +224,7 @@ namespace Pomp.Hosting
         /// or the user's own values would be wiped). A user's own copy of a catalog skill wins by directory order.
         /// Atomic, and safe to rewrite while the engine runs: omp watches the file and applies both keys without a restart.
         /// </summary>
-        private void WriteOverlay(string overlayPath, string root, IReadOnlyList<string> hostTools, IReadOnlyList<string>? deniedTools, ComputerUseOptions? computer, bool yolo, string? worktreeBase)
+        private void WriteOverlay(string overlayPath, string root, IReadOnlyList<string> hostTools, IReadOnlyList<string>? deniedTools, ComputerUseOptions? computer, bool yolo, bool toolUi, string? worktreeBase)
         {
             var home = ToolResourceFiles.Home(_options.UserHome);
             var directories = new List<string> { Path.Combine(root, ".pomp", "skills"), Path.Combine(home, ".pomp", "skills") };
@@ -262,7 +262,7 @@ namespace Pomp.Hosting
                 _logger.Warn("Could not add the bundled skills to the overlay: " + ex.Message);
             }
 
-            OmpOverlayWriter.Write(overlayPath, hostTools, deniedTools, computer, yolo, directories, worktreeBase, disabled);
+            OmpOverlayWriter.Write(overlayPath, hostTools, deniedTools, computer, yolo, toolUi, directories, worktreeBase, disabled);
         }
         /// <summary>Switches one skill off or on (any source, including engine rows): stored, then the live overlay is rewritten.</summary>
         private void SetSkillEnabled(string name, bool enabled)
@@ -314,7 +314,7 @@ namespace Pomp.Hosting
             lock (_computerLock) computer = _computerOptions;
             var extensionArguments = _settings.LoadOmpExtensions ? OmpExtensionArguments.Build(_environment.ExtensionDirectory ?? string.Empty) : Array.Empty<string>();
             var worktreeBase = extensionArguments.Count > 0 && OmpExtensionArguments.ContainsModule(_environment.ExtensionDirectory, "./extensions/teams.ts") ? ProjectData.Folder(root, "wt") : null;
-            WriteOverlay(Path.Combine(dataDirectory, "omp", "pomp-overlay.yml"), root, hostTools, blockNetwork ? OmpNetworkTools.Names : null, computer, _settings.ApprovalMode == OmpApprovalMode.Yolo, worktreeBase);
+            WriteOverlay(Path.Combine(dataDirectory, "omp", "pomp-overlay.yml"), root, hostTools, blockNetwork ? OmpNetworkTools.Names : null, computer, _settings.ApprovalMode == OmpApprovalMode.Yolo, _settings.UseRpcUiMode, worktreeBase);
         }
         // ui/ready holds the hub lock while taking the session snapshot: never take the hub lock under _stateLock.
         private bool ResourcesBusy() { var pending = _ui.PendingRequestCount > 0; lock (_stateLock) return pending || ResourcesBusyLocked(); }
@@ -427,6 +427,20 @@ namespace Pomp.Hosting
             }
             catch (Exception ex) when (ex is FormatException or JsonException or InvalidCastException or ArgumentException) { _logger.Debug("Ignored malformed tool-selection result."); }
             return true;
+        }
+        /// <summary>
+        /// Whether the current conversation can call <c>read_buffer</c>, so a composed prompt names it only then: the engine's tool snapshot of
+        /// this conversation (active and xd://-mounted tools; an agent conversation has its role's tools only, docs/architecture.md §8.8), or,
+        /// before a snapshot of this conversation arrived, whether the host offers the tool.
+        /// </summary>
+        private bool CanReadBuffer()
+        {
+            lock (_stateLock)
+            {
+                if (_toolsView.Available && _toolsView.SessionId != null && _toolsView.SessionId == _info.SessionId)
+                    return _toolsView.Tools.Any(t => t.Name == Pomp.Tools.HostToolNames.ReadBuffer && t.Active);
+            }
+            return _registry.TryGet(Pomp.Tools.HostToolNames.ReadBuffer, out _);
         }
         private static bool PlainToolName(string? name) => name != null && name.Length is > 0 and <= 256 && !name.Any(char.IsControl);
         private static HashSet<string> ToolNames(JToken? value) => value is JArray array ? new HashSet<string>(array.Where(t => t.Type == JTokenType.String).Select(t => (string)t!).Where(PlainToolName), StringComparer.Ordinal) : throw new JsonException();

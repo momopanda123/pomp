@@ -7,13 +7,15 @@ Visual Studio 2017(15.9) · 2019(16.10+) · 2022 · 2026을 지원하고, 화면
 
 | 구성 요소 | 버전 | 맡는 일 |
 |---|---|---|
-| POMP | 0.5.7 | Visual Studio 확장: 채팅 화면, VS 도구, 승인 카드, 에이전트·팀 관리 |
+| POMP | 0.5.8 | Visual Studio 확장: 채팅 화면, VS 도구, 승인 카드, 에이전트·팀 관리 |
 | omp | 18.12.1 | 함께 들어 있는 대화·에이전트 엔진 [oh-my-pi](https://github.com/can1357/oh-my-pi)(MIT) |
 
 ![POMP 소개](docs/media/pomp-intro.gif)
 
 <!-- howto-videos -->
 ## 기능별 영상
+
+영상은 POMP 언어를 영어로 둔 화면이다. 한국어로 두면 POMP 메뉴와 화면이 한국어로 나온다.
 
 **편집기에서 코드 설명** — 코드를 선택하고 우클릭 › POMP › 이 코드 설명. 설명은 채팅에 나온다.
 
@@ -41,20 +43,44 @@ Visual Studio 2017(15.9) · 2019(16.10+) · 2022 · 2026을 지원하고, 화면
 
 <table>
   <tr>
-    <td align="center" valign="top" width="50%"><b>슬래시 명령 · @ 멘션 · 권한 모드 · 보낼 대상</b><br>입력창에서 명령과 파일을 고르고, 권한 모드와 보낼 대상을 정한다.<br><br><img src="docs/media/howto-slash.gif" width="400" alt="슬래시 명령 · @ 멘션 · 권한 모드 · 보낼 대상"></td>
-    <td align="center" valign="top" width="50%"><b>에이전트에게 위임</b><br>&nbsp;<br>역할 에이전트를 대화 상대 탭으로 열고 일을 맡긴다.<br><br><img src="docs/media/howto-partner.gif" width="400" alt="에이전트에게 위임"></td>
+    <td align="center" valign="top" width="50%"><b>슬래시 명령 · @ 멘션 · 권한 모드 · 보낼 대상</b><br>입력창에서 명령과 파일을 고르고, 권한 모드와 보낼 대상을 정한다.</td>
+    <td align="center" valign="top" width="50%"><b>작업 중 지시 · BTW</b><br>작업이 도는 동안 대기열의 메시지를 지금 보내기로 바로 전하고, /btw로 작업과 별도로 잠깐 묻는다.</td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="50%"><b>조언자</b><br>조언자를 켜면 주 에이전트의 작업을 지켜보고 의견을 낸다.<br><br><img src="docs/media/howto-advisor.gif" width="400" alt="조언자"></td>
-    <td align="center" valign="top" width="50%"><b>역할 그림과 POMP 지시</b><br>역할마다 그림을 정하고, POMP 자신의 지시를 편집한다.<br><br><img src="docs/media/howto-roles.gif" width="400" alt="역할 그림과 POMP 지시"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-slash.gif" width="100%" alt="슬래시 명령 · @ 멘션 · 권한 모드 · 보낼 대상"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-steer.gif" width="100%" alt="작업 중 지시 · BTW"></td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="50%"><b>팀 만들기</b><br>여러 역할을 묶어 팀을 만든다.<br><br><img src="docs/media/howto-team.gif" width="400" alt="팀 만들기"></td>
-    <td align="center" valign="top" width="50%"><b>자동화 규칙</b><br>빌드 실패 같은 이벤트에 알림·채팅 전달·스크립트를 건다.<br><br><img src="docs/media/howto-automation.gif" width="400" alt="자동화 규칙"></td>
+    <td align="center" valign="top" width="50%"><b>에이전트에게 위임</b><br>역할 에이전트를 대화 상대 탭으로 열고 일을 맡긴다.</td>
+    <td align="center" valign="top" width="50%"><b>조언자</b><br>조언자를 켜면 주 에이전트의 작업을 지켜보고 의견을 낸다.</td>
   </tr>
   <tr>
-    <td align="center" valign="top" width="50%"><b>도구 탭</b><br>&nbsp;<br>대화 설정·권한·스킬·MCP·규칙·워크플로·지식을 한곳에서 관리한다.<br><br><img src="docs/media/howto-tools.gif" width="400" alt="도구 탭"></td>
-    <td align="center" valign="top" width="50%"><b>계정 · 모델 · 추론 수준</b><br>계정을 연결하고, 입력창 아래에서 모델과 추론 수준을 고른다.<br><br><img src="docs/media/howto-accounts.gif" width="400" alt="계정 · 모델 · 추론 수준"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-partner.gif" width="100%" alt="에이전트에게 위임"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-advisor.gif" width="100%" alt="조언자"></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><b>역할 그림과 POMP 지시</b><br>역할마다 그림을 정하고, POMP 자신의 지시를 편집한다.</td>
+    <td align="center" valign="top" width="50%"><b>팀 만들기</b><br>여러 역할을 묶어 팀을 만든다.</td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-roles.gif" width="100%" alt="역할 그림과 POMP 지시"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-team.gif" width="100%" alt="팀 만들기"></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><b>자동화 규칙</b><br>빌드 실패 같은 이벤트에 알림·채팅 전달·스크립트를 건다.</td>
+    <td align="center" valign="top" width="50%"><b>도구 탭</b><br>대화 설정·권한·스킬·MCP·규칙·워크플로·지식을 한곳에서 관리한다.</td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-automation.gif" width="100%" alt="자동화 규칙"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-tools.gif" width="100%" alt="도구 탭"></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><b>계정 · 모델 · 추론 수준</b><br>계정을 연결하고, 입력창 아래에서 모델과 추론 수준을 고른다.</td>
+    <td width="50%"></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-accounts.gif" width="100%" alt="계정 · 모델 · 추론 수준"></td>
+    <td width="50%"></td>
   </tr>
 </table>
 <!-- /howto-videos -->
@@ -71,9 +97,10 @@ Visual Studio 2017(15.9) · 2019(16.10+) · 2022 · 2026을 지원하고, 화면
 |---|---|
 | 편집기에서 바로 | 선택한 코드를 우클릭 **POMP** 메뉴나 단축키로 설명·리뷰·수정·테스트 작성. **POMP에게 질문**으로 그 자리에서 묻는다. |
 | 승인한 것만 적용 | 변경은 Diff로 보여 주고, 허용한 것만 편집기 버퍼에 넣는다. 저장은 사용자가 한다. |
-| Live 표시 | 에이전트가 고친 위치로 편집기가 따라가고, 바뀐 줄에 `+`/`−` 표시가 붙는다. 누르면 이전·이후 비교와 **원복**. |
+| Live 표시 | 에이전트가 고친 위치로 편집기가 따라가고, 바뀐 줄에 `+`/`−` 표시가 붙는다. 언어와 관계없다. 누르면 이전·이후 비교와 **원복**. |
 | POMP 책갈피 | 요청마다 바뀐 파일의 첫 줄을 VS 책갈피 창의 대화별 폴더에 남긴다. |
 | 컨텍스트 바구니 · 지식 | 파일·폴더·심볼을 담아 질문 범위로 쓰고, 선택한 줄은 지식으로 저장해 함께 보낸다. |
+| 작업 중 지시 · BTW | 작업 중에 대기열 메시지의 **지금 보내기**(또는 `/steer`)로 하던 작업에 바로 전하고, `/btw`로 작업과 별도로 잠깐 묻는다. |
 | 에이전트 · 팀 · 조언자 | 역할 에이전트와 팀에게 일을 맡기고, 조언자가 작업을 지켜보며 의견을 낸다. |
 | 작업 탭 · 도구 탭 | 계획·변경 기록·코드 점검, 그리고 권한·스킬·MCP·규칙·워크플로·지식 관리. |
 | 계정 · 모델 | 구독 로그인, API 키, 직접 띄운 모델 서버. 채팅·에이전트마다 모델을 고르고 사용량을 본다. |

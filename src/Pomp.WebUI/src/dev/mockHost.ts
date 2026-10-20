@@ -41,6 +41,8 @@ import type {
   AgentsCommand,
   ApprovalMode,
   AgentHookRule,
+  BtwRecord,
+  BtwStatus,
   CommandInfo,
   ContextBreakdown,
   ComputerSetCommand,
@@ -370,27 +372,34 @@ const ENGINE_COMMANDS: CommandInfo[] = [
 ];
 
 const MOCK_ROOT = 'C:\\repo\\Pomp';
-const SESSION_TITLES = [
+const SESSION_TITLES_KO = [
   'Pomp 개발 세션', '빌드 오류를 확인하고 최소 수정으로 고쳐 주세요', '채팅 탭 접근성 검토',
   '이 솔루션의 프로젝트 구조를 설명해 줘', '모델 선택 UI 개선', '실패한 테스트 원인 확인',
   '세션 목록 검색과 빠른 전환 설계', '문서의 프로토콜 예제를 검토해 줘', 'WebView2 재연결 문제 조사',
   '변경 내용에서 잠재적인 null 참조를 찾아 줘', '한국어 UI 문구 정리', '터미널 작업 결과를 요약해 줘',
 ];
+const SESSION_TITLES_EN = [
+  'Pomp development', 'Check the build errors and fix them with the smallest change', 'Chat tab accessibility review',
+  'Explain the project structure of this solution', 'Model picker improvements', 'Find why the test fails',
+  'Conversation list search and quick switching', 'Review the protocol examples in the docs', 'WebView2 reconnect investigation',
+  'Find possible null references in the changes', 'Tidy the UI wording', 'Summarize the terminal job results',
+];
 
-/** Named and unnamed sessions, all with first-message titles, newest first. */
+/** Named and unnamed sessions, all with first-message titles, newest first, in the page's language (`?locale=`). */
 /** ?sessions=N lists N conversations (scale check of the paged list; there is no count limit). */
 function buildSessions(): SessionEntry[] {
   const now = Date.now();
   const count = Math.max(1, Math.min(20000, Number(new URLSearchParams(window.location.search).get('sessions')) || 25));
+  const titles = (new URLSearchParams(window.location.search).get('locale') ?? 'ko').startsWith('ko') ? SESSION_TITLES_KO : SESSION_TITLES_EN;
   return Array.from({ length: count }, (_, index) => {
-    const title = SESSION_TITLES[index % SESSION_TITLES.length]!;
+    const title = titles[index % titles.length]!;
     const named = index === 0 || index % 3 === 2;
     const modifiedUtc = new Date(now - index * index * 35 * 60_000).toISOString();
     return {
       id: `mock-entry-${index + 1}`,
       sessionId: index === 0 ? 'mock-session' : `mock-session-${index + 1}`,
-      title: index >= SESSION_TITLES.length ? `${title} (${index + 1})` : title,
-      ...(named ? { name: index >= SESSION_TITLES.length ? `${title} (${index + 1})` : title } : {}),
+      title: index >= titles.length ? `${title} (${index + 1})` : title,
+      ...(named ? { name: index >= titles.length ? `${title} (${index + 1})` : title } : {}),
       modifiedUtc,
       visitedUtc: new Date(now - index * index * 35 * 60_000 - index * 5 * 60_000).toISOString(),
       messageCount: index === 0 ? 86 : 4 + ((index * 7) % 31) * 2,
@@ -515,7 +524,7 @@ export function installMockHost(): void {
   let tokens = 12_840;
   let streaming = false;
   const mockTools = createMockToolsHandler(message => post(message.type, message.payload as never), { sessionId, busy: () => streaming });
-  const conversations = createMockConversations(post, { sessionId: () => sessionId, busy: () => streaming, start: input => startTurn(input, opts.scenario, true) });
+  const conversations = createMockConversations(post, { sessionId: () => sessionId, busy: () => streaming, start: input => startTurn(input, opts.scenario, true), steer: input => steerTurn(input) });
   for (const entry of sessions) {
     entry.partner = entry.id === currentEntry.id ? { kind: 'main' } : entry.messageCount! % 3 === 0 ? { kind: 'team', id: 'feature-dev' } : { kind: 'agent', id: 'architect' };
     if (entry.sessionId) conversations.tabs.seed(entry.sessionId, entry.partner);
@@ -931,10 +940,22 @@ export function installMockHost(): void {
   const stopTurn = (): void => {
     const run = current;
     if (!run || run.aborted) return;
+    // The mock agent never reads a steer before its run ends: Stop takes every one back, like the host's abort_and_restore_queue.
+    const steers = runSteers.get(run);
+    if (steers?.length) { post('chat/steerWithdrawn', { steerIds: steers }); runSteers.delete(run); }
     abortRun(run); // unwinds the script (and dismisses open questions), then close the turn like the real host
     post('chat/turnEnd', { promptId: run.promptId, status: 'aborted' });
     postSession(false);
     conversations.finish(run.promptId, 'aborted');
+  };
+
+  const runSteers = new WeakMap<Run, string[]>();
+  /** chat/steer and the queue's "send now": a steered bubble in the running turn, or a turn of its own when nothing runs (like the host). */
+  const steerTurn = (payload: UiToHost['chat/send']): void => {
+    if (!current || current.aborted) { startTurn(payload, opts.scenario, true); return; }
+    const steerId = nextId('steer');
+    runSteers.set(current, [...(runSteers.get(current) ?? []), steerId]);
+    post('chat/steered', { steerId, clientMessageId: payload.clientMessageId, text: payload.text, attachments: payload.attachments });
   };
 
   // ---- Engine setup (accounts / login / API keys / model / usage); nobody is signed in at the start of the "setup" scenario ----
@@ -960,6 +981,43 @@ export function installMockHost(): void {
   const clearLoginTimers = (): void => {
     loginTimers.forEach((timer) => window.clearTimeout(timer));
     loginTimers = [];
+  };
+
+  // ---- Side questions (/btw): one at a time per session, answered beside the running turn, never in the transcript ----
+  const btwRecords = new Map<string, BtwRecord>();
+  let btwActive: string | undefined;
+  let btwTimer: number | undefined;
+  const settleBtw = (status: BtwStatus): void => {
+    const record = btwActive ? btwRecords.get(btwActive) : undefined;
+    btwActive = undefined; window.clearTimeout(btwTimer);
+    if (!record) return;
+    const latest = record.followUps?.at(-1) ?? record;
+    latest.status = status; latest.updatedAt = Date.now();
+    post('btw/record', { record: structuredClone(record) });
+  };
+  const askBtw = ({ requestId, question, recordId }: UiToHost['btw/ask']): void => {
+    const ko = opts.locale.startsWith('ko');
+    if (btwActive) { post('btw/reply', { requestId, ok: false, error: ko ? '다른 질문에 아직 답하는 중이에요.' : 'Another side question is still running.' }); return; }
+    const topic = recordId ? btwRecords.get(recordId) : undefined;
+    if (recordId && !topic) { post('btw/reply', { requestId, ok: false, error: ko ? '알 수 없는 질문 주제예요.' : 'Unknown side question topic.' }); return; }
+    const now = Date.now();
+    const turn = { question, answer: '', status: 'running' as const, createdAt: now, updatedAt: now };
+    const record: BtwRecord = topic ? { ...topic, followUps: [...(topic.followUps ?? []), turn] } : { id: nextId('btw'), leafId: null, ...turn };
+    btwRecords.set(record.id, record); btwActive = record.id;
+    post('btw/record', { record: structuredClone(record) });
+    post('btw/reply', { requestId, ok: true, record: structuredClone(record) });
+    const words = (ko ? '지금은 계획의 두 번째 단계를 진행 중이에요. 테스트를 고친 뒤 빌드를 다시 확인할 예정이에요.' : 'The agent is on the second step of the plan: it fixes the tests, then checks the build again.').split(' ');
+    let index = 0;
+    const step = (): void => {
+      if (btwActive !== record.id) return;
+      if (index >= words.length) { settleBtw('complete'); return; }
+      const delta = (index === 0 ? '' : ' ') + words[index++];
+      const latest = record.followUps?.at(-1) ?? record;
+      latest.answer += delta;
+      post('btw/delta', { recordId: record.id, delta });
+      btwTimer = later(70, step);
+    };
+    btwTimer = later(250, step);
   };
 
   const postSetup = (requestId?: string, error?: string): void =>
@@ -1237,7 +1295,15 @@ export function installMockHost(): void {
     }
     fail('알 수 없는 이벤트 규칙 동작이에요.');
   };
-  const postComputer = () => post('computer/state', computerState);
+  // The PC-wide owner (PompSession.Computer): the conversation that switched it on keeps it while another tab is shown (on there,
+  // off elsewhere) until it is switched off or its tab closes. ?computer=owned: another POMP on this PC holds it.
+  let computerOwner: { sessionId: string; label: string } | null = null;
+  const postComputer = () => {
+    computerState.desktop = computerOwner?.sessionId === sessionId;
+    computerState.ownerElsewhere = computerOwner ? (computerOwner.sessionId === sessionId ? null : computerOwner.label)
+      : computerQuery === 'owned' ? 'Reviewer · OtherProject' : null;
+    post('computer/state', computerState);
+  };
   const postBackground = () =>
     post('workspace/backgroundState', {
       root: MOCK_ROOT,
@@ -1662,7 +1728,7 @@ export function installMockHost(): void {
     current = null;
     currentEntry = { id: nextId('mock-entry-new'), sessionId: nextId('mock-session-new'), title: '새 대화', modifiedUtc: new Date().toISOString(), visitedUtc: new Date().toISOString(), messageCount: 0, current: true, partner: partner ?? { kind: 'main' } };
     sessionId = currentEntry.sessionId!;
-    mockTools.resetConversation(sessionId);
+    mockTools.resetConversation(sessionId); postComputer();
     conversations.changedSession(partner);
     sessionName = undefined;
     transcripts.set(currentEntry.id, []);
@@ -1677,16 +1743,24 @@ export function installMockHost(): void {
   const handleHistory = async (command: SessionHistoryCommand): Promise<void> => {
     const { requestId } = command;
     const mutating = command.action === 'switch' || command.action === 'rename' || command.action === 'compact' || command.action === 'delete';
+    const ko = opts.locale.startsWith('ko');
+    // Like the real host (PompSession.History): /compact is told in the chat when it starts, ends and fails; a failed rename too.
+    const refuse = (message: string): void => {
+      postHistory(requestId, message);
+      if (command.action === 'compact') post('chat/notice', { level: 'warning', message: (ko ? '컨텍스트를 압축하지 못했어요: ' : 'The context could not be compacted: ') + message });
+      if (command.action === 'rename') post('chat/notice', { level: 'warning', message: (ko ? '대화 이름을 바꾸지 못했어요: ' : 'The conversation could not be renamed: ') + message });
+    };
     if (mutating && (!bridgeRunning || streaming || sessionChanging || permissionWaiters.size > 0 || dialogWaiters.size > 0)) {
-      postHistory(requestId, !bridgeRunning ? 'Not connected.' : 'Finish the current response, approval or session operation before changing sessions.');
+      refuse(!bridgeRunning ? 'Not connected.' : 'Finish the current response, approval or session operation before changing sessions.');
       return;
     }
     const mode = command.action === 'switch' ? opts.switchSession : command.action === 'refresh' || command.action === 'delete' ? 'ok' : opts[command.action];
     if (mutating) sessionChanging = true;
     try {
+      if (command.action === 'compact') post('chat/notice', { level: 'info', message: ko ? '컨텍스트 압축 중' : 'Compacting context' });
       await wait(opts.sessions === 'slow' || mode === 'slow' ? 3_000 : command.action === 'compact' ? 1_200 : 180);
       if (opts.sessions === 'error' || mode === 'error') {
-        postHistory(requestId, `Session ${command.action} failed (mock failure).`);
+        refuse(`Session ${command.action} failed (mock failure).`);
         return;
       }
       switch (command.action) {
@@ -1730,7 +1804,7 @@ export function installMockHost(): void {
           if (entry.id === currentEntry.id) {
             currentEntry = { id: nextId('mock-entry-new'), sessionId: nextId('mock-session-new'), title: opts.locale.startsWith('ko') ? '새 대화' : 'New conversation', modifiedUtc: new Date().toISOString(), messageCount: 0, current: true };
             sessionId = currentEntry.sessionId!;
-            mockTools.resetConversation(sessionId); conversations.changedSession(); sessionName = undefined;
+            mockTools.resetConversation(sessionId); postComputer(); conversations.changedSession(); sessionName = undefined;
             transcripts.set(currentEntry.id, []); tokens = 0; touchSession(); postSession(false); knowledge.snapshot();
           }
           sessions = sessions.filter(item => item.id !== entry.id); transcripts.delete(entry.id); if (entry.sessionId) conversations.tabs.forget(entry.sessionId);
@@ -1739,7 +1813,7 @@ export function installMockHost(): void {
         case 'rename': {
           const name = command.name.trim();
           if (!name || command.name.length > 120 || /[\x00-\x1f\x7f]/.test(command.name)) {
-            postHistory(requestId, 'The session name must be 1 to 120 characters without control characters.');
+            refuse('The session name must be 1 to 120 characters without control characters.');
             break;
           }
           sessionName = name;
@@ -1750,17 +1824,19 @@ export function installMockHost(): void {
           postHistory(requestId);
           break;
         }
-        case 'compact':
+        case 'compact': {
           if (command.instructions !== undefined && command.instructions.length > 2000) {
-            postHistory(requestId, 'Compaction instructions must be at most 2000 characters.');
+            refuse('Compaction instructions must be at most 2000 characters.');
             break;
           }
+          const before = tokens;
           tokens = Math.floor(tokens * 0.35);
           touchSession();
           postSession(false);
           postHistory(requestId);
-          post('chat/notice', { level: 'info', message: `대화를 압축했습니다 (mock). 현재 컨텍스트: ${tokens.toLocaleString()} 토큰.${command.instructions ? `\n지시: ${command.instructions}` : ''}` });
+          post('chat/notice', { level: 'info', message: ko ? `컨텍스트를 압축했어요: ${before.toLocaleString('en-US')} → ${tokens.toLocaleString('en-US')} 토큰` : `Context compacted: ${before.toLocaleString('en-US')} → ${tokens.toLocaleString('en-US')} tokens` });
           break;
+        }
         case 'switch': {
           const entry = sessions.find((item) => item.id === command.id);
           if (command.root !== MOCK_ROOT || !entry?.sessionId) {
@@ -1772,7 +1848,7 @@ export function installMockHost(): void {
           sessionId = entry.sessionId;
           // Like the real host (PompSession.History): a completed switch also answers the page's pending new-session request.
           post('session/newResult', { requestId, status: 'completed' });
-          mockTools.resetConversation(sessionId);
+          mockTools.resetConversation(sessionId); postComputer();
           conversations.changedSession();
           sessionName = entry.name;
           tokens = contextTokens.get(sessionId) ?? (entry.messageCount ?? 0) * 145;
@@ -1928,6 +2004,17 @@ export function installMockHost(): void {
         case 'chat/send':
           startTurn(payload as unknown as UiToHost['chat/send'], opts.scenario);
           break;
+        case 'chat/steer':
+          steerTurn(payload as unknown as UiToHost['chat/steer']);
+          break;
+        case 'btw/ask':
+          askBtw(payload as unknown as UiToHost['btw/ask']);
+          break;
+        case 'btw/cancel': {
+          const { recordId } = payload as unknown as UiToHost['btw/cancel'];
+          if (btwActive && (!recordId || recordId === btwActive)) settleBtw('cancelled');
+          break;
+        }
         case 'chat/stop':
           stopTurn();
           break;
@@ -1974,6 +2061,7 @@ export function installMockHost(): void {
           const command = payload as unknown as UiToHost['conversation/tab'];
           if (command.action === 'close' && command.sessionId !== sessionId) {
             conversations.tabs.close(command.sessionId ?? '');
+            if (computerOwner?.sessionId === command.sessionId) { computerOwner = null; postComputer(); }
             post('conversation/tabReply', { requestId: command.requestId, ok: true });
             break;
           }
@@ -1981,7 +2069,7 @@ export function installMockHost(): void {
             post('session/newResult', { requestId: command.requestId, status: 'failed', message: 'Finish or stop the reply before switching tabs.' });
             break;
           }
-          if (command.action === 'close') conversations.tabs.close(command.sessionId!);
+          if (command.action === 'close') { conversations.tabs.close(command.sessionId!); if (computerOwner?.sessionId === command.sessionId) computerOwner = null; }
           const target = command.action === 'open' ? conversations.tabs.openSession(command.partner!) : command.action === 'activate' && command.sessionId ? command.sessionId : conversations.tabs.main();
           const entry = target ? sessions.find(item => item.sessionId === target) : undefined;
           if (entry) void handleHistory({ action: 'switch', requestId: command.requestId, root: MOCK_ROOT, id: entry.id }).catch((error: unknown) => console.error('[mock host] tab', error));
@@ -2140,8 +2228,10 @@ export function installMockHost(): void {
             computerState.pending = false;
             if (computerQuery === 'error' || computerState.policy === 'off' || !computerState.available) {
               post('computer/reply', { requestId, ok: false, error: '컴퓨터 사용을 변경하지 못했습니다 (mock).' });
+            } else if (desktop && computerState.ownerElsewhere) {
+              post('computer/reply', { requestId, ok: false, error: `다른 대화에서 사용 중이에요: ${computerState.ownerElsewhere}` });
             } else {
-              computerState.desktop = desktop;
+              computerOwner = desktop ? { sessionId, label: sessionName ?? '새 대화' } : null;
               post('computer/reply', { requestId, ok: true });
             }
             postComputer();
@@ -2154,6 +2244,7 @@ export function installMockHost(): void {
           setTimeout(() => post('workspace/agentPlanResult', { requestId, ok: false, error: 'Plan editing requires the real host; this preview did not change the plan.' }), 200);
           break;
         }
+        case 'ui/vsKey':
         case 'ui/log':
         case 'log/open':
         case 'settings/open':

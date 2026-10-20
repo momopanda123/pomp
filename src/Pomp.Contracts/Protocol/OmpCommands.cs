@@ -28,6 +28,43 @@ namespace Pomp.Protocol
 
         public static JObject Abort() => Command(OmpCommandTypes.Abort);
 
+        /// <summary>Withdraws the queued user steering and follow-up messages, then aborts (omp's Esc).</summary>
+        public static JObject AbortAndRestoreQueue() => Command(OmpCommandTypes.AbortAndRestoreQueue);
+
+        /// <summary>A message for the running agent, delivered at its next step (interrupt mode "immediate").</summary>
+        public static JObject Steer(string message)
+        {
+            var command = Command(OmpCommandTypes.Steer);
+            command["message"] = message;
+            return command;
+        }
+
+        /// <summary>Takes back the first matching user message still waiting in omp's steering or follow-up queue.</summary>
+        public static JObject RemoveQueuedMessage(string message, string queue)
+        {
+            var command = Command(OmpCommandTypes.RemoveQueuedMessage);
+            command["message"] = message;
+            command["queue"] = queue;
+            return command;
+        }
+
+        /// <summary>A side question (<c>/btw</c>) over the session's context; with <paramref name="recordId"/> a follow-up in that topic.</summary>
+        public static JObject Btw(string question, string? recordId = null)
+        {
+            var command = Command(OmpCommandTypes.Btw);
+            command["question"] = question;
+            if (!string.IsNullOrEmpty(recordId)) command["recordId"] = recordId;
+            return command;
+        }
+
+        /// <summary>Cancels the running side question; only topic <paramref name="recordId"/> when given.</summary>
+        public static JObject BtwCancel(string? recordId = null)
+        {
+            var command = Command(OmpCommandTypes.BtwCancel);
+            if (!string.IsNullOrEmpty(recordId)) command["recordId"] = recordId;
+            return command;
+        }
+
         public static JObject NewSession() => Command(OmpCommandTypes.NewSession);
 
         public static JObject NegotiateProtocol(int protocolVersion)

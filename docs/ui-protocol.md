@@ -88,6 +88,18 @@ The VS host handles these page messages in the WebView channel. They never reach
 - Meta and AltGr do not match. IME composition, key repeat and keyCode 229 are ignored.
 - The page app does not send it.
 
+#### `ui/vsKey`
+
+Payload: `{ chord }`, for example `"F5"`, `"Ctrl+F5"`, `"Ctrl+Shift+B"`, `"Ctrl+Break"` (modifiers in the order Ctrl, Alt, Shift).
+
+- Keystrokes inside the WebView never reach Visual Studio's key bindings. The page passes on the Visual Studio keys it does not use itself.
+- The page sends it from a bubbling window `keydown` listener for a key no element handled (`defaultPrevented` is false), and prevents the key's default:
+  - `F1` to `F12` and `Break` with any Ctrl, Alt and Shift;
+  - `Ctrl+Shift+B`.
+- Not sent: a chord of `host/hello.shortcuts`, bare `F12` (developer tools), `Shift+F10` (a field's context menu), `Alt+F4`, key repeat, IME composition (keyCode 229), Meta and AltGr.
+- The VS host runs the command bound to the chord in the Global scope of the current key bindings (Tools > Options > Environment > Keyboard), through `IVsUIShell.PostExecCommand`. It does nothing when no command is bound or the bound command is unavailable.
+- The host accepts only the chords listed above.
+
 #### `ui/pasteFiles`
 
 - The chat input sends it for a paste of files or an image without plain text. A page cannot read their paths.
@@ -116,7 +128,9 @@ Payload: `{ text, level: "error"|"warning"|"info" }`.
   - the conversation header;
   - the partner tab strip;
   - the queue.
-- Examples: a failed model, thinking or permission change; why a message was not sent; a lost target; a failed rename or conversation-list request; a failed Live/bookmark change; a failed queue action.
+- Examples: a failed model, thinking or permission change; why a message was not sent; a lost target; a failed conversation-list request; a failed Live/bookmark change; a failed queue action.
+- A slash command's refusal or failure is not a status-bar notice: the page adds it to the chat as a local `warning` notice, see "Slash commands".
+  So is a failed rename of the conversation (also from the header), which the host reports with `chat/notice`.
 - The VS host shows the text as `POMP: <text>` in the VS status bar, on one line and at most 300 characters.
 - The VS host logs errors and warnings. A repeated notice is logged once.
 - Dialog and form field errors stay where they are.
@@ -254,6 +268,8 @@ Host text the page shows says what happened, the current state or a reason.
 | `theme/changed` | `{ kind: "dark"\|"light", colors: { [cssVar]: value }, fontFamily?, fontSizePx? }` | Apply every `colors` entry. |
 | `session/info` | `{ model?, thinkingLevel?, sessionId?, sessionName?, contextUsage?, isStreaming, workingDirectory?, fastMode? }` | Session state for the composer. See "session/info" below. |
 | `chat/turnStarted` | `{ promptId, clientMessageId?, text?, attachments?, editorContext?, team?, agent?, agentInstance?, main? }` | The host took a user message as a prompt. See "chat/turnStarted" below. |
+| `chat/steered` | `{ steerId, clientMessageId?, text, attachments?, editorContext? }` | A message steered into the running agent. See "Steering" below. |
+| `chat/steerWithdrawn` | `{ steerIds }` | Stop took these steered messages back before the agent read them; their bubbles show 전달 안 됨 / Not delivered. See "Steering" below. |
 | `chat/assistantStart` | `{ messageId }` | New assistant bubble. |
 | `chat/assistantDelta` | `{ messageId, kind: "text"\|"thinking", delta }` | Append; render markdown incrementally. |
 | `chat/assistantNarration` | `{ messageId, text }` | The ended thinking block was narration. See "chat/assistantNarration" below. |
@@ -280,9 +296,12 @@ Host text the page shows says what happened, the current state or a reason.
 | `chat/replayEnd` | `{}` | End of the replayed transcript; live messages follow. |
 | `agents/state` | `{ root?, roles: Role[], teams: Team[], diagnostics: string[], main, rolesHidden?, teamsHidden? }` | Agent roles and teams state. |
 | `agents/reply` | `{ requestId, ok, error?, name?, transcript?, template?, preview? }` | Answer to `agents/command`. |
-| `computer/state` | `{ policy: "off"\|"perConversation", browser, confirmReads, desktop, pending, available, message? }` | Computer use of this conversation. |
+| `computer/state` | `{ policy: "off"\|"perConversation", browser, confirmReads, desktop, pending, available, message?, ownerElsewhere? }` | Computer use of this conversation. `ownerElsewhere`: the name of the conversation that holds it on this PC when that is not this one (see `computer/set`). |
 | `computer/reply` | `{ requestId, ok, error? }` | Exactly one answer per `computer/set`. |
 | `error` | `{ code, message, retryable }` | A host-level error not tied to a turn. |
+| `btw/record` | `{ record: BtwRecord }` | A side question's full record at each lifecycle change. See "Side questions (/btw)". |
+| `btw/delta` | `{ recordId, delta }` | Answer text of the running side question. |
+| `btw/reply` | `{ requestId, ok, error?, record? }` | Exactly one answer per `btw/ask`. |
 
 `kind` of a permission request: `fileWrite` `projectChange` `processExec` `debuggerControl` `breakpointChange`
 `bookmarkChange` `packageChange` `vcsWrite` `testRun` `other`.
@@ -604,6 +623,9 @@ A host-level error not tied to a turn. It is sent when:
 | `ui/log` | `{ level: "debug"\|"info"\|"warning"\|"error", message }` | Page-side diagnostics into the host log. |
 | `ui/editorFollow` | `{ requestId, action: "set", live?, bookmarks? }` | Persist the specified editor-follow toggles. |
 | `chat/send` | see [`chat/send`](#chatsend) | Send a message or queue it while busy. |
+| `chat/steer` | same as `chat/send` | Send to the running agent now; an ordinary send when nothing runs. See "Steering". |
+| `btw/ask` | `{ requestId, question, recordId? }` | Ask a side question about this conversation. See "Side questions (/btw)". |
+| `btw/cancel` | `{ recordId? }` | Cancel the running side question. |
 | `workspace/countDraftTokens` | `{ requestId, root, sessionId, modelId, provider, text, attachments?: [{ path }] }` | Count the draft, attachments and knowledge with the local tokenizer. |
 | `workspace/countBasketTokens` | `{ requestId, root, sessionId?, includeEditorContext, attachments?: [{ path }] }` | Estimate what the next message adds beyond its text. |
 | `workspace/findFiles` | `{ requestId, query, limit? }` | Files for the `@` mention list. |
@@ -782,8 +804,21 @@ Payload:
 - It runs in order with the chat commands.
 - Switching on is refused during a reply.
 - Answered by `computer/reply`.
-- The page handles a typed `/computer` itself.
+- The page handles a typed `/computer` itself: it acts like a click on the composer's screen & input control button (`computer-toggle`, after Live).
+  With the option off the button is hidden and the page says in the chat that it is unavailable. A typed `/computer` that cannot switch
+  (another conversation holds it, a reply runs, the host refuses) is told in the chat as well; a click on the button reports to the status bar.
 - Variants such as `/computer:<suffix>` or ones with unusual whitespace that reach the host are intercepted and refused (`send_failed`).
+- One conversation on the PC holds computer use. The host keeps the record in `%LOCALAPPDATA%\Pomp\state\computer-owner.json`
+  (`{ instance, pid, processStart, sessionId, label, workspace, updatedAt }`), read and written under the named mutex `Local\Pomp.ComputerOwner`.
+  - Switching on takes the record first. When another live conversation holds it (another tab of this POMP or another POMP), the reply is
+    `{ ok: false, error: "In use by another conversation: <name>" }` and nothing changes.
+  - A record whose process has ended (or whose process id now names another process) is stale and counts as free.
+  - The record belongs to the tab that switched it on (the Default tab, or that agent's or team's tab). Leaving that tab switches the engine
+    off but keeps the record; coming back switches it on again without a request. When the tab comes back with a new conversation
+    (an empty conversation is never saved, so the tab starts a new one), the record moves to it in one write and it is switched on there.
+  - The record is released when the holder switches it off, when another conversation replaces the holder's inside its own tab (a new
+    conversation, the conversation list, deleting it), when the holder's agent or team tab is closed, when omp stops or restarts, and when POMP closes.
+  - The host watches the file and re-reads it every 3 seconds; any change re-sends `computer/state` with the new `ownerElsewhere`.
 
 #### `workspace/agentPlan`
 
@@ -798,14 +833,14 @@ Payload:
 - Answered by `workspace/agentPlanPageResult`:
 
 ```
-{ requestId, ok, error?, revision, editable, editableWhileWorking, page, size, total,
+{ requestId, ok, error?, revision, editable, editableWhileWorking, page, size, total, completedCount,
   phases: [{ index, name, taskCount }],
   rows: [{ phase, task, content, status, blocker? }] }
 ```
 
 - `phase`/`task` index the whole plan.
 - `query` filters task content, blocker and phase name.
-- `total` counts the matches.
+- `total` counts the matches; `completedCount` counts the `completed` tasks of the whole plan.
 - `page` is clamped.
 
 #### `workspace/agentPlanEdit`
@@ -814,8 +849,8 @@ Payload:
 
 ```
 { requestId, sessionId, revision,
-  op: "addTask"|"updateTask"|"deleteTask"|"addPhase"|"renamePhase"|"deletePhase",
-  phase?, task?, name?, content?, status?, blocker? }
+  op: "addTask"|"updateTask"|"deleteTask"|"addPhase"|"renamePhase"|"deletePhase"|"clearCompleted"|"moveTask"|"startTask",
+  phase?, task?, toPhase?, toTask?, name?, content?, status?, blocker? }
 ```
 
 - Refused unless `revision` is the plan omp holds now.
@@ -859,7 +894,7 @@ Payload:
 - The page asks `workspace/agentPlanPage` again whenever the revision changes.
 - Each row is edited or deleted with `workspace/agentPlanEdit`, under the same guards as above, except while the agent works:
   - `editable` says the guards above pass; `editableWhileWorking` says only the conversation and the connection are right.
-  - While a turn, a tool, an approval/question or background work is active, or queued messages are about to run, an edit is taken only when it leaves the task in progress alone: changing or deleting a task that is not in progress, adding a task, adding or renaming a phase. No edit may set `in_progress`. A phase holding the task in progress is not deleted.
+  - While a turn, a tool, an approval/question or background work is active, or queued messages are about to run, an edit is taken only when it leaves the task in progress alone: changing, deleting or moving a task that is not in progress, adding a task, adding or renaming a phase, clearing the completed tasks. No edit may set `in_progress` (so `startTask` is refused). A phase holding the task in progress is not deleted.
   - The reason: the model names its tasks by their text in its todo calls; the task it works on must stay as it knows it.
   - The host reads the plan once more just before `set_todos` and refuses the edit when the model changed it meanwhile.
   - The page asks for the page again when the work starts or ends, so both flags are current.
@@ -869,6 +904,11 @@ Payload:
 - Text limits still apply: names ≤ 200, content ≤ 600, blocker ≤ 300 characters.
 - Only a plan whose `set_todos` frame would exceed about 1 MiB is refused.
 - Deleting the last task of a phase removes the phase.
+- `clearCompleted` (no `phase`/`task`) removes every `completed` task of the whole plan, and each phase it leaves empty; it is refused when there is none. The page result's `completedCount` counts them over the whole plan (not only the query's matches), so the UI disables the button at 0.
+- `moveTask` takes the task at `phase`/`task` out and inserts it at index `toTask` of phase `toPhase` (`toTask` counts the destination's tasks once the task has left; `toTask` equal to that count appends). The same place is refused as "Nothing to change". A phase the move leaves empty is removed. The note tells the model the new place and that the plan's order is the order to work in.
+- Order matters to omp, not to POMP: omp's `todo` tool starts the earliest `pending` task in plan order whenever a mutation leaves no task `in_progress`, keeps only the earliest of several `in_progress` tasks, and never starts a `blocked` one (omp 18.12.1 `src/tools/todo.ts`; `set_todos` itself stores the plan as given). Moving a pending task ahead therefore changes what the agent does next.
+- `startTask` makes the task at `phase`/`task` the task in progress, like the todo tool's `start`: every other `in_progress` task goes back to `pending`, and the task's blocker is dropped. A `completed` task is refused. It is idle-only. While idle, the Work tab's per-row run button sends it and, once it is saved, sends an ordinary `chat/send` that asks for that task.
+- While the agent works, the run button sends no plan edit: the plan must not change under the running turn. It sends only an ordinary `chat/send`, which the host queues like any message sent while busy (`chat/queued`, `chat/queueState`), asking the agent to switch to the task once the current step is done and to mark it `in_progress` itself with the todo tool's `start` (which takes a task of any status by its text). The item can be sent into the running turn with the queue's Send now (`chat/queue` `steer`), like any other queued message. The button is disabled on `completed` tasks and, while the agent works, on the task in progress.
 - An empty plan takes edits without a revision.
 
 **Persistence**
@@ -932,14 +972,14 @@ Every chat tab is its own omp conversation: the Default (POMP) tab's, and one pe
 |---|---|---|
 | `chat/queued` | host → UI | `{ clientMessageId, itemId }` |
 | `chat/queueState` | host → UI | see below |
-| `chat/queue` | UI → host | `{ requestId, action: "edit"\|"remove"\|"move"\|"clear"\|"pause"\|"resume", id?, text?, index? }` |
+| `chat/queue` | UI → host | `{ requestId, action: "edit"\|"remove"\|"move"\|"clear"\|"pause"\|"resume"\|"steer", id?, text?, index? }` |
 | `chat/queueReply` | host → UI | Reply to `chat/queue`. |
 
 `chat/queueState` payload:
 
 ```
 { sessionId?,
-  items: [{ id, text, attachments?, includeEditorContext, team?, agent?, agentInstance?, createdAt }],
+  items: [{ id, text, attachments?, includeEditorContext, team?, agent?, agentInstance?, createdAt, canSteer }],
   paused, reason? }
 ```
 
@@ -952,6 +992,10 @@ Every chat tab is its own omp conversation: the Default (POMP) tab's, and one pe
 - `move` uses a zero-based final index.
 - `edit` changes only typed text.
 - `clear` removes all items but does not implicitly resume a paused queue.
+- `steer` (the item's 지금 보내기 / Send now button) takes the item out of the queue and steers it into the running agent, see "Steering".
+  With nothing running it is sent at once as an ordinary message, also from a paused queue.
+  `canSteer` is false for an item with a chosen recipient (team, agent or running member) or a slash command; the host refuses `steer` for it.
+  When the steer fails, the item goes back to the front of the queue.
 
 **Scope and dispatch**
 
@@ -968,7 +1012,8 @@ Every chat tab is its own omp conversation: the Default (POMP) tab's, and one pe
 - The user must resume in the original conversation or clear the items.
 - If the queue is empty, the first fresh submission starts an unpaused queue.
 - A submission received before Stop remains paused.
-- The host never supplies omp `streamingBehavior` (`steer`/`followUp`).
+- Queued items are never queued inside omp: the host sends no `prompt` `streamingBehavior`. Only an explicit steer reaches omp's
+  steering queue (see "Steering").
 
 **Limits**
 
@@ -977,6 +1022,52 @@ Every chat tab is its own omp conversation: the Default (POMP) tab's, and one pe
 - The complete queue state has a 1,800 KiB UTF-8 budget, to fit the outbound envelope.
 - Rejection is a host `error` with `code: "queue_rejected"`, `retryable: false`.
 - On rejection no turn starts.
+
+### Steering
+
+A steer is a message for the agent that is working now. omp delivers it at the agent's next step (`steer`, interrupt mode
+`immediate`); the running turn goes on with it and ends as usual.
+
+- `/steer <text>` (page command) and the queue's `steer` action send one. Without text (and without attachments) `/steer` is an
+  inline composer error.
+- The page sends `chat/steer` only while it sees a running turn or `session/info.isStreaming`; otherwise `/steer <text>` is a
+  normal `chat/send`.
+- The host composes the message like a send: the editor context when `includeEditorContext` is on, then the attached paths, then the
+  text. It goes to this conversation itself: a message with a chosen recipient or a slash command is sent normally instead.
+- On the chat command queue, right before the command, the host checks under its state lock that a turn is open or omp is streaming
+  and that Stop has not been pressed since. If not, the message is an ordinary send (queued while busy, like `chat/send`).
+- A steer never registers a turn: no `chat/turnStarted`, no `chat/turnEnd`, no second prompt id.
+- After omp accepts it, `chat/steered` shows the user's bubble where it was sent, marked 작업 중 전달 / Steered. `chat/steered` is part
+  of the replayed transcript. After a conversation switch, the restored transcript shows the steered message once, as a user message
+  of its own.
+- When the run ended before omp took the steer, the host takes it back with `remove_queued_message` (queue `steering`) and sends it
+  normally. If omp had already taken it, omp handles it and the host only logs that: omp 18.12.1 starts a run with a steer it gets
+  while idle (checked over RPC: `steer` to an idle session answers `success`, then `agent_start` follows and `remove_queued_message`
+  answers `removed: false`), so the message is delivered once, as the start of the next run, and its reply streams into the chat.
+- Stop after a steer uses `abort_and_restore_queue` instead of `abort`, so a steer omp still holds does not start a new run. A steer
+  withdrawn this way is not sent; a notice says how many, and `chat/steerWithdrawn` (part of the replayed transcript) marks the newest
+  that many steered bubbles of the run 전달 안 됨 / Not delivered (omp delivers steers in order, so the ones it still held are the newest).
+- Failures (omp refused it, too large, connection lost) are a `chat/notice`; nothing is resent.
+
+### Side questions (/btw)
+
+`/btw <question>` asks omp's side question (`btw`) about the current conversation, in a panel of the chat tab.
+
+- omp answers over the conversation's context, including a turn still streaming, as text with no tool use.
+  It runs beside the agent: it neither waits for nor blocks the running work.
+- Question and answer are never added to the transcript. The host does not log `btw/*` in the replayed transcript.
+- `btw/ask` without `recordId` starts a topic; with `recordId` (the id of the topic's first record) it is a follow-up, and omp replays
+  the topic's earlier turns as context.
+- `btw/reply` answers the request; `ok: false` carries omp's reason (one side question at a time, unknown topic, no model, and so on).
+- `btw/record` carries omp's `BtwHistoryRecord`: `{ id, leafId, question, answer, status, createdAt, updatedAt, error?, followUps? }`
+  with `status` `running`, `complete`, `cancelled`, `error` or `interrupted`. The last record for an id wins.
+  A topic's latest turn is its last follow-up, else the record itself.
+- `btw/delta` appends answer text to the latest turn of `recordId`.
+- The started record can arrive before `btw/reply`; the page recognizes a new topic by its question.
+- Only frames of the current omp process are forwarded.
+- `btw/cancel` cancels the running side question, only of topic `recordId` when given. The page sends it when the panel closes while
+  an answer runs, and before a new `/btw` replaces a topic. It never affects the conversation's run.
+- A conversation change (new conversation, switch, tab) cancels the side question in omp; the page closes the panel.
 
 ### Agent run history
 
@@ -1763,16 +1854,22 @@ catalog/command: { requestId, action: "refresh"|"install", id?, scope?: "project
 - `source` is absent from an older host.
 - The page merges the list with its own commands into the palette: the `/` button and typed `/` completion.
 - The page sends any other `/name` text as a normal `chat/send`; omp runs extension, skill and prompt commands itself.
+- omp (18.12.1) lists only the builtins that run without its terminal UI, and runs those from prompt text: their answer is a
+  `command_output` frame, which the host shows as a `chat/notice` (`format: "pre"`). A terminal-only builtin, such as `/new`, `/resume`,
+  `/login` or `/extensions`, is not listed and would reach the model as plain text, which is why the page handles those jobs itself.
 
 ### Palette
 
 **One entry per function, under one plain name.** The palette shows, in this order:
 
 1. The page's own commands, which it handles itself and never sends on:
-   `/new /sessions /rename /model /thinking /effort /permissions /compact /accounts /login /usage /work /agents /computer /agent /team /goal /help`.
-   `/goal` opens the goal card, see "Goal runs".
+   `/new /sessions /rename /model /thinking /effort /permissions /compact /accounts /login /usage /work /agents /computer /agent /team /goal /steer /btw /help`.
+   `/goal` opens the goal card, see "Goal runs". `/steer` and `/btw` post `chat/steer` and `btw/ask`, see "Steering" and
+   "Side questions (/btw)".
 2. POMP's engine commands under plain names, each with a short label, and only when the engine lists the registered name.
-3. The engine's other commands, by name only, with no description and no argument syntax.
+3. The engine's other commands, by name only, with no description and no argument syntax. Left out: `autoresearch` (extension) and
+   `init` (file), whose jobs `/goal` and the onboarding skill do, and `annotate` (custom), whose annotation views omp 18.12.1 draws only in
+   its terminal UI (over RPC `ui.custom` returns nothing, so it would do nothing). Typed, they still go to the engine.
 4. The enabled skills, plain names, after a "스킬" / "Skills" heading. The heading is a row of the list, not an option.
 
 - `/effort` opens the thinking-level picker, like `/thinking`.
@@ -1803,7 +1900,7 @@ The palette lists the plain name; the host sends the registered one.
 | `/rules` | `pomp-rules` | Shows the scoped rules that apply and their diagnostics. |
 | `/resources` | `pomp-resources` | Lists the `.pomp` skills, commands and agent recipes. |
 | `/guard` | `pomp-guard` | Shows the pre-edit guard mode and the files with unsaved Visual Studio changes. |
-| `/vs-status` | `pomp-context` | Shows the Visual Studio connection: host, solution, unsaved files, offered tools. |
+| `/vs-status` | `pomp-context` | Shows the Visual Studio connection: host, solution, unsaved files, and how many of the offered VS tools this conversation can call (an agent tab has its role's tools only). |
 | `/skill NAME`, `/command NAME`, `/recipe NAME` | `pomp-skill`, `pomp-command`, `pomp-recipe` | Load a `.pomp/skills`, `.pomp/commands` or `.pomp/agents` Markdown resource into the conversation. |
 
 - `/goal` is the page's command; the host never receives it as text.
@@ -1831,6 +1928,17 @@ The palette lists the plain name; the host sends the registered one.
   - A plain skill name becomes `/skill:name` when the engine lists `skill:name` and no real command has that plain name.
     A command always wins.
   - Anything else is sent untouched: `/skill:name`, a registered name, and unknown names.
+
+### Refusals
+
+- A slash command that cannot run now, or whose argument is missing, is not sent. The page adds a local `warning` notice to the
+  chat and keeps the typed text in the input.
+- A missing argument names the syntax: "목표가 비어 있어요. 사용법: /goal 목표" / "The goal is empty. Usage: /goal goal".
+  The same goes for `/plan`, `/steer`, `/btw`, `/agent`, `/team` (also an unknown name) and `/rename`.
+- The other page refusals: `/new` and `/permissions` while a reply, approval or terminal job runs; `/rename` and `/compact` behind
+  another session request (see "Sessions"); `/computer` with the option off or while it cannot switch; a send that failed.
+- POMP's engine commands refuse in the engine and tell it with a `notify` warning, which the host shows as a chat notice, in the
+  POMP language: an empty `/workflow` or `/plan` task, an empty or unknown `/skill`, `/command` or `/recipe` name.
 
 ### Skills in the palette
 
@@ -2037,6 +2145,10 @@ Word completion has no messages of its own: the page completes words locally whi
 
 `session/history` (UI → host) is answered by exactly one `session/historyState` with the same `requestId`.
 
+- The host runs these requests one after another. The page sends one at a time, except that a `rename` or `compact` may follow
+  pending read-only requests (`refresh`, `preview`, `messages`); behind any other pending request the page refuses it and says
+  "Another request is being handled. Try again shortly." in the chat.
+
 | action | fields | effect |
 |---|---|---|
 | `refresh` | | List only. |
@@ -2065,6 +2177,8 @@ Word completion has no messages of its own: the page completes words locally whi
 **`rename`**
 
 - `name` is 1..120 characters, with no control characters.
+- A failure is told in the chat, not in the status bar: the host posts a `warning` `chat/notice` "The conversation could not be
+  renamed: reason"; the page's own checks (invalid name, no reply, no connection) are a local warning notice.
 
 **`delete`**
 
@@ -2077,7 +2191,15 @@ Word completion has no messages of its own: the page completes words locally whi
 **`compact`**
 
 - Custom instructions are at most 2000 characters.
-- `session/info` shows the new context usage.
+- omp sends no event for a compaction it was asked for, so the host tells the chat itself with `chat/notice`:
+  - `info` "Compacting context" when it sends omp `compact`;
+  - `info` "Context compacted: N → M tokens" when it is done (N is omp's `tokensBefore`, M the new `contextUsage.tokens`;
+    without both only "Context compacted.");
+  - `warning` "The context could not be compacted: reason" when it is refused or fails, e.g. while a reply runs, or omp's
+    "Nothing to compact (session too small)".
+- The `session/historyState` reply still carries `error`, but the page does not show it again. A missing reply (after 6 minutes)
+  or a failed post is a local warning notice in the chat.
+- `session/info` shows the new context usage. The `/context` breakdown measured before is dropped and measured again.
 
 ```
 session/historyState: { requestId?, error?, root,
@@ -2498,6 +2620,8 @@ The page's own chords come from `host/hello.shortcuts`, set in Tools > Options >
 - They are applied to the IDE key bindings.
 - Inside the page the same chord arrives as `host/hello.shortcuts.toggleFocus`; the page then sends `ui/toggleFocus`.
 - Reason: WebView2 keeps keystrokes from reaching VS.
+- Visual Studio's own keys (F5, Ctrl+F5, Ctrl+Shift+B) reach VS through `ui/vsKey`.
+- When a build or run started while the chat had the focus ends, the VS host puts the focus back into the page's field that had it (Visual Studio activates the code editor on leaving debugging). It does not when the user moved the focus meanwhile (see docs/architecture.md).
 
 **Editor commands**
 

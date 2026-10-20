@@ -19,7 +19,7 @@ export function createMockPermissions(emit: (payload: PermissionRulesState) => v
     : { file: 'C:\\workspace\\.pomp\\permissions.json', status: 'valid', requireReviewedEdits: true, requireSandbox: false, hash: `policy-${revision}`, rules: [
       { tool: '*', effect: 'allow' },
       { tool: 'bash', effect: 'allow', commands: ['dotnet test', 'dotnet build'] },
-      { tool: 'write', effect: 'allow', paths: ['src/**', 'tests/**'] },
+      { tool: 'write', effect: 'allow', paths: ['src', 'tests'] },
       { tool: 'fetch', effect: 'deny' },
     ] };
   return (command: UiToHost['permission/rules']): void => {

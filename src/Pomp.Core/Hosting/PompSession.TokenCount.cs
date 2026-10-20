@@ -87,7 +87,7 @@ namespace Pomp.Hosting
         private string BasketText(string draft, IReadOnlyList<string> paths, string root, string session)
         {
             var parts = new List<string>();
-            if (paths.Count > 0) parts.Add(PromptDisplay.AttachmentsHeader + "\n" + string.Join("\n", paths.Select(path => "- " + path)));
+            if (paths.Count > 0) parts.Add(PromptDisplay.AttachmentsHeader(CanReadBuffer()) + "\n" + string.Join("\n", paths.Select(path => "- " + path)));
             if (draft.Length > 0) parts.Add(draft);
             try
             {

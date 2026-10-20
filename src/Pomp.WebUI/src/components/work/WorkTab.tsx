@@ -24,6 +24,8 @@ export interface WorkTabProps {
   connected: boolean; busy: boolean; newSessionPending?: boolean; inert?: boolean; attention: WorkAttention;
   requestedView?: RequestedWorkView; onViewChange?: (view: WorkView) => void;
   onContinue: (task?: string) => void; onStop: () => void; onSolve: (text: string) => SendResult;
+  /** Run one plan task: `marked` when the plan already marks it in progress (idle), else it is scheduled after the current step. */
+  onRunTask: (task: string, marked: boolean) => SendResult;
   onOpenWorkflows?: () => void;
 }
 export function normalizeWorkView(view: RequestedWorkView): WorkView { return view === 'plan' || view === 'workflow' ? 'progress' : view === 'history' ? 'review' : view === 'terminal' ? 'progress' : view; }
@@ -35,7 +37,7 @@ export function initialWorkView(attention: WorkAttention): WorkView {
   return workViews.find(view => workViewAttention(view, attention) > 0) ?? 'review';
 }
 export function WorkTab({ locale, session, workspaceKey, sessionId, connected, busy, newSessionPending = false, inert = false,
-  requestedView, onViewChange, onContinue, onStop, onSolve, onOpenWorkflows }: WorkTabProps) {
+  requestedView, onViewChange, onContinue, onRunTask, onStop, onSolve, onOpenWorkflows }: WorkTabProps) {
   useWorkScope(workspaceKey, sessionId);
   const snapshot = useWorkSnapshot();
   const applied = new Set(snapshot.review?.outcomes.filter(item => item.state === 'applied').map(item => item.path.toLowerCase()));
@@ -66,7 +68,7 @@ export function WorkTab({ locale, session, workspaceKey, sessionId, connected, b
           </div>
         </div>}
         {item === 'progress' && <div className="work-combined-body">
-          <AgentPlan layout="page" session={session} sessionId={sessionId} locale={locale} busy={busy} inert={inactive(item)} disabled={!connected || newSessionPending} onStop={onStop} onContinue={onContinue} />
+          <AgentPlan layout="page" session={session} sessionId={sessionId} locale={locale} busy={busy} inert={inactive(item)} disabled={!connected || newSessionPending} onStop={onStop} onContinue={onContinue} onRunTask={onRunTask} />
           {/* Workflow already contains ComposerAutoContinuePanel: do not duplicate its controls/subscription. */}
           <ComposerWorkflowPanel layout="page" locale={locale} workspaceKey={workspaceKey} sessionId={sessionId} connected={connected && !newSessionPending} inert={inactive(item) || busy} onContinue={onContinue} onOpenWorkflows={onOpenWorkflows} />
           {snapshot.interactive.enabled && snapshot.interactive.supported && <InteractiveTerminalPanel layout="page" locale={locale} connected={connected && !newSessionPending} inert={inactive(item) || !connected || newSessionPending} />}

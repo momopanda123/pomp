@@ -19,6 +19,3 @@
 .conv-tools .ui-tr:not(.ui-th) { border-bottom: 1px solid color-mix(in srgb, var(--pomp-border) 65%, transparent); }
 .conv-tools .conv-foot { border-top: 0; }
 .conv-foot .btn { flex: none; }
-.computer-section .confirm-popover.inline { margin-top: 0; }
-.computer-section .computer-reason { margin: 0; padding: 0; }
-.computer-section .view-section-status .spinner { display: inline-block; }

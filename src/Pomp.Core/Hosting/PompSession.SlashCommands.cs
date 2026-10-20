@@ -80,7 +80,7 @@ namespace Pomp.Hosting
             var match = SlashToken.Match(resolved);
             if (!match.Success || !TakesReferences(match.Groups[2].Value)) return resolved;
             var args = resolved.Substring(match.Length).Trim();
-            return "/" + match.Groups[2].Value + " " + (args.Length > 0 ? args + "\n\n" : "\n") + PromptDisplay.CommandReferencesHeader + "\n" + string.Join("\n", attachments.Select(path => "- " + path));
+            return "/" + match.Groups[2].Value + " " + (args.Length > 0 ? args + "\n\n" : "\n") + PromptDisplay.CommandReferencesHeader(CanReadBuffer()) + "\n" + string.Join("\n", attachments.Select(path => "- " + path));
         }
 
         /// <summary>One of POMP's task commands, a skill or a prompt file (by engine name): their text goes to the model.</summary>

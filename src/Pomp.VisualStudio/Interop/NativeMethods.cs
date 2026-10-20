@@ -207,5 +207,74 @@ namespace Pomp.VisualStudio.Interop
         {
             if (window != IntPtr.Zero && GetFocus() != window && IsWindow(window)) SetFocus(window);
         }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsWindowEnabled(IntPtr window);
+
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int virtualKey);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentProcessId();
+
+        /// <summary>
+        /// True when this process owns the foreground window and <paramref name="mainWindow"/> takes input: Visual Studio is the
+        /// active application and no modal dialog is open over it.
+        /// </summary>
+        internal static bool IsActiveAndModeless(IntPtr mainWindow)
+        {
+            var foreground = GetForegroundWindow();
+            if (foreground == IntPtr.Zero || mainWindow == IntPtr.Zero) return false;
+            GetWindowThreadProcessId(foreground, out var processId);
+            return processId == GetCurrentProcessId() && IsWindowEnabled(mainWindow);
+        }
+
+        // VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2.
+        private static readonly int[] MouseButtons = { 0x01, 0x02, 0x04, 0x05, 0x06 };
+
+        /// <summary>True while a mouse button is physically held (a window activated now was clicked).</summary>
+        internal static bool IsMouseButtonDown()
+        {
+            foreach (var key in MouseButtons)
+            {
+                if ((GetAsyncKeyState(key) & 0x8000) != 0) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>True while Ctrl is physically held (Ctrl+Tab, Ctrl+Alt+L and similar window switches).</summary>
+        internal static bool IsCtrlDown() => (GetAsyncKeyState(0x11) & 0x8000) != 0;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct CursorPoint { public int X; public int Y; }
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetCursorPos(out CursorPoint point);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr WindowFromPoint(CursorPoint point);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+
+        /// <summary>
+        /// True when the mouse pointer is over <paramref name="topLevel"/> itself (its root window), not over another top-level window
+        /// such as a dialog in front of it: a click there was on Visual Studio's own windows.
+        /// </summary>
+        internal static bool IsCursorOver(IntPtr topLevel)
+        {
+            if (topLevel == IntPtr.Zero || !GetCursorPos(out var point)) return false;
+            var window = WindowFromPoint(point);
+            return window != IntPtr.Zero && GetAncestor(window, 2) == topLevel; // GA_ROOT
+        }
     }
 }

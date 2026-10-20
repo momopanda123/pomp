@@ -3,11 +3,9 @@ import { useLocale } from '../../i18n';
 import { toolsTranslate, type ToolsTranslate } from '../../i18n/toolsStrings';
 import type { ConversationTool } from '../../toolsProtocol';
 import type { ToolsController } from '../../toolsState';
-import type { ComputerReplyPayload, ComputerStatePayload } from '../../protocol';
 import { Icon } from '../Icon';
 import { ViewSection } from '../ViewSection';
 import { Cell, DataTable, Row, Switch } from '../ui';
-import { ComputerUseSection } from './ComputerUseSection';
 import './conversation.css';
 
 export type { ActiveRule } from '../../protocol';
@@ -57,9 +55,8 @@ function ToolGroup({ id, label, entries, selected, disabled, t, onChange }: {
     </div>
   </div>;
 }
-export function ConversationTools({ controller, locale, connected, disabled, busy, computer, computerReply, computerRequest }: {
-  controller: ToolsController; locale: string; connected: boolean; disabled: boolean; busy: boolean;
-  computer?: ComputerStatePayload | null; computerReply?: ComputerReplyPayload | null; computerRequest?: { revision: number };
+export function ConversationTools({ controller, locale, disabled, busy }: {
+  controller: ToolsController; locale: string; disabled: boolean; busy: boolean;
 }) {
   const { tools } = controller; const t = toolsTranslate(locale); const ko = useLocale() === 'ko';
   const selected = controller.selectedTools;
@@ -80,7 +77,6 @@ export function ConversationTools({ controller, locale, connected, disabled, bus
     controller.toggleTools(names, checked);
   }
   return <div className="tools-scroll-body tools-conversation-body">
-    <ComputerUseSection computer={computer} reply={computerReply} request={computerRequest} connected={connected} blocked={disabled || busy} />
     <ViewSection sectionKey="tools-selection" className="tools-section conv-tools" title={t('tools.title')} bodyClassName="ui-flush"
       status={<span data-testid="tools-active-count">{active}/{tools.tools.length}</span>}>
       {busy && <p className="ui-note ui-muted" role="status">{t('tools.busy')}</p>}

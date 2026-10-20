@@ -27,7 +27,7 @@ namespace Pomp.Hosting
             foreach (var row in rows.OfType<JObject>())
             {
                 var name = row.GetString("name");
-                if (name == null || name == "pomp-rules") continue;
+                if (name == null) continue;
                 if (name.StartsWith("/", StringComparison.Ordinal)) name = name.Substring(1);
                 if (name == AdvisorCommand) continue;
                 if (name.Length < 1 || name.Length > 64 || !IsCommandLetterOrDigit(name[0])

@@ -28,6 +28,10 @@ namespace Pomp.Protocol
         public const string ConfigUpdate = "config_update";
         public const string Notice = "notice";
 
+        // Side questions (/btw): the full record at each lifecycle change, and answer text as it streams
+        public const string BtwRecord = "btw_record";
+        public const string BtwDelta = "btw_delta";
+
         // Agent session events (AgentSessionEvent)
         public const string AgentStart = "agent_start";
         public const string AgentEnd = "agent_end";
@@ -56,6 +60,10 @@ namespace Pomp.Protocol
         public const string FollowUp = "follow_up";
         public const string Abort = "abort";
         public const string AbortAndPrompt = "abort_and_prompt";
+        public const string AbortAndRestoreQueue = "abort_and_restore_queue";
+        public const string RemoveQueuedMessage = "remove_queued_message";
+        public const string Btw = "btw";
+        public const string BtwCancel = "btw_cancel";
         public const string NewSession = "new_session";
         public const string OpenSession = "open_session";
         public const string NegotiateProtocol = "negotiate_protocol";

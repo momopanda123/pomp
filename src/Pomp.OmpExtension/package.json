@@ -10,6 +10,7 @@
       "./extensions/composer-guard.ts",
       "./extensions/permissions.ts",
       "./extensions/pre-edit.ts",
+      "./extensions/live-edits.ts",
       "./extensions/network.ts",
       "./extensions/pomp-context.ts",
       "./extensions/inline.ts",

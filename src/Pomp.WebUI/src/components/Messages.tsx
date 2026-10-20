@@ -175,6 +175,7 @@ export const UserMessage = memo(function UserMessage({ item }: { item: UserItem 
     <div className={state ? `msg user ${state}` : 'msg user'} ref={bubbleRef} tabIndex={-1} {...bubbleHandlers}>
       {/* No badge = the conversation itself answered; a badge names the one-message target (an agent, team or running member). */}
       {item.target && item.target.kind !== 'main' && <TargetBadge target={item.target} />}
+      {item.steered && <div className={item.withdrawn ? 'message-steered-badge withdrawn' : 'message-steered-badge'} data-testid="message-steered" title={t(item.withdrawn ? 'msg.steerWithdrawnTitle' : 'msg.steeredTitle')}><Icon name={item.withdrawn ? 'stop' : 'zap'} size={12} /><span>{t(item.withdrawn ? 'msg.steerWithdrawn' : 'msg.steered')}</span></div>}
       <UserTextBody text={item.text} />
       {item.attachments && item.attachments.length > 0 && <AttachmentSummary files={item.attachments} testId="user-attachments" />}
       <EditorContextChip context={item.editorContext} />

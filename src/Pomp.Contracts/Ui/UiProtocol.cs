@@ -57,6 +57,27 @@ namespace Pomp.Ui
         public const string ChatTurnEnd = "chat/turnEnd";
         public const string ChatNotice = "chat/notice";
 
+        /// <summary>
+        /// Host → UI: a message the user steered into the running agent (<see cref="ChatSteeredPayload"/>); part of the transcript, shown
+        /// as a user bubble marked as steered inside the running turn.
+        /// </summary>
+        public const string ChatSteered = "chat/steered";
+
+        /// <summary>
+        /// Host → UI: Stop took steered messages back before the agent read them (<see cref="ChatSteerWithdrawnPayload"/>); their bubbles
+        /// are marked as not delivered.
+        /// </summary>
+        public const string ChatSteerWithdrawn = "chat/steerWithdrawn";
+
+        /// <summary>Host → UI: a side question's full record (<see cref="BtwRecordPayload"/>) at each lifecycle change; not part of the transcript.</summary>
+        public const string BtwRecord = "btw/record";
+
+        /// <summary>Host → UI: answer text of the running side question (<see cref="BtwDeltaPayload"/>).</summary>
+        public const string BtwDelta = "btw/delta";
+
+        /// <summary>Host → UI answer to <see cref="BtwAsk"/> (<see cref="BtwReplyPayload"/>).</summary>
+        public const string BtwReply = "btw/reply";
+
         /// <summary>Host → UI: the notes an advisor gave the chat agent (<see cref="ChatAdvisorNotesPayload"/>); part of the transcript.</summary>
         public const string ChatAdvisorNotes = "chat/advisorNotes";
         public const string PermissionRequest = "permission/request";
@@ -147,6 +168,18 @@ namespace Pomp.Ui
         public const string UiLog = "ui/log";
         public const string ChatSend = "chat/send";
         public const string ChatStop = "chat/stop";
+
+        /// <summary>
+        /// UI → host (<see cref="ChatSendPayload"/>): the message goes to the running agent now (omp <c>steer</c>); with nothing running it
+        /// is sent like <see cref="ChatSend"/>.
+        /// </summary>
+        public const string ChatSteer = "chat/steer";
+
+        /// <summary>UI → host <c>{ requestId, question, recordId? }</c> (<see cref="BtwAskPayload"/>): a side question; answered by <see cref="BtwReply"/>.</summary>
+        public const string BtwAsk = "btw/ask";
+
+        /// <summary>UI → host <c>{ recordId? }</c>: cancels the running side question (of that topic only, when given).</summary>
+        public const string BtwCancel = "btw/cancel";
         public const string PermissionRespond = "permission/respond";
 
         /// <summary>UI → host <c>{ requestId, mode: alwaysAsk | write | yolo }</c>: the composer's permission-mode chip; answered by <see cref="PermissionModeResult"/>.</summary>
@@ -184,14 +217,17 @@ namespace Pomp.Ui
         public const string AgentPlanPage = "workspace/agentPlanPage";
 
         /// <summary>
-        /// Host → UI page of the plan: <c>{requestId, ok, error?, revision, page, size, total, phases: [{index, name, taskCount}],
-        /// rows: [{phase, task, content, status, blocker?}]}</c>; <c>total</c> counts the tasks that match the query.
+        /// Host → UI page of the plan: <c>{requestId, ok, error?, revision, page, size, total, completedCount, phases: [{index, name, taskCount}],
+        /// rows: [{phase, task, content, status, blocker?}]}</c>; <c>total</c> counts the tasks that match the query, <c>completedCount</c>
+        /// the completed tasks of the whole plan.
         /// </summary>
         public const string AgentPlanPageResult = "workspace/agentPlanPageResult";
 
         /// <summary>
-        /// One change to the whole plan, checked against <c>revision</c>: <c>{requestId, sessionId, revision, op, phase?, task?, name?,
-        /// content?, status?, blocker?}</c> with op <c>addTask | updateTask | deleteTask | addPhase | renamePhase | deletePhase</c>.
+        /// One change to the whole plan, checked against <c>revision</c>: <c>{requestId, sessionId, revision, op, phase?, task?, toPhase?, toTask?,
+        /// name?, content?, status?, blocker?}</c> with op <c>addTask | updateTask | deleteTask | addPhase | renamePhase | deletePhase |
+        /// clearCompleted | moveTask | startTask</c> (<c>clearCompleted</c> removes every completed task, and a phase it leaves empty;
+        /// <c>moveTask</c> puts the task at <c>toTask</c> of <c>toPhase</c>; <c>startTask</c> makes it the task in progress).
         /// </summary>
         public const string AgentPlanEdit = "workspace/agentPlanEdit";
         public const string AgentsHistory = "agents/history";
@@ -603,6 +639,65 @@ namespace Pomp.Ui
 
         /// <summary>True when the conversation answered itself (no team, agent or instance), so a retry keeps that destination.</summary>
         public bool? Main { get; set; }
+    }
+
+    /// <summary>A message steered into the running agent, shown where it was sent.</summary>
+    public sealed class ChatSteeredPayload
+    {
+        /// <summary>Unique id of this steered message (never a turn's prompt id).</summary>
+        public string SteerId { get; set; } = string.Empty;
+
+        public string? ClientMessageId { get; set; }
+
+        /// <summary>The user's text as typed.</summary>
+        public string Text { get; set; } = string.Empty;
+
+        public List<ChatAttachment>? Attachments { get; set; }
+
+        public ChatEditorContext? EditorContext { get; set; }
+    }
+
+    /// <summary>Steered messages Stop withdrew from omp before the agent read them.</summary>
+    public sealed class ChatSteerWithdrawnPayload
+    {
+        /// <summary>The <see cref="ChatSteeredPayload.SteerId"/> of each withdrawn message.</summary>
+        public List<string> SteerIds { get; set; } = new List<string>();
+    }
+
+    public sealed class BtwAskPayload
+    {
+        public string RequestId { get; set; } = string.Empty;
+        public string Question { get; set; } = string.Empty;
+
+        /// <summary>The topic (id of its first record) this question follows up; null starts a new topic.</summary>
+        public string? RecordId { get; set; }
+    }
+
+    public sealed class BtwCancelPayload
+    {
+        public string? RecordId { get; set; }
+    }
+
+    public sealed class BtwReplyPayload
+    {
+        public string RequestId { get; set; } = string.Empty;
+        public bool Ok { get; set; }
+        public string? Error { get; set; }
+
+        /// <summary>omp's <c>BtwHistoryRecord</c> as started: <c>{ id, question, answer, status, createdAt, updatedAt, error?, followUps? }</c>.</summary>
+        public JObject? Record { get; set; }
+    }
+
+    public sealed class BtwRecordPayload
+    {
+        /// <summary>omp's <c>BtwHistoryRecord</c>; the last one for an id wins.</summary>
+        public JObject Record { get; set; } = new JObject();
+    }
+
+    public sealed class BtwDeltaPayload
+    {
+        public string RecordId { get; set; } = string.Empty;
+        public string Delta { get; set; } = string.Empty;
     }
 
     public sealed class ChatAssistantStartPayload
@@ -1593,6 +1688,9 @@ namespace Pomp.Ui
         public string? Agent { get; set; }
         public string? AgentInstance { get; set; }
         public string CreatedAt { get; set; } = string.Empty;
+
+        /// <summary>The item can be steered into the running agent: it goes to this conversation itself (no chosen target) and is no slash command.</summary>
+        public bool CanSteer { get; set; }
     }
 
     public sealed class ChatQueueStatePayload
