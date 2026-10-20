@@ -1,7 +1,7 @@
 {
   "name": "pomp-webui",
   "private": true,
-  "version": "0.5.7",
+  "version": "0.5.8",
   "author": "deanpinb@gmail.com",
   "description": "Chat UI of the pomp Visual Studio extension (hosted in WebView2, offline bundle)",
   "type": "module",
