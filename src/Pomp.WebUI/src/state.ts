@@ -336,8 +336,8 @@ export type Action =
   | { type: 'setIncludeEditorContext'; value: boolean }
   /** A message went to the running agent (`chat/steer`): the draft was used. */
   | { type: 'steerSent'; clearDraft: boolean }
-  /** `/btw`: a new topic in the side panel with its first question (`requestId` of the `btw/ask`). */
-  | { type: 'btwOpen'; requestId: string; question: string; sessionId?: string }
+  /** `/btw`: open a side topic, optionally with an already submitted first question. */
+  | { type: 'btwOpen'; pending?: BtwPanel['pending']; sessionId?: string }
   /** A follow-up question in the panel's topic. */
   | { type: 'btwAsk'; requestId: string; question: string }
   | { type: 'btwFailed'; requestId: string; message: string }
@@ -1096,7 +1096,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, sendError: undefined, composer: action.clearDraft ? { ...emptyComposer } : state.composer };
 
     case 'btwOpen':
-      return { ...state, btw: { sessionId: action.sessionId, pending: { requestId: action.requestId, question: action.question } } };
+      return { ...state, btw: { sessionId: action.sessionId, pending: action.pending } };
 
     case 'btwAsk':
       return state.btw ? { ...state, btw: { ...state.btw, error: undefined, pending: { requestId: action.requestId, question: action.question } } } : state;

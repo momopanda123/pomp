@@ -151,11 +151,12 @@ namespace Pomp.VisualStudio.Editor
                 var request = new InlineRequest { Prefix = snapshot.GetText(Math.Max(0, position - 3200), Math.Min(position, 3200)),
                     Suffix = snapshot.GetText(position, Math.Min(800, snapshot.Length - position)), Language = view.TextBuffer.ContentType.TypeName };
                 CancelPending(); pending = new CancellationTokenSource(); var token = pending.Token;
+                var assistant = services.ActiveSession;
                 _ = services.JoinableTaskFactory.RunAsync(async () =>
                 {
                     try
                     {
-                        var text = await ((IInlineAssistant)services.Session).CompleteInlineAsync(request, token).ConfigureAwait(false);
+                        var text = await assistant.CompleteInlineAsync(request, token).ConfigureAwait(false);
                         await services.JoinableTaskFactory.SwitchToMainThreadAsync(token);
                         if (closed || composing || !view.HasAggregateFocus || view.TextSnapshot != snapshot || view.Caret.Position.BufferPosition.Position != position || OtherCompletionActive())
                         { services.Logger.Debug("Inline suggestion dropped: the editor changed while it was prepared."); return; }
@@ -256,6 +257,7 @@ namespace Pomp.VisualStudio.Editor
                 if (document == null) return true;
                 if (view.TextSnapshot != snapshot) { SetStatus(PompLanguage.Pick("POMP: 코드가 바뀌어 질문을 취소했어요.", "POMP: the code changed, so the question was cancelled.")); return true; }
                 CancelEdit(); editRequest = new CancellationTokenSource(); var token = editRequest.Token;
+                var assistant = services.ActiveSession;
                 SetStatus(PompLanguage.Pick("POMP: 질문의 수정 제안을 준비하는 중", "POMP: preparing an edit proposal for the question"));
                 _ = services.JoinableTaskFactory.RunAsync(async () =>
                 {
@@ -267,14 +269,14 @@ namespace Pomp.VisualStudio.Editor
                         foreach (var span in spans.OrderByDescending(s => s.Start.Position))
                         {
                             var start = span.Start.Position; var end = span.End.Position;
-                            var replacement = await ((IInlineAssistant)services.Session).CompleteInlineAsync(new InlineRequest {
+                            var replacement = await assistant.CompleteInlineAsync(new InlineRequest {
                                 IsEdit = true, Prefix = source.Substring(Math.Max(0, start - 12000), Math.Min(start, 12000)), Selection = span.GetText(),
                                 Suffix = source.Substring(end, Math.Min(4000, source.Length - end)), Instruction = instruction, Language = snapshot.ContentType.TypeName }, linked.Token).ConfigureAwait(false);
                             await services.JoinableTaskFactory.SwitchToMainThreadAsync(linked.Token);
                             if (closed || view.TextSnapshot != snapshot) throw new OperationCanceledException("The source changed.");
                             after = after.Substring(0, start) + InlineEditText.FitReplacement(replacement, span.GetText(), eol) + after.Substring(end);
                         }
-                        await ((IInlineAssistant)services.Session).StageInlineSnapshotAsync(document.FilePath, source, after, linked.Token).ConfigureAwait(false);
+                        await assistant.StageInlineSnapshotAsync(document.FilePath, source, after, linked.Token).ConfigureAwait(false);
                         await services.JoinableTaskFactory.SwitchToMainThreadAsync(linked.Token);
                         SetStatus(PompLanguage.Pick("POMP: 질문의 수정 제안을 검토 화면에 열었어요.", "POMP: the edit proposal for the question is open for review."));
                         await services.Commands.ShowChatAsync(focus: true);

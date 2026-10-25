@@ -237,13 +237,13 @@ export function App() {
   const btwRunning = (): boolean => { const panel = latest.current.btw; return !!panel && (panel.pending !== undefined || btwTurns(panel.record).at(-1)?.status === 'running'); };
   /** Stops only the side panel's own answer; the conversation's run is never touched. */
   const cancelBtw = (): void => { const panel = latest.current.btw; if (panel && btwRunning()) send('btw/cancel', panel.topicId ? { recordId: panel.topicId } : {}); };
-  /** `/btw <question>`: a new topic in the side panel (an answer still running in the previous one stops). */
+  /** `/btw [question]`: open a new side topic; only a nonempty question starts an engine request. */
   const openBtw = (question: string): SendResult => {
     if (latest.current.bridge.state !== 'running') return { ok: false, reason: 'hostUnavailable' };
     cancelBtw();
-    const requestId = newId();
-    if (!send('btw/ask', { requestId, question })) return { ok: false, reason: 'hostUnavailable' };
-    dispatch({ type: 'btwOpen', requestId, question, sessionId: latest.current.session?.sessionId });
+    const pending = question ? { requestId: newId(), question } : undefined;
+    if (pending && !send('btw/ask', pending)) return { ok: false, reason: 'hostUnavailable' };
+    dispatch({ type: 'btwOpen', pending, sessionId: latest.current.session?.sessionId });
     return { ok: true };
   };
   /** A follow-up in the panel's topic (a new topic when the first question never started one). */

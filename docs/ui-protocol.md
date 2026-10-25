@@ -1038,8 +1038,8 @@ Each open chat tab owns a separate omp process and conversation: the Default (PO
 For non-Codex models, a steer is a message for the agent that is working now. omp delivers it at the agent's next step (`steer`,
 interrupt mode `immediate`); the running turn goes on with it and ends as usual.
 
-- `/steer <text>` (page command) and the queue's `steer` action send one. Without text (and without attachments) `/steer` is an
-  inline composer error.
+- `/steer <text>` (page command, also accepted as `/stear <text>`) and the queue's `steer` action send one. Without text (and without attachments) `/steer` is refused with a chat warning.
+- A queued `/steer` or `/stear` wrapper remains steerable; the host removes the command prefix before delivery. Other engine slash commands remain ineligible.
 - The page sends `chat/steer` only while it sees a running turn or `session/info.isStreaming`; otherwise `/steer <text>` is a
   normal `chat/send`.
 - The host composes the message like a send: the editor context when `includeEditorContext` is on, then the attached paths, then the
@@ -1065,7 +1065,7 @@ child as an in-flight message, so a native Codex child may still reject it: omp 
 
 ### Side questions (/btw)
 
-`/btw <question>` asks omp's side question (`btw`) about the current conversation, in a panel of the chat tab.
+`/btw` opens an empty side panel without sending an empty `btw/ask`. `/btw <question>` opens it and asks omp's side question (`btw`) about the current conversation. The panel's input starts the first topic when no question has been submitted yet.
 
 - omp answers over the conversation's context, including a turn still streaming, as text with no tool use.
   It runs beside the agent: it neither waits for nor blocks the running work.
@@ -1878,8 +1878,7 @@ catalog/command: { requestId, action: "refresh"|"install", id?, scope?: "project
 
 1. The page's own commands, which it handles itself and never sends on:
    `/new /sessions /rename /model /thinking /effort /permissions /compact /accounts /login /usage /work /agents /computer /agent /team /goal /steer /btw /help`.
-   `/goal` opens the goal card, see "Goal runs". `/steer` and `/btw` post `chat/steer` and `btw/ask`, see "Steering" and
-   "Side questions (/btw)".
+   `/goal` opens the goal card, see "Goal runs". `/steer` (also `/stear`) posts `chat/steer`; `/btw` opens the side panel and posts `btw/ask` only when a question is supplied. See "Steering" and "Side questions (/btw)".
 2. POMP's engine commands under plain names, each with a short label, and only when the engine lists the registered name.
 3. The engine's other commands, by name only, with no description and no argument syntax. Left out: `autoresearch` (extension) and
    `init` (file), whose jobs `/goal` and the onboarding skill do, and `annotate` (custom), whose annotation views omp 18.12.1 draws only in
@@ -1948,7 +1947,7 @@ The palette lists the plain name; the host sends the registered one.
 - A slash command that cannot run now, or whose argument is missing, is not sent. The page adds a local `warning` notice to the
   chat and keeps the typed text in the input.
 - A missing argument names the syntax: "목표가 비어 있어요. 사용법: /goal 목표" / "The goal is empty. Usage: /goal goal".
-  The same goes for `/plan`, `/steer`, `/btw`, `/agent`, `/team` (also an unknown name) and `/rename`.
+  The same goes for `/plan`, `/steer`, `/agent`, `/team` (also an unknown name) and `/rename`. Bare `/btw` opens an empty side panel.
 - The other page refusals: `/new` or `/permissions` behind another session request; `/rename` and `/compact` behind
   another session request (see "Sessions"); `/computer` with the option off or while it cannot switch; a send that failed.
 - POMP's engine commands refuse in the engine and tell it with a `notify` warning, which the host shows as a chat notice, in the

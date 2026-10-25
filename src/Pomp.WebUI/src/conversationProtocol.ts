@@ -8,7 +8,7 @@ export interface CommandReply { requestId: string; ok: boolean; error?: string }
 export interface QueueItem {
   id: string; text: string; attachments?: { path: string }[]; includeEditorContext: boolean;
   team?: string; agent?: string; agentInstance?: string; createdAt: string;
-  /** It goes to this conversation itself and is no slash command, so the queue's steer action can send it now. */
+  /** Message text for this conversation (including a /steer or /stear wrapper), not a targeted message or engine command. */
   canSteer?: boolean;
 }
 export interface QueueState { sessionId?: string | null; items: QueueItem[]; paused: boolean; reason?: string }

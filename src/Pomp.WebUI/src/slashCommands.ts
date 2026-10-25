@@ -36,9 +36,8 @@ export const POMP_COMMANDS: Readonly<Record<string, { engine: string; label: Mes
   recipe: { engine: 'pomp-recipe', label: 'slash.recipe' },
 };
 const POMP_ENGINE_NAMES = new Set(Object.values(POMP_COMMANDS).map(command => command.engine));
-/** Old names of commands that are gone because a command of the page or the engine does the same job: typing one runs the replacement. */
-export const LEGACY_COMMANDS: ReadonlyMap<string, BuiltinCommand> = new Map<string, BuiltinCommand>([['pomp-compact', 'compact']]);
-const LEGACY_NAMES: ReadonlySet<string> = new Set(LEGACY_COMMANDS.keys());
+/** Alternate typed spellings run the canonical built-in; the palette lists each action only once. */
+export const COMMAND_ALIASES: Readonly<Record<string, BuiltinCommand>> = { 'pomp-compact': 'compact', stear: 'steer' };
 
 /** One palette entry: `group` is set for the skills, which are listed after the commands under their own heading. */
 export interface PaletteCommand extends CommandInfo { group?: 'skills' }
@@ -77,7 +76,7 @@ export function commandCatalog(host: readonly CommandInfo[], t: Translate, skill
   // A builtin of the engine is listed only when it is on the list (under POMP's label); a command somebody added is theirs and keeps its place.
   const labelOf = (command: CommandInfo): MessageKey | undefined => command.source === 'builtin' ? LISTED_ENGINE_COMMANDS.get(command.name) : undefined;
   const engine: PaletteCommand[] = host
-    .filter(command => !shown.has(command.name) && !isHiddenCommand(command.name) && !isEngineShipped(command) && !command.name.startsWith('pomp-') && !POMP_ENGINE_NAMES.has(command.name) && !LEGACY_NAMES.has(command.name) && plainSkillName(command) === undefined
+    .filter(command => !shown.has(command.name) && !isHiddenCommand(command.name) && !isEngineShipped(command) && !command.name.startsWith('pomp-') && !POMP_ENGINE_NAMES.has(command.name) && !Object.hasOwn(COMMAND_ALIASES, command.name) && plainSkillName(command) === undefined
       && (command.source !== 'builtin' || labelOf(command) !== undefined))
     .map(command => {
       const label = labelOf(command);

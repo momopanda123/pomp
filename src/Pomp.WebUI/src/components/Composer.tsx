@@ -14,7 +14,7 @@ import { matchesShortcut } from '../shortcuts';
 import { useComposerPrediction } from '../useComposerPrediction';
 import { useWordCompletion } from '../useWordCompletion';
 import { ComposerGhost } from './ComposerGhost';
-import { commandCatalog, isBuiltinCommand, LEGACY_COMMANDS, slashMatches, slashTakesReferences, type BuiltinCommand, type SlashMatch } from '../slashCommands';
+import { commandCatalog, isBuiltinCommand, COMMAND_ALIASES, slashMatches, slashTakesReferences, type BuiltinCommand, type SlashMatch } from '../slashCommands';
 import type { SetupReply, SetupState } from '../setup';
 import type { Action, TranscriptItem } from '../state';
 import { effectiveRoles, isRunnableTeam, targetKey, targetPayload } from '../teamsCache';
@@ -642,8 +642,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     setTargetLost(null);
     const command = /^\/([^\s]+)(?:\s+([\s\S]*))?$/u.exec(text);
     if (rejection) { if (command) commandFailed(rejection); else setFailure(rejection); inputRef.current?.focus(); return; }
-    // An old command name whose job a built-in does now runs that built-in (/pomp-compact → /compact).
-    const typed = command ? LEGACY_COMMANDS.get(command[1]!) ?? command[1]! : undefined;
+    // Alternate spellings are page commands too, not slash text for the engine's queue.
+    const typed = command ? (Object.hasOwn(COMMAND_ALIASES, command[1]!) ? COMMAND_ALIASES[command[1]!] : command[1]!) : undefined;
     // /plan is POMP's own plan-only command (the host maps it): without a task there is nothing to plan.
     if (command && typed === 'plan' && !(command[2] ?? '').trim() && catalog.some(item => item.name === 'plan')) {
       refuseCommand(t('plan.empty'), 'slash.args.plan'); return;
@@ -666,7 +666,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
       }
       else if (name === 'steer' || name === 'btw') {
         const rest = command[2]?.trim() ?? '';
-        if (!rest && (name === 'btw' || draft.attachments.length === 0)) { refuseCommand(t(name === 'btw' ? 'btw.empty' : 'steer.empty'), name === 'btw' ? 'slash.args.btw' : 'slash.args.steer'); return; }
+        if (name === 'steer' && !rest && draft.attachments.length === 0) { refuseCommand(t('steer.empty'), 'slash.args.steer'); return; }
         setTargetError(null);
         result = name === 'steer' ? onSteer?.(rest, draft.attachments) ?? { ok: false, reason: 'hostUnavailable' } : onCommand(name, rest);
       }
