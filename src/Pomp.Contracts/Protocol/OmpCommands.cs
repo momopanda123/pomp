@@ -39,6 +39,15 @@ namespace Pomp.Protocol
             return command;
         }
 
+        /// <summary>Delivers a user message directly to this session's running subagent (without a main-agent turn).</summary>
+        public static JObject SteerSubagent(string subagentId, string message)
+        {
+            var command = Command(OmpCommandTypes.SteerSubagent);
+            command["subagentId"] = subagentId;
+            command["message"] = message;
+            return command;
+        }
+
         /// <summary>Takes back the first matching user message still waiting in omp's steering or follow-up queue.</summary>
         public static JObject RemoveQueuedMessage(string message, string queue)
         {

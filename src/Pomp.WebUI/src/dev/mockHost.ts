@@ -910,6 +910,19 @@ export function installMockHost(): void {
       post('chat/turnEnd', { promptId, status: 'error', error: { code: 'busy', message: 'A session operation is still running.', retryable: true } });
       return;
     }
+    if (payload.agentInstance) {
+      const messageId = nextId('subagent');
+      if (payload.agentInstance === 'job-mock-2') {
+        post('chat/subagentAccepted', { messageId, clientMessageId: payload.clientMessageId, text: payload.text,
+          agentInstance: payload.agentInstance, attachments: payload.attachments });
+      } else {
+        post('chat/turnStarted', { promptId: messageId, clientMessageId: payload.clientMessageId, text: payload.text,
+          agentInstance: payload.agentInstance, attachments: payload.attachments });
+        post('chat/turnEnd', { promptId: messageId, status: 'error',
+          error: { code: 'subagent_rejected', message: 'The agent is no longer running.', retryable: false } });
+      }
+      return;
+    }
     if (!draining && conversations.tryQueue(payload)) return;
     payload = conversations.route(payload);
     abortRun(current);
@@ -1934,8 +1947,8 @@ export function installMockHost(): void {
     work.snapshot();
     postInteractive();
     // The real host sends engine/info at every engine start and in the ui/ready snapshot.
-    if (opts.engine === 'bundled') post('engine/info', { source: 'bundled', version: '18.12.1', verified: true, expectedVersion: '18.12.1' });
-    else if (opts.engine === 'settings') post('engine/info', { source: 'settings', version: '18.9.0', verified: false, expectedVersion: '18.12.1', path: 'D:\\tools\\omp-next\\omp.exe' });
+    if (opts.engine === 'bundled') post('engine/info', { source: 'bundled', version: '18.12.6', verified: true, expectedVersion: '18.12.6' });
+    else if (opts.engine === 'settings') post('engine/info', { source: 'settings', version: '18.9.0', verified: false, expectedVersion: '18.12.6', path: 'D:\\tools\\omp-next\\omp.exe' });
     else if (opts.engine === 'installed') post('engine/info', { source: 'installed', version: '18.4.1', verified: false, path: 'C:\\Users\\dev\\AppData\\Local\\omp\\omp.exe' });
     postHistory(undefined, opts.sessions === 'error' ? 'The session list could not be read (mock failure).' : undefined);
     if (new URLSearchParams(window.location.search).get('taskApproval') === '1') post('permission/request', {

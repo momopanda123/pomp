@@ -58,6 +58,7 @@ namespace Pomp.Protocol
         public const string Prompt = "prompt";
         public const string Steer = "steer";
         public const string FollowUp = "follow_up";
+        public const string SteerSubagent = "steer_subagent";
         public const string Abort = "abort";
         public const string AbortAndPrompt = "abort_and_prompt";
         public const string AbortAndRestoreQueue = "abort_and_restore_queue";
@@ -108,15 +109,16 @@ namespace Pomp.Protocol
     }
 
     /// <summary>
-    /// Shape of omp's tool-approval prompt: an extension UI "select" whose title starts with
-    /// "Allow tool: &lt;name&gt;" and whose options are ["Approve", "Deny"], or (omp 18.11.3 and later, for a prompt the approval
-    /// mode raised) ["Approve", "Approve &lt;subject&gt; for this session", "Deny"]
-    /// (packages/coding-agent/src/extensibility/extensions/wrapper.ts, tools/approval.ts).
+    /// Shape of omp's tool-approval select: "Allow tool: &lt;name&gt;" and a final "Deny".
+    /// Before 18.12.6 it offers "Approve" (possibly followed by a session grant);
+    /// cached approvals in 18.12.6 offer scoped grants first and "Approve Once" before the optional session grant.
+    /// The host must only choose the approval for this call, never an engine-owned grant.
     /// </summary>
     public static class OmpApprovalPrompt
     {
         public const string TitlePrefix = "Allow tool: ";
         public const string Approve = "Approve";
+        public const string ApproveOnce = "Approve Once";
         public const string Deny = "Deny";
 
         /// <summary>

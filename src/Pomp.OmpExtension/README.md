@@ -3,7 +3,7 @@
 The omp-side pieces of pomp (Visual Studio 2019/2022/2026 host). Plain TypeScript, zero dependencies, no build step:
 omp (Bun) loads the `.ts` files directly.
 
-**Compatibility:** tested with omp **18.12.1** (earlier with 18.10.4, 18.10.3, 18.8.6 and 18.4.3) (`can1357/oh-my-pi`); requires omp **>= 18.3.2** (`ctx.agent`, used to keep the
+**Compatibility:** extension loading and command registration tested over RPC with omp **18.12.6**; Visual Studio interaction last tested with 18.12.1 (earlier with 18.10.4, 18.10.3, 18.8.6 and 18.4.3) (`can1357/oh-my-pi`); requires omp **>= 18.3.2** (`ctx.agent`, used to keep the
 guidance out of subagents; `tool_call` `additionalContext`, used by `warn` mode, exists since 18.3.1). The API facts below
 were read from the upstream docs and source (`main`, tree `33f887a`, the 18.4.x line). Loading the package into a real
 omp 18.8.6 was verified by an out-of-repo test: all modules load, every `/pomp-*` command (including `/pomp-context`, `/pomp-guard`) is registered,
@@ -183,6 +183,7 @@ fail open.
 
 ## Verification
 
+* **Loaded into the official omp 18.12.6 binary** over isolated RPC without a provider call: the engine became ready, `get_available_commands` listed 23 `pomp-*` commands (including `pomp-context`, `pomp-team` and `pomp-stop`), and no `extension_error` frame arrived.
 * **Loaded into a real omp 18.12.1** in Visual Studio (18.10.4, 18.10.3, 18.8.6 and 18.4.3 before it, the earlier ones by an out-of-repo test with no provider calls): both commands (`pomp-context`,
   `pomp-guard`) are present, `/pomp-context` completes and no `extension_error` frame appears.
 * Type-checked with `tsc --strict` against the real `ExtensionAPI` / event types copied from the upstream tree above

@@ -540,6 +540,16 @@ export interface SteeredPayload {
   attachments?: { path: string }[];
   editorContext?: TurnStartedPayload['editorContext'];
 }
+/** The subagent accepted a direct message; its reply continues in the agent's conversation, not this chat turn. */
+export interface SubagentAcceptedPayload {
+  messageId: string;
+  clientMessageId?: string;
+  text: string;
+  agentInstance: string;
+  attachments?: { path: string }[];
+  editorContext?: TurnStartedPayload['editorContext'];
+}
+
 
 /** omp's side question (`/btw`) lifecycle; `interrupted`: the process ended while it ran. */
 export type BtwStatus = 'running' | 'complete' | 'cancelled' | 'error' | 'interrupted';
@@ -1241,6 +1251,7 @@ export interface HostToUi extends ConversationHostToUi, ToolsHostToUi {
   'chat/replayBegin': { truncated: boolean };
   'chat/replayEnd': Record<string, never>;
   'chat/steered': SteeredPayload;
+  'chat/subagentAccepted': SubagentAcceptedPayload;
   /** Stop took these steered messages back before the agent read them: their bubbles show "not delivered". */
   'chat/steerWithdrawn': { steerIds: string[] };
   'btw/record': { record: BtwRecord };
@@ -1463,6 +1474,7 @@ const HOST_TYPES: Record<HostMessageType, true> = {
   'chat/replayBegin': true,
   'chat/replayEnd': true,
   'chat/steered': true,
+  'chat/subagentAccepted': true,
   'chat/steerWithdrawn': true,
   'btw/record': true,
   'btw/delta': true,

@@ -69,6 +69,9 @@ namespace Pomp.Ui
         /// </summary>
         public const string ChatSteerWithdrawn = "chat/steerWithdrawn";
 
+        /// <summary>Host → UI: an existing subagent accepted a direct message; its reply/turn may still be running.</summary>
+        public const string ChatSubagentAccepted = "chat/subagentAccepted";
+
         /// <summary>Host → UI: a side question's full record (<see cref="BtwRecordPayload"/>) at each lifecycle change; not part of the transcript.</summary>
         public const string BtwRecord = "btw/record";
 
@@ -657,6 +660,17 @@ namespace Pomp.Ui
         public ChatEditorContext? EditorContext { get; set; }
     }
 
+    /// <summary>An existing subagent accepted the message into its own conversation; this is not its final result.</summary>
+    public sealed class ChatSubagentAcceptedPayload
+    {
+        public string MessageId { get; set; } = string.Empty;
+        public string? ClientMessageId { get; set; }
+        public string Text { get; set; } = string.Empty;
+        public string AgentInstance { get; set; } = string.Empty;
+        public List<ChatAttachment>? Attachments { get; set; }
+        public ChatEditorContext? EditorContext { get; set; }
+    }
+
     /// <summary>Steered messages Stop withdrew from omp before the agent read them.</summary>
     public sealed class ChatSteerWithdrawnPayload
     {
@@ -894,7 +908,7 @@ namespace Pomp.Ui
         /// <summary>A role name (docs/architecture.md §8.3): a new assignment run by exactly that agent (<c>/pomp-agent</c>).</summary>
         public string? Agent { get; set; }
 
-        /// <summary>A subagent id of this conversation (docs/architecture.md §8.3): a direct message to that existing agent (<c>/pomp-dm</c>).</summary>
+        /// <summary>A running subagent id of this conversation (docs/architecture.md §8.3): direct delivery via <c>steer_subagent</c>.</summary>
         public string? AgentInstance { get; set; }
 
         /// <summary>
@@ -1634,6 +1648,7 @@ namespace Pomp.Ui
         public string SessionId { get; set; } = string.Empty;
         public ConversationPartnerPayload Partner { get; set; } = new ConversationPartnerPayload();
         public string? Title { get; set; }
+        public bool IsRunning { get; set; }
     }
 
     /// <summary>conversation/tabsState: the current conversation's partner and the workspace's chat tabs (docs/architecture.md §8.8).</summary>
@@ -1643,8 +1658,14 @@ namespace Pomp.Ui
         public ConversationPartnerPayload Partner { get; set; } = new ConversationPartnerPayload();
         public string? Title { get; set; }
         public string? Message { get; set; }
+        /// <summary>An engine switch queued behind the current reply; the current conversation remains active until its result.</summary>
+        public string? PendingAction { get; set; }
+        public string? PendingRequestId { get; set; }
+        public ConversationPartnerPayload? PendingPartner { get; set; }
+        public string? PendingSessionId { get; set; }
         /// <summary>The Default (POMP) tab's conversation; null when it has none yet (activating it starts a new one).</summary>
         public string? Main { get; set; }
+        public bool MainRunning { get; set; }
         public List<ConversationTabPayload> Tabs { get; set; } = new List<ConversationTabPayload>();
     }
 

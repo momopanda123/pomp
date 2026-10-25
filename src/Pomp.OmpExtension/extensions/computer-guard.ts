@@ -4,8 +4,10 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as engine from "@oh-my-pi/pi-coding-agent";
+import { settings } from "@oh-my-pi/pi-coding-agent";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import { cfgComputerEnabled } from "@oh-my-pi/pi-coding-agent/tools/settings";
+import { cfgBrowserEnabled } from "@oh-my-pi/pi-coding-agent/tools/browser/settings";
 import { type Env, isPompHost, pick } from "../lib/vs-state.ts";
 
 const MAX_STATE_BYTES = 4096;
@@ -29,16 +31,10 @@ export function readComputerState(env: Env = process.env): ComputerState {
 	} catch { return "unreadable"; }
 }
 
-/** The official extension shim resolves SettingsManager.create inside the calling session's async settings scope. */
-export function readEngineComputerState(cwd: string): EngineComputerState {
+/** Read effective live settings, including per-session /computer overrides, not raw launch config. */
+export function readEngineComputerState(): EngineComputerState {
 	try {
-		const api = engine as unknown as { SettingsManager?: { create(cwd: string): { rawValue(setting: unknown): unknown } } };
-		const settings = api.SettingsManager?.create(cwd);
-		if (!settings) return "unreadable";
-		// rawValue is the public registry accessor; these two boolean keys have no path-scoped value resolution.
-		const read = (name: string) => settings.rawValue({ segments: [name, "enabled"], definition: {} });
-		const desktop = read("computer"), browser = read("browser");
-		return typeof desktop === "boolean" && typeof browser === "boolean" ? { desktop, browser } : "unreadable";
+		return { desktop: cfgComputerEnabled.get(settings), browser: cfgBrowserEnabled.get(settings) };
 	} catch { return "unreadable"; }
 }
 
@@ -89,7 +85,7 @@ export default function computerGuard(pi: ExtensionAPI): void {
 		if (event.toolName !== "eval" && event.toolName !== "computer" && event.toolName !== "browser") return undefined;
 		try {
 			const id = ctx.sessionManager?.getSessionId();
-			const reason = computerToolBlock(event.toolName, typeof id === "string" ? id : undefined, ctx.agent?.kind, readComputerState(), event.toolName === "eval" ? readEngineComputerState(ctx.cwd) : "unreadable");
+			const reason = computerToolBlock(event.toolName, typeof id === "string" ? id : undefined, ctx.agent?.kind, readComputerState(), event.toolName === "eval" ? readEngineComputerState() : "unreadable");
 			return reason ? { block: true, reason } : undefined;
 		} catch { return { block: true, reason: unauthorized() }; }
 	});

@@ -357,11 +357,11 @@ export function PermissionDialog({ request, position, total, shortcuts, onRespon
                 value={note}
                 aria-invalid={note.length > MAX_NOTE_CHARS}
                 onChange={(event) => { setNote(event.target.value); setFailure(null); }}
-                // Enter denies with this note (Esc is the card's deny); never while an IME composition is open.
+                // Enter has the same default as the card (allow once), never an implicit deny.
                 onKeyDown={(event) => {
                   if (event.key !== 'Enter' || composing(event)) return;
                   consume(event);
-                  if (!event.repeat) answer('deny');
+                  if (!event.repeat) answer('allow');
                 }}
               />
               {note.length > MAX_NOTE_CHARS && <div className="composer-warning" role="alert" data-testid="note-limit">{t('perm.noteLimit')}</div>}

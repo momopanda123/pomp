@@ -126,9 +126,6 @@ namespace Pomp.Hosting
                     PauseChatQueue(PompLanguage.Pick("사용자가 대화를 중지했어요.", "Conversation stopped by the user."));
                     Cancel(sending);
                     break;
-                case UiMessageTypes.ConversationTab:
-                    _commands.Enqueue(() => HandleTabAsync(message.Payload ?? new JObject()));
-                    break;
                 case UiMessageTypes.ChatQueue:
                     _commands.Enqueue(() => HandleQueueAsync(message.Payload ?? new JObject()));
                     break;
@@ -392,6 +389,23 @@ namespace Pomp.Hosting
             }
 
             send = CopySend(send);
+            if (!string.IsNullOrWhiteSpace(send.AgentInstance))
+            {
+                if (queuedItemId != null)
+                {
+                    lock (_stateLock)
+                    {
+                        var item = _chatQueue.FirstOrDefault(q => q.Id == queuedItemId);
+                        if (item == null || _queuePaused || generation != _chatStopGeneration || _queueSession != _info.SessionId
+                            || _turns.Count > 0 || _info.IsStreaming || _bridge.State != BridgeState.Running || _sessionSwitchUncertain) return false;
+                        _chatQueue.Remove(item);
+                    }
+                    PublishChatQueue();
+                }
+                var delivered = await HandleDirectSubagentSendAsync(send, generation, requestToken, expectedSession).ConfigureAwait(false);
+                if (queuedItemId != null) ScheduleQueueDispatch();
+                return delivered;
+            }
             var partner = capturedPartner ?? DefaultPartner(send);
             QueuedChat? queued = null;
             try
@@ -515,6 +529,7 @@ namespace Pomp.Hosting
             {
                 if (partnerError != null) throw partnerError;
                 if (_sessionSwitchUncertain) throw new InvalidOperationException(PompLanguage.Pick("세션 전환 후 활성 대화를 확실히 알 수 없어요.", "The active conversation is uncertain after a session switch."));
+                if (WorkspaceSwitchBlock() is string workspaceBlock) throw new InvalidOperationException(workspaceBlock);
                 var state = _bridge.State;
                 if (state != BridgeState.Running)
                 {
@@ -528,7 +543,8 @@ namespace Pomp.Hosting
                 // engineText: the host's own commands (a goal run) say exactly what the engine gets; the bubble keeps what the user typed.
                 var message = engineText ?? await ComposeMessageAsync(editorContext?.Text, text, attachments, sending.Token).ConfigureAwait(false);
                 sending.Token.ThrowIfCancellationRequested();
-                // A message for a team or one agent goes through the extension's /pomp-team, /pomp-agent or /pomp-dm (docs/architecture.md §8.2).
+                // Team dispatch and new agent assignments go through their extension commands.
+                // Existing subagents were already sent directly by steer_subagent above.
                 message = await ApplyTargetAsync(send, message, sending.Token).ConfigureAwait(false);
                 sending.Token.ThrowIfCancellationRequested();
                 // An agent conversation answers as the agent only with the engine extension that gives it the role (extensions/partner.ts).
@@ -624,6 +640,7 @@ namespace Pomp.Hosting
             cancellationToken.ThrowIfCancellationRequested();
             await RequireEngineCommandsAsync(connection, cancellationToken, "pomp-permissions").ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
+            if (WorkspaceSwitchBlock() is string workspaceBlock) throw new InvalidOperationException(workspaceBlock);
             var command = OmpCommands.Prompt(message, null);
             command["id"] = promptId; // known before the response so prompt_result can never race ahead of the bookkeeping
             // Never look up the bridge's newest connection after composition; send only to this epoch's process.

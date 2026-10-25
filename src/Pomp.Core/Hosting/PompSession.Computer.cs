@@ -16,9 +16,9 @@ namespace Pomp.Hosting
     // Computer use for this conversation (docs/architecture.md §8.5). The composer's button runs omp's /computer on|off, a builtin answered
     // with command_output and no model request. The extension's guard keeps subagents (they run unasked) away from Eval while it is on, so the
     // guard's state file is written before switching on and after switching off. Everything starts off: each omp process (the overlay) and a
-    // reconnect. One conversation on the PC holds it (ComputerOwnerLock): taken when it is switched on, kept while its tab stays open (the
-    // engine turns it off while another tab is shown and on again on return), released when it is switched off, its tab closes or its
-    // conversation ends, omp restarts, or POMP closes.
+    // reconnect. One conversation on the PC holds it (ComputerOwnerLock): taken when it is switched on and kept while
+    // that conversation's engine is open, even if another tab is selected and its run continues. Other engines cannot
+    // take the lock until it is switched off, its tab closes, its engine restarts, or POMP closes.
     public sealed partial class PompSession
     {
         private readonly object _computerLock = new object();
@@ -27,6 +27,7 @@ namespace Pomp.Hosting
         private bool _computerGuard;
         private bool _computerDesktop;
         private bool _computerPending;
+        private string? _computerQueuedRequestId;
         private string? _computerMessage;
         private string? _computerSessionId;
         private TaskCompletionSource<string>? _computerAnswer;
@@ -50,6 +51,7 @@ namespace Pomp.Hosting
                 _computerGuard = guardInstalled;
                 _computerDesktop = false;
                 _computerSessionId = null;
+                _computerOwnerTab = null;
                 _computerMessage = guardInstalled || options.Policy == ComputerUsePolicy.Off ? null
                     : PompLanguage.Pick("확장이 꺼져 있어 컴퓨터 사용을 켤 수 없어요.", "Computer use cannot be switched on because extensions are off.");
                 owner = _computerOwner;
@@ -57,7 +59,8 @@ namespace Pomp.Hosting
 
             if (owner == null)
             {
-                var root = Path.GetDirectoryName(stateDirectory);
+                // The engine guard lives under state/<pid>/<engine>; the owner record must remain shared at state/.
+                var root = Path.GetDirectoryName(Path.GetDirectoryName(stateDirectory));
                 if (!string.IsNullOrEmpty(root))
                 {
                     try
@@ -101,7 +104,7 @@ namespace Pomp.Hosting
                     ["browser"] = _computerOptions.Browser,
                     ["confirmReads"] = _computerOptions.ConfirmReads,
                     ["desktop"] = _computerDesktop,
-                    ["pending"] = _computerPending,
+                    ["pending"] = _computerPending || _computerQueuedRequestId != null,
                     // Only while omp runs: a toggle pressed during start-up would only fail.
                     ["available"] = _computerGuard && _computerOptions.Policy != ComputerUsePolicy.Off && _bridge.State == BridgeState.Running,
                     ["message"] = _computerMessage,
@@ -135,25 +138,114 @@ namespace Pomp.Hosting
             return label.Length > 80 ? label.Substring(0, 80) : label;
         }
 
+        private bool ComputerTurnBusy()
+        {
+            lock (_stateLock) return _turns.Count > 0 || _info.IsStreaming;
+        }
+
         /// <summary>computer/set from the page (queued with the chat commands): answers with one computer/reply.</summary>
         private async Task HandleComputerSetAsync(JObject payload)
         {
             var requestId = payload.GetString("requestId") ?? string.Empty;
+            var on = payload.GetBool("desktop") == true;
+            if (on)
+            {
+                bool waiting;
+                lock (_computerLock) waiting = _computerQueuedRequestId != null;
+                if (waiting)
+                {
+                    _ui.Post(UiMessageTypes.ComputerReply, new JObject { ["requestId"] = requestId, ["ok"] = false,
+                        ["error"] = PompLanguage.Pick("이전 요청을 처리하고 있어요.", "The previous request is still running.") }, UiDelivery.State);
+                    return;
+                }
+            }
+            if (!on)
+            {
+                string? cancelled;
+                lock (_computerLock) { cancelled = _computerQueuedRequestId; _computerQueuedRequestId = null; }
+                if (cancelled != null)
+                {
+                    PublishComputerState();
+                    _ui.Post(UiMessageTypes.ComputerReply, new JObject { ["requestId"] = cancelled, ["ok"] = false,
+                        ["error"] = PompLanguage.Pick("켜기 요청을 취소했어요.", "The request to switch on was cancelled.") }, UiDelivery.State);
+                }
+            }
+            else if (ComputerTurnBusy())
+            {
+                string? current; OmpConnection? connection;
+                lock (_stateLock) { current = _info.SessionId; connection = _epochConnection; }
+                string? pending;
+                lock (_computerLock)
+                {
+                    pending = _computerQueuedRequestId != null || _computerPending
+                        ? PompLanguage.Pick("이전 요청을 처리하고 있어요.", "The previous request is still running.") : null;
+                    if (pending == null && !_computerDesktop) _computerQueuedRequestId = requestId;
+                }
+                if (pending != null)
+                {
+                    _ui.Post(UiMessageTypes.ComputerReply, new JObject { ["requestId"] = requestId, ["ok"] = false, ["error"] = pending }, UiDelivery.State);
+                    return;
+                }
+                bool queued;
+                lock (_computerLock) queued = _computerQueuedRequestId == requestId;
+                if (queued)
+                {
+                    PublishComputerState();
+                    var lifetime = _disposeCts.Token;
+                    var lastPendingRefresh = DateTime.MinValue;
+                    _ = Task.Run(async () =>
+                    {
+                        while (!lifetime.IsCancellationRequested)
+                        {
+                            await Task.Delay(200, lifetime).ConfigureAwait(false);
+                            lock (_computerLock) if (_computerQueuedRequestId != requestId) return;
+                            bool changed;
+                            lock (_stateLock) changed = _info.SessionId != current || !ReferenceEquals(connection, _epochConnection);
+                            if (changed || _bridge.State != BridgeState.Running)
+                            {
+                                lock (_computerLock) { if (_computerQueuedRequestId != requestId) return; _computerQueuedRequestId = null; }
+                                PublishComputerState();
+                                _ui.Post(UiMessageTypes.ComputerReply, new JObject { ["requestId"] = requestId, ["ok"] = false,
+                                    ["error"] = PompLanguage.Pick("대화가 바뀌어 켜지 않았어요.", "The conversation changed; computer use was not switched on.") }, UiDelivery.State);
+                                return;
+                            }
+                            bool refreshPending;
+                            lock (_stateLock) refreshPending = _turns.Count == 0 && _info.IsStreaming;
+                            if (refreshPending && DateTime.UtcNow - lastPendingRefresh >= TimeSpan.FromSeconds(3))
+                            {
+                                lastPendingRefresh = DateTime.UtcNow;
+                                RequestInfoRefresh();
+                            }
+                            if (ComputerTurnBusy()) continue;
+                            await _commands.Enqueue(async () =>
+                            {
+                                bool changedInside;
+                                lock (_stateLock) changedInside = _info.SessionId != current || !ReferenceEquals(connection, _epochConnection);
+                                if (!changedInside && ComputerTurnBusy()) return;
+                                lock (_computerLock) { if (_computerQueuedRequestId != requestId) return; _computerQueuedRequestId = null; }
+                                PublishComputerState();
+                                if (changedInside)
+                                {
+                                    _ui.Post(UiMessageTypes.ComputerReply, new JObject { ["requestId"] = requestId, ["ok"] = false,
+                                        ["error"] = PompLanguage.Pick("대화가 바뀌어 켜지 않았어요.", "The conversation changed; computer use was not switched on.") }, UiDelivery.State);
+                                    return;
+                                }
+                                await HandleComputerSetAsync(payload).ConfigureAwait(false);
+                            }).ConfigureAwait(false);
+                            lock (_computerLock) if (_computerQueuedRequestId != requestId) return;
+                        }
+                    }, lifetime).ContinueWith(t =>
+                    {
+                        if (t.Exception != null && !(t.Exception.InnerException is OperationCanceledException))
+                            _logger.Warn("Pending computer use switch failed: " + t.Exception.InnerException?.Message);
+                    }, TaskScheduler.Default);
+                    return;
+                }
+            }
             string? error;
-            try
-            {
-                error = await SetComputerDesktopAsync(payload.GetBool("desktop") == true, reason: null).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn("Switching computer use failed: " + ex.Message);
-                error = ex.Message;
-            }
-
+            try { error = await SetComputerDesktopAsync(on, reason: null).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { return; }
+            catch (Exception ex) { _logger.Warn("Switching computer use failed: " + ex.Message); error = ex.Message; }
             _ui.Post(UiMessageTypes.ComputerReply, new JObject { ["requestId"] = requestId, ["ok"] = error == null, ["error"] = error }, UiDelivery.State);
         }
 
@@ -179,14 +271,13 @@ namespace Pomp.Hosting
                     return PompLanguage.Pick("컴퓨터 사용이 설정에서 '사용 안 함'이에요.", "Computer use is turned off in the settings.");
                 if (on && (!_computerGuard || _computerOptions.Policy == ComputerUsePolicy.Off))
                     return _computerMessage ?? PompLanguage.Pick("컴퓨터 사용이 꺼진 채로 시작됐어요.", "Started with computer use off.");
+                if (_computerPending) return PompLanguage.Pick("이전 요청을 처리하고 있어요.", "The previous request is still running.");
                 if (_computerDesktop == on)
                 {
                     if (reason != null) _computerMessage = reason;
-                    if (!on && !keepOwner) _computerOwner?.Release();
+                    if (!on && !keepOwner) { _computerOwner?.Release(); _computerOwnerTab = null; }
                     return null;
                 }
-
-                if (_computerPending) return PompLanguage.Pick("이전 요청을 처리하고 있어요.", "The previous request is still running.");
                 _computerPending = true;
                 ownerLock = _computerOwner;
             }
@@ -197,6 +288,7 @@ namespace Pomp.Hosting
             {
                 if (_bridge.State != BridgeState.Running) return PompLanguage.Pick("연결되어 있지 않아요.", "Not connected.");
                 if (on && busy) return PompLanguage.Pick("응답이 진행 중이에요.", "A reply is in progress.");
+                if (on && ownerLock == null) return PompLanguage.Pick("컴퓨터 사용 잠금을 사용할 수 없어요.", "The computer use owner lock is unavailable.");
                 if (on && ownerLock != null)
                 {
                     string root;
@@ -249,7 +341,10 @@ namespace Pomp.Hosting
             finally
             {
                 if (taken) ownerLock?.Release();
-                lock (_computerLock) _computerPending = false;
+                string? latest;
+                lock (_computerLock) { if (taken || (!on && !keepOwner && !_computerDesktop)) _computerOwnerTab = null; _computerPending = false; }
+                lock (_stateLock) latest = _info.SessionId;
+                if (latest != sessionId) ComputerSessionObserved(latest);
                 PublishComputerState();
             }
         }
@@ -311,8 +406,18 @@ namespace Pomp.Hosting
                 var owner = ownerLock?.Current();
                 if (owner != null && owner.Mine && (owner.SessionId == sessionId || inOwnerTab))
                 {
-                    var replaces = owner.SessionId == sessionId ? null : owner.SessionId;
-                    lock (_stateLock) _commands.Enqueue(() => ResumeComputerAsync(replaces));
+                    // A new conversation inside the holder's own tab does not inherit computer use.
+                    // Returning from another tab does (left then names that other tab).
+                    if (owner.SessionId != sessionId && left == owner.SessionId)
+                    {
+                        ownerLock!.Release(owner.SessionId);
+                        lock (_computerLock) _computerOwnerTab = null;
+                    }
+                    else
+                    {
+                        var replaces = owner.SessionId == sessionId ? null : owner.SessionId;
+                        lock (_stateLock) _commands.Enqueue(() => ResumeComputerAsync(replaces));
+                    }
                 }
                 else ReleaseClosedComputerOwner();
                 PublishComputerState();
@@ -334,7 +439,7 @@ namespace Pomp.Hosting
             var error = await SetComputerDesktopAsync(true, reason: null, replaces: replaces).ConfigureAwait(false);
             if (error == null) return;
             ComputerOwnerLock? ownerLock;
-            lock (_computerLock) { _computerMessage = error; ownerLock = _computerOwner; }
+            lock (_computerLock) { _computerMessage = error; ownerLock = _computerOwner; _computerOwnerTab = null; }
             ownerLock?.Release();
             PublishComputerState();
         }
@@ -376,9 +481,9 @@ namespace Pomp.Hosting
             lock (_computerLock) owner = _computerOwnerTab;
             if (owner == null) return false;
             if (owner == "main") return true;
-            string root, current;
-            lock (_stateLock) { root = _workingDirectory; current = _info.SessionId ?? ""; }
-            if (current.Length > 0 && ComputerTabOf(current) == owner) return true;
+            string root;
+            lock (_stateLock) root = _workingDirectory;
+            // A tab that was closed before its engine switch must not be counted open just because it is still current.
             try { return _tabs.Read(root).Conversations.Any(e => e.Open && ComputerTabKey(e.Partner) == owner); }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is InvalidOperationException || ex is ArgumentException) { return false; }
         }
@@ -391,6 +496,7 @@ namespace Pomp.Hosting
             var owner = ownerLock?.Current();
             if (owner == null || !owner.Mine || ComputerOwnerTabOpen()) return;
             ownerLock!.Release(owner.SessionId);
+            lock (_computerLock) _computerOwnerTab = null;
         }
 
         /// <summary>omp stopped or restarts: its replacement starts with computer use off (the overlay), and nothing is held.</summary>
@@ -405,6 +511,7 @@ namespace Pomp.Hosting
                     wasOn = _computerDesktop;
                     _computerDesktop = false;
                     _computerSessionId = null;
+                    _computerOwnerTab = null;
                     if (wasOn) _computerMessage = PompLanguage.Pick("다시 시작돼 컴퓨터 사용이 꺼졌어요.", "Restarted, so computer use is off.");
                     ownerLock = _computerOwner;
                 }

@@ -14,9 +14,9 @@ import { Pager, usePaged } from './ui';
  * expand under their row. It lists only the conversations with the tab's partner (POMP conversations in the Default tab), and a chosen one
  * opens in this tab.
  */
-export function SessionHistory({ locale, sessionId, sessionName, partner, history, disabled, onNew, onOpened, onClose }: {
+export function SessionHistory({ locale, sessionId, sessionName, partner, history, disabled, newDisabled, switchDisabled, onNew, onOpened, onClose }: {
   locale: string; sessionId?: string; sessionName?: string; partner: ConversationPartner; history: SessionHistoryController;
-  disabled: boolean; onNew: () => void; onOpened: () => void; onClose?: () => void;
+  disabled: boolean; newDisabled: boolean; switchDisabled: boolean; onNew: () => void; onOpened: () => void; onClose?: () => void;
 }) {
   const t = useT(); const [query, setQuery] = useState(''); const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState<{ id: string; name: string }>();
@@ -37,6 +37,8 @@ export function SessionHistory({ locale, sessionId, sessionName, partner, histor
     (root?.querySelector<HTMLElement>('[data-testid="session-search"]') ?? root?.querySelector<HTMLElement>('li.current [data-testid="session-open"]') ?? root?.querySelector<HTMLElement>('[data-testid="session-open"]'))?.focus({ preventScroll: true });
   }, [searchable]);
   useEffect(() => { setEditing(false); setDeleting(undefined); setMenu(undefined); setPreviewId(undefined); }, [sessionId]);
+  // The confirmation sits under the list: in a long or scrolled list it would open out of sight, and the delete would seem to do nothing.
+  useEffect(() => { if (deleting) deleteAnchor.current?.scrollIntoView?.({ block: 'nearest' }); }, [deleting]);
   const entries = tabEntries.filter(entry => `${entry.title ?? ''} ${entry.name ?? ''} ${entry.sessionId ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const paged = usePaged(entries, query);
   const date = (value?: string) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString(locale) : '';
@@ -46,17 +48,17 @@ export function SessionHistory({ locale, sessionId, sessionName, partner, histor
   }}>
     <div className="sessions-toolbar"><strong>{t('session.list')}</strong>
       <button className="icon-btn" type="button" disabled={history.pending} title={t('session.refresh')} aria-label={t('session.refresh')} onClick={() => history.command('refresh')}><Icon name="restart" /></button>
-      <button className="icon-btn" type="button" data-testid="sessions-new" disabled={disabled || history.pending} onClick={onNew} title={t('status.newSession')} aria-label={t('status.newSession')}><Icon name="plus" /></button>
+      <button className="icon-btn" type="button" data-testid="sessions-new" disabled={newDisabled} onClick={onNew} title={t('status.newSession')} aria-label={t('status.newSession')}><Icon name="plus" /></button>
     </div>
     {searchable && <input className="session-search" type="search" data-testid="session-search" aria-label={t('session.search')} placeholder={t('session.search')} value={query} onChange={event => setQuery(event.target.value)} />}
-    {disabled && <p className="hint" data-testid="session-switch-blocked">{t('session.blocked')}</p>}
+    {switchDisabled && <p className="hint" data-testid="session-switch-blocked">{t('session.blocked')}</p>}
     {history.pending && <p role="status">{t('session.loading')}</p>}{history.error && <p role="alert">{revealControls(history.error)}</p>}
     <ol className="session-list" data-testid="session-list">{paged.slice.map(entry => {
       const current = entry.current === true || entry.sessionId === sessionId;
       const preview = previewId === entry.id && history.state.preview?.id === entry.id ? history.state.preview : undefined;
       return <li key={entry.id} className={current ? 'current' : ''} data-testid={`session-row-${entry.id}`} aria-busy={history.pendingId === entry.id || undefined}>
         <div className="session-row-main">
-          <button className="session-row-open" type="button" data-testid="session-open" disabled={history.pending || (!current && disabled)} onClick={() => { if (current) onOpened(); else if (history.command('switch', entry.id)) onOpened(); }}>
+          <button className="session-row-open" type="button" data-testid="session-open" disabled={history.pending || (!current && switchDisabled)} onClick={() => { if (current) onOpened(); else if (history.command('switch', entry.id)) onOpened(); }}>
             <strong className="session-title">{current && <Icon name="check" size={12} />}{revealControls(entry.title || entry.name || entry.sessionId || entry.id)}</strong>
             <span className="session-meta">{date(entry.modifiedUtc || entry.visitedUtc)}{entry.messageCount !== undefined && <> · {t('session.messages', { count: entry.messageCount })}</>}</span>
           </button>

@@ -4,7 +4,7 @@ import { makeTranslate } from './i18n';
 import { normalizeSessionHistory, onMessage, send, type SessionHistoryState, type UiToHost } from './protocol';
 
 type HistoryAction = UiToHost['session/history']['action'];
-interface Pending { action: HistoryAction; timer: number }
+interface Pending { action: HistoryAction; timer?: number }
 /** Requests that only read: the host runs session requests one after another, so a rename or compaction may follow them. */
 const READS: Partial<Record<HistoryAction, true>> = { refresh: true, preview: true, messages: true };
 /** The current conversation's own changes (also the /rename and /compact commands): their failures are told in the chat, the host's too. */
@@ -45,6 +45,11 @@ export function useSessionHistory(workspaceKey: string, sessionId: string | unde
       requests.current.clear();
     };
   }, [workspaceKey]);
+  useEffect(() => {
+    if (connected) return;
+    for (const request of requests.current.values()) window.clearTimeout(request.timer);
+    requests.current.clear(); setPending(false); setPendingId(undefined);
+  }, [connected]);
 
   /** True while another request keeps `action` from starting now (a rename or compaction waits only for a request that changes something). */
   const busyFor = useCallback((action: HistoryAction): boolean => {
@@ -65,7 +70,8 @@ export function useSessionHistory(workspaceKey: string, sessionId: string | unde
       : action === 'preview' || action === 'delete' ? { id: value }
       : action === 'messages' ? { sessionId, cursor: value } : {}) } as UiToHost['session/history'];
     // Register before posting: a synchronous dev host can already reply to this request.
-    const timer = window.setTimeout(() => {
+    // A switch can wait for a running turn to finish. Its answer is not bounded by the usual read-request timeout.
+    const timer = action === 'switch' ? undefined : window.setTimeout(() => {
       if (!requests.current.delete(requestId)) return;
       setPending(requests.current.size > 0); setPendingId(undefined); fail(t('session.noReply'));
     }, action === 'delete' ? 60000 : action === 'compact' ? 360000 : action === 'messages' || action === 'rename' ? 30000 : 15000);

@@ -1,7 +1,10 @@
 using System;
+using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Input;
 using System.Windows.Threading;
 using EnvDTE;
+using Window = EnvDTE.Window;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
@@ -17,8 +20,10 @@ namespace Pomp.VisualStudio.ToolWindow
     /// ended and Visual Studio left it elsewhere: leaving debugging, Visual Studio activates the code editor, and the started program
     /// takes the foreground meanwhile. One who kept typing would type into the code.
     /// <para>
-    /// A session starts at the first <c>OnBuildBegin</c> or <c>OnEnterRunMode</c> in design mode and ends when design mode returns
-    /// (after a run) or shortly after <c>OnBuildDone</c> (a build, or Ctrl+F5, which runs without the debugger). The focus goes back
+    /// A session starts at the first <c>OnBuildBegin</c> or <c>OnEnterRunMode</c> in design mode, or when Debug.Start /
+    /// Debug.StartWithoutDebugging runs in design mode (an up-to-date project raises no build event, and Ctrl+F5 no debugger event). It
+    /// ends when design mode returns (after a run) or shortly after <c>OnBuildDone</c> or the start command when no build is running and
+    /// no run began (a plain build, or Ctrl+F5, which runs without the debugger). The focus goes back
     /// once Visual Studio is the active application again with no modal dialog open (the program's window, or the "continue with the
     /// last successful build?" question, may be in front), after Visual Studio has settled its own window activation; for a few seconds
     /// after that, a window Visual Studio activates itself is undone as well.
@@ -35,7 +40,7 @@ namespace Pomp.VisualStudio.ToolWindow
         /// <summary>Window activations this long after a session transition are Visual Studio's own (window layout switch, editor activation).</summary>
         private static readonly TimeSpan TransitionGrace = TimeSpan.FromSeconds(2);
 
-        /// <summary>A build that does not lead into a run within this time ended the session (Ctrl+F5 and a plain build stay in design mode).</summary>
+        /// <summary>A build or start command that does not lead into a run within this time ended the session (Ctrl+F5 and a plain build stay in design mode).</summary>
         private static readonly TimeSpan BuildEndDelay = TimeSpan.FromSeconds(1.5);
 
         /// <summary>
@@ -53,7 +58,7 @@ namespace Pomp.VisualStudio.ToolWindow
         /// <summary>A window activated this soon after a Visual Studio key in the chat was activated by that key's command.</summary>
         private static readonly TimeSpan ChatKeyEffect = TimeSpan.FromSeconds(1);
 
-        /// <summary>A build or run that begins this soon after a Visual Studio key in the chat was started by that key.</summary>
+        /// <summary>A build or run that begins this soon after its launch/build key in the chat was started by that key.</summary>
         private static readonly TimeSpan ChatKeyStart = TimeSpan.FromSeconds(10);
 
         private readonly PompServices services;
@@ -64,12 +69,15 @@ namespace Pomp.VisualStudio.ToolWindow
         private DebuggerEvents? debuggerEvents;
         private BuildEvents? buildEvents;
         private WindowEvents? windowEvents;
+        private CommandEvents? startEvents;
+        private CommandEvents? startWithoutDebuggingEvents;
 
         private bool active;
         private bool ran;
         private bool restoreChat;
         private bool userMoved;
         private bool waiting;
+        private bool building;
         private int buildGeneration;
         private DateTime graceUntilUtc;
         private DateTime waitDeadlineUtc;
@@ -78,6 +86,7 @@ namespace Pomp.VisualStudio.ToolWindow
         private DateTime foreignActivationUtc;
         private DateTime restoredUtc;
         private DateTime chatKeyUtc = DateTime.MinValue;
+        private DateTime buildKeyUtc = DateTime.MinValue;
         private bool disposed;
 
         public ChatFocusKeeper(PompServices services, PompChatControl chat)
@@ -88,6 +97,7 @@ namespace Pomp.VisualStudio.ToolWindow
             context = new VsAdapterContext(services.Package, services.JoinableTaskFactory, services.Logger);
             timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(100) };
             timer.Tick += OnTick;
+            InputManager.Current.PostProcessInput += OnPostProcessInput;
             try
             {
                 var events = context.Dte.Events;
@@ -101,6 +111,8 @@ namespace Pomp.VisualStudio.ToolWindow
                 buildEvents.OnBuildBegin += OnBuildBegin;
                 buildEvents.OnBuildDone += OnBuildDone;
                 windowEvents.WindowActivated += OnWindowActivated;
+                startEvents = StartCommandEvents(events, "Debug.Start");
+                startWithoutDebuggingEvents = StartCommandEvents(events, "Debug.StartWithoutDebugging");
             }
             catch (Exception ex)
             {
@@ -118,18 +130,66 @@ namespace Pomp.VisualStudio.ToolWindow
         /// A Visual Studio key was pressed in the chat (<c>ui/vsKey</c>): a window its command activates at once (F7 shows the code) is the
         /// user's choice, unless it is one Visual Studio activates around a mode change (Shift+F5 stops debugging and shows the editor).
         /// </summary>
-        public void NoteChatKey() => chatKeyUtc = DateTime.UtcNow;
+        public void NoteChatKey(string chord)
+        {
+            chatKeyUtc = DateTime.UtcNow;
+            if (chord == "F5" || chord == "Ctrl+F5" || chord == "Ctrl+Shift+B")
+                buildKeyUtc = chatKeyUtc;
+        }
+
+        private CommandEvents? StartCommandEvents(Events events, string name)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            try
+            {
+                var command = context.Dte.Commands.Item(name, -1);
+                var commandEvents = events.CommandEvents[command.Guid, command.ID];
+                commandEvents.BeforeExecute += OnStartBeforeExecute;
+                commandEvents.AfterExecute += OnStartAfterExecute;
+                return commandEvents;
+            }
+            catch (Exception ex)
+            {
+                context.LogUnexpected("Subscribing to " + name + " for the chat focus", ex);
+                return null;
+            }
+        }
+
+        private void OnStartBeforeExecute(string guid, int id, object customIn, object customOut, ref bool cancelDefault)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            // Before the command runs, the focus is still where the user started it from (a toolbar click keeps it in the chat).
+            if (!active && InDesignMode()) Begin();
+        }
+
+        private void OnStartAfterExecute(string guid, int id, object customIn, object customOut)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (!active) return;
+            Grace();
+            // No build followed (the project was up to date): Ctrl+F5 has started the program, F5 is about to enter run mode.
+            EndUnlessRunning();
+        }
 
         private void OnBuildBegin(vsBuildScope scope, vsBuildAction action)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
+            building = true;
             if (!active && InDesignMode()) Begin();
         }
 
         private void OnBuildDone(vsBuildScope scope, vsBuildAction action)
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            building = false;
             if (!active) return;
             Grace();
+            EndUnlessRunning();
+        }
+
+        /// <summary>Ends the session a moment from now unless a build is still running or the debugger has started a run.</summary>
+        private void EndUnlessRunning()
+        {
             var generation = ++buildGeneration;
             var delay = new DispatcherTimer(DispatcherPriority.Background) { Interval = BuildEndDelay };
             delay.Tick += (sender, args) =>
@@ -137,7 +197,7 @@ namespace Pomp.VisualStudio.ToolWindow
                 ThreadHelper.ThrowIfNotOnUIThread();
                 delay.Stop();
                 // F5 enters run mode after its build: that session ends with design mode instead.
-                if (!disposed && active && !ran && generation == buildGeneration && InDesignMode()) End();
+                if (!disposed && active && !ran && !building && generation == buildGeneration && InDesignMode()) End();
             };
             delay.Start();
         }
@@ -193,6 +253,30 @@ namespace Pomp.VisualStudio.ToolWindow
             else if (waiting) foreignActivationUtc = now;
         }
 
+        private void OnPostProcessInput(object sender, ProcessInputEventArgs e)
+        {
+            if ((!active && !waiting) || e.StagingItem.Input.RoutedEvent != Mouse.PreviewMouseDownEvent) return;
+            var main = Application.Current?.MainWindow;
+            if (main == null || !NativeMethods.IsCursorOver(new WindowInteropHelper(main).Handle)) return;
+            // At PreviewMouseDown the old pane can still own keyboard focus. Identify the clicked surface, not the old focus.
+            var source = e.StagingItem.Input.OriginalSource as DependencyObject;
+            if (IsWithinChat(chat, source))
+            {
+                restoreChat = true;
+                userMoved = false;
+            }
+            else userMoved = true;
+        }
+
+        internal static bool IsWithinChat(System.Windows.Media.Visual chat, DependencyObject? source)
+        {
+            // Text links report a Run/Hyperlink rather than their visual host. IsAncestorOf rejects those.
+            while (source is ContentElement content)
+                source = ContentOperations.GetParent(content) ?? (content as FrameworkContentElement)?.Parent;
+            return ReferenceEquals(source, chat) ||
+                ((source is System.Windows.Media.Visual || source is System.Windows.Media.Media3D.Visual3D) && chat.IsAncestorOf(source));
+        }
+
         private static string WindowCaption(Window window)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
@@ -211,7 +295,7 @@ namespace Pomp.VisualStudio.ToolWindow
             userMoved = false;
             // A key pressed in the chat (F5, Ctrl+Shift+B) started this: Visual Studio may already have shown the Output window and
             // taken the focus by the time the build begins.
-            restoreChat = carried || chat.HasKeyboardFocus || DateTime.UtcNow - chatKeyUtc < ChatKeyStart;
+            restoreChat = carried || chat.HasKeyboardFocus || DateTime.UtcNow - buildKeyUtc < ChatKeyStart;
             services.Logger.Debug("Chat focus: a build or run started (chat had the focus: " + restoreChat + ").");
             Grace();
         }
@@ -253,14 +337,17 @@ namespace Pomp.VisualStudio.ToolWindow
             }
 
             if (now - readySinceUtc < Settle || now - foreignActivationUtc < Settle) return;
-            // Once, and again only after Visual Studio activated another window since.
-            if (restoredUtc == DateTime.MinValue || restoredUtc < foreignActivationUtc)
+            // Once, and again when VS silently restores another pane during a layout/mode transition.
+            // A real click outside the chat cancels this in OnPostProcessInput/OnWindowActivated.
+            if (restoredUtc == DateTime.MinValue || restoredUtc < foreignActivationUtc
+                || (!chat.HasKeyboardFocus && now - restoredUtc >= Settle))
             {
-                restoredUtc = now;
                 if (!chat.HasKeyboardFocus) Restore();
+                restoredUtc = now;
             }
 
             if (now > watchUntilUtc) StopWaiting();
+
         }
 
         private void Restore()
@@ -320,6 +407,7 @@ namespace Pomp.VisualStudio.ToolWindow
             disposed = true;
             StopWaiting();
             timer.Tick -= OnTick;
+            InputManager.Current.PostProcessInput -= OnPostProcessInput;
             try
             {
                 if (debuggerEvents != null)
@@ -336,6 +424,12 @@ namespace Pomp.VisualStudio.ToolWindow
                 }
 
                 if (windowEvents != null) windowEvents.WindowActivated -= OnWindowActivated;
+                foreach (var commandEvents in new[] { startEvents, startWithoutDebuggingEvents })
+                {
+                    if (commandEvents == null) continue;
+                    commandEvents.BeforeExecute -= OnStartBeforeExecute;
+                    commandEvents.AfterExecute -= OnStartAfterExecute;
+                }
             }
             catch (Exception)
             {
@@ -345,6 +439,8 @@ namespace Pomp.VisualStudio.ToolWindow
             debuggerEvents = null;
             buildEvents = null;
             windowEvents = null;
+            startEvents = null;
+            startWithoutDebuggingEvents = null;
         }
     }
 }

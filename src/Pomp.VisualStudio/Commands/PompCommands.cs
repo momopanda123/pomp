@@ -105,7 +105,7 @@ namespace Pomp.VisualStudio.Commands
                     targets.Clear(); large = false;
                     try
                     {
-                        if (services.Session is PompSession session)
+                        if (services.ActiveSession is PompSession session)
                         {
                             var all = session.ListEditorSendTargets(MenuItems - 1);
                             large = all.Count > MenuItems;

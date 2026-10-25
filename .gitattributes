@@ -12,6 +12,8 @@
 
 # omp before 18.4.2 mis-parses CRLF SKILL.md frontmatter; keep the skill files LF on every checkout.
 src/Pomp.OmpExtension/skills/**/SKILL.md text eol=lf
+# The engine source patch is applied to upstream's LF files (build/build-omp.ps1): a CRLF checkout does not apply.
+*.patch   text eol=lf
 
 *.png     binary
 *.ico     binary

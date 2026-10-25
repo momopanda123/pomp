@@ -117,21 +117,21 @@ namespace Pomp.Permissions
         }
 
         /// <summary>
-        /// What the approval mode (Tools > Options > Pomp > Agent, or the chat composer's permission-mode chip) answers without asking:
+        /// What the approval mode (Tools &gt; Options &gt; Pomp &gt; Agent, or the chat composer's permission-mode chip) answers without asking:
         /// <see cref="OmpApprovalMode.Write"/> allows the host's file, project, breakpoint and bookmark changes (omp's own write tier it
-        /// approves itself); <see cref="OmpApprovalMode.Yolo"/> allows every request. Never a prompt a person must answer
-        /// (<paramref name="forced"/>: omp's "Reason:" and provider safety prompts) and never omp's computer and browser helpers, whose
-        /// input on the user's screen always asks (docs/architecture.md §8.5).
+        /// approves itself); <see cref="OmpApprovalMode.Yolo"/> allows all requests except omp's computer and browser control.
+        /// Those two always ask even in auto-all; forced tool prompts (e.g. "Reason:") still obey the explicitly selected
+        /// auto-all mode for every other tool, including after a model switch.
         /// </summary>
         public static bool AllowedByMode(OmpApprovalMode mode, PermissionRequest request, bool forced)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
-            if (forced || mode == OmpApprovalMode.AlwaysAsk) return false;
+            if (mode == OmpApprovalMode.AlwaysAsk) return false;
             if (request.Source == PermissionSource.OmpApproval
                 && (string.Equals(request.ToolName, "computer", StringComparison.OrdinalIgnoreCase) || string.Equals(request.ToolName, "browser", StringComparison.OrdinalIgnoreCase)))
                 return false;
             if (mode == OmpApprovalMode.Yolo) return true;
-            if (IsOnceOnly(request)) return false;
+            if (forced || IsOnceOnly(request)) return false;
             switch (request.Kind)
             {
                 case PermissionKind.FileWrite:

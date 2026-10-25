@@ -129,28 +129,6 @@ export default function teams(pi: ExtensionAPI): void {
     },
   });
 
-  // A direct message to an agent this conversation already ran (docs/architecture.md §8.3): delivered over omp's IRC, so that agent
-  // continues its own context (a parked agent is revived by omp).
-  pi.registerCommand('pomp-dm', {
-    description: 'Send the message to an existing agent of this conversation and show its reply',
-    handler: async (args, ctx) => {
-      const match = /^\s*([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\s+([\s\S]+)$/.exec(args);
-      if (!match) {
-        ctx.ui.notify('Agent ID or message is missing.', 'warning');
-        return;
-      }
-      const id = match[1]!;
-      const brief = [
-        `<!-- pomp-dm:${id} -->`,
-        `The user sent a direct message to the existing agent \`${id}\`. Deliver the user's message below to it verbatim with \`write agent://${id}\`. Do not call the \`wait\` tool for it: its reply arrives by itself as a message (\`wait\` only covers jobs you started). Show that reply to the user when it arrives.`,
-        `Do not answer the message yourself and do not start new agents. If \`write\` reports that the agent does not exist, say so.`,
-        `<!-- /pomp-dm -->`,
-      ].join('\n\n');
-      activeMembersOnly = { teamId: id, label: `the direct message to agent '${id}'`, allowed: new Set() };
-      pi.sendUserMessage(`${brief}\n\n${match[2]}`);
-    },
-  });
-
   pi.registerCommand('pomp-team', {
     description: 'Execute a team dispatch with coordinated instructions',
     handler: async (args, ctx) => {

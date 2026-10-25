@@ -29,8 +29,8 @@ export function SessionRename({ name, disabled, onSave, onDone }: { name: string
     }} />;
 }
 
-export function SessionHeader({ session, history, disabled, onNew, listOpen, onToggleList, children }: {
-  session: SessionInfoPayload | null; history: SessionHistoryController; disabled: boolean; onNew: () => void;
+export function SessionHeader({ session, history, disabled, newDisabled, onNew, listOpen, onToggleList, children }: {
+  session: SessionInfoPayload | null; history: SessionHistoryController; disabled: boolean; newDisabled: boolean; onNew: () => void;
   listOpen: boolean; onToggleList: () => void; children?: ReactNode;
 }) {
   const t = useT(); const [editing, setEditing] = useState(false); const nameButton = useRef<HTMLButtonElement>(null);
@@ -43,7 +43,7 @@ export function SessionHeader({ session, history, disabled, onNew, listOpen, onT
     {editing ? <SessionRename name={realName} disabled={disabled || history.pending} onSave={value => history.command('rename', value)} onDone={restoreFocus => { setEditing(false); if (restoreFocus) window.requestAnimationFrame(() => nameButton.current?.focus()); }} />
       : <button ref={nameButton} className="session-name" type="button" disabled={disabled || !session?.sessionId} title={t('session.rename')} data-testid="session-name" onClick={() => setEditing(true)}>{revealControls(realName || t('session.untitled'))}</button>}
     <button className="icon-btn" type="button" data-testid="session-quick" aria-label={t('session.quick')} title={t('session.quick')} aria-controls="conversation-list" aria-expanded={listOpen} onClick={onToggleList}><Icon name="chevronDown" size={12} /></button>
-    <button className="icon-btn" type="button" data-testid="new-session" disabled={disabled || history.pending} title={t('status.newSession')} aria-label={t('status.newSession')} onClick={onNew}><Icon name="plus" /></button>
+    <button className="icon-btn" type="button" data-testid="new-session" disabled={newDisabled} title={t('status.newSession')} aria-label={t('status.newSession')} onClick={onNew}><Icon name="plus" /></button>
     {children}
   </div>;
 }

@@ -6,8 +6,7 @@ export const BUILTIN_COMMANDS = ['new', 'sessions', 'rename', 'model', 'thinking
 export type BuiltinCommand = typeof BUILTIN_COMMANDS[number];
 export const isBuiltinCommand = (name: string): name is BuiltinCommand => (BUILTIN_COMMANDS as readonly string[]).includes(name);
 /** POMP's plumbing commands: the host sends them programmatically, so the command list never offers them (typed text still goes to the host as written). */
-export const HIDDEN_COMMANDS = ['pomp-tools', 'pomp-inline', 'pomp-stop', 'pomp-feedback-guard', 'pomp-agent', 'pomp-dm', 'pomp-team', 'pomp-plan-note'] as const;
-export const isHiddenCommand = (name: string): boolean => name.startsWith('pomp-') || (HIDDEN_COMMANDS as readonly string[]).includes(name);
+export const isHiddenCommand = (name: string): boolean => name.startsWith('pomp-');
 
 /**
  * Commands the bundled agent ships outside its builtins (by name and source) that the palette leaves out. POMP's /goal and the onboarding

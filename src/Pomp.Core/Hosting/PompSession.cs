@@ -84,7 +84,7 @@ namespace Pomp.Hosting
     /// dispatcher, the permission gate and the Visual Studio adapters. It launches omp with the arguments of architecture.md §4, keeps
     /// <c>vs-state.json</c> current, translates omp frames into the UI protocol (docs/ui-protocol.md) and UI messages into omp
     /// commands, and answers omp's approval prompts and extension dialogs through the UI.
-    /// Construct it once per Visual Studio instance, after the host tools were registered in <paramref name="registry"/>.
+    /// A conversation host constructs one per open conversation after registering its host tools in <paramref name="registry"/>.
     /// </summary>
     public sealed partial class PompSession : IPompSession
     {
@@ -123,6 +123,33 @@ namespace Pomp.Hosting
         private readonly int _hostProcessId;
         private readonly UsageMetrics _metrics;
         private readonly bool _ownsMetrics;
+        // A conversation host assigns each engine a private guard/VS state and config overlay.
+        private readonly string _engineKey = Guid.NewGuid().ToString("N");
+        internal event EventHandler? ConversationStateChanged;
+        internal string? ConversationId { get { lock (_stateLock) return _info.SessionId; } }
+        internal string? ConversationFile { get { lock (_stateLock) return _sessionFile; } }
+        internal bool ConversationRunning { get { lock (_stateLock) return _info.IsStreaming || _info.HasPendingAsyncWork || _turns.Count > 0; } }
+        internal string ConversationRoot { get { lock (_stateLock) return _workingDirectory; } }
+        internal ConversationTabsStatePayload ConversationTabs => TabsView();
+        internal Task RunHistoryCommandAsync(JObject args, Func<string, string, bool>? ownedElsewhere = null) =>
+            _commands.Enqueue(() => HandleRecentSessionsAsync(args, ownedElsewhere));
+        internal void InitializeConversation(string root, string? id, string? file, ConversationPartnerPayload? partner)
+        {
+            lock (_stateLock)
+            {
+                _recoveryRoot = root;
+                _recoverySession = id;
+                _recoveryFile = file;
+                _newConversationPartner = partner == null ? null : CopyPartner(partner);
+                _managedInitialSession = id;
+                _managedInitialTranscriptReady = id == null;
+            }
+        }
+        private string? _managedInitialSession;
+        private bool _managedInitialTranscriptReady = true;
+        internal void FreezeWorkspace() { Interlocked.Exchange(ref _workspaceSwitching, 1); _gate.ResetSession(); }
+        private void NotifyConversationChanged() => ConversationStateChanged?.Invoke(this, EventArgs.Empty);
+        internal void UnfreezeWorkspace() => Interlocked.Exchange(ref _workspaceSwitching, 0);
 
         private readonly object _stateLock = new object();
         // Guards _lastHelloJson only (the JSON of the host/hello last built for the page); never held while posting.
@@ -172,7 +199,8 @@ namespace Pomp.Hosting
             ICustomToolRegistry registry,
             IPompLogger logger,
             IOmpProcessLauncher? launcher,
-            PompSessionOptions? options)
+            PompSessionOptions? options,
+            bool managedWorkspace = false)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _environment = environment ?? throw new ArgumentNullException(nameof(environment));
@@ -279,13 +307,10 @@ namespace Pomp.Hosting
             _bridge.ConnectionEnded += OnConnectionEnded;
             PompLanguage.Changed += OnHelloSettingsChanged;
             _settings.Changed += OnHelloSettingsChanged;
-            try
+            if (!managedWorkspace)
             {
-                _adapters.Solution.SolutionChanged += OnSolutionChanged;
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn("Could not subscribe to solution changes: " + ex.Message);
+                try { _adapters.Solution.SolutionChanged += OnSolutionChanged; }
+                catch (Exception ex) { _logger.Warn("Could not subscribe to solution changes: " + ex.Message); }
             }
         }
 
@@ -405,6 +430,8 @@ namespace Pomp.Hosting
             _dispatcher.Dispose();
             _dispatcher.Completed -= OnHostToolCompleted;
             _bridge.Dispose();
+            try { File.Delete(Path.Combine(Path.GetFullPath(_environment.DataDirectory), "omp", "pomp-overlay-" + _engineKey + ".yml")); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { _logger.Debug("Could not remove the engine overlay: " + ex.Message); }
             _ui.Dispose();
             lock (_knowledgeStateFileLock) _vsState.DeleteDirectory();
             _vsState.Dispose();
@@ -497,11 +524,11 @@ namespace Pomp.Hosting
             catch (Exception ex) when (!(ex is OperationCanceledException)) { _logger.Warn("Could not check where this workspace's POMP data came from: " + ex.Message); }
 
             // omp treats any --config overlay problem as a hard startup error: the file must exist (absolute path) before the spawn.
-            var overlayPath = Path.Combine(dataDirectory, "omp", "pomp-overlay.yml");
+            var overlayPath = Path.Combine(dataDirectory, "omp", "pomp-overlay-" + _engineKey + ".yml");
             var hostTools = _registry.GetDefinitions().Select(definition => definition.Name).ToList();
             var blockNetwork = _settings.BlockOmpNetworkTools;
 
-            var stateDirectory = Path.Combine(dataDirectory, "state", _hostProcessId.ToString(CultureInfo.InvariantCulture));
+            var stateDirectory = Path.Combine(dataDirectory, "state", _hostProcessId.ToString(CultureInfo.InvariantCulture), _engineKey);
             try
             {
                 // The state file only feeds omp's pre-edit guard: failing to provide it must not stop omp from starting.
@@ -544,6 +571,7 @@ namespace Pomp.Hosting
             var launchDirectory = Path.Combine(dataDirectory, "workspace");
             Directory.CreateDirectory(launchDirectory);
             var launch = new OmpLaunchOptions { ExecutablePath = resolution.Path!, WorkingDirectory = launchDirectory };
+            BundledEngine.UseOwnNatives(launch, dataDirectory);
             lock (_stateLock) _launchedApprovalMode = _settings.ApprovalMode;
             foreach (var argument in OmpLaunchArguments.Build(
                 _settings.UseRpcUiMode,
@@ -600,6 +628,7 @@ namespace Pomp.Hosting
                 {
                     _sessionFile = null;
                     _sessionFolderRoot = "";
+                    if (_workingDirectory.Length > 0) _managedInitialSession = null;
                 }
                 _workingDirectory = root;
             }

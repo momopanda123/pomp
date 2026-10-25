@@ -318,7 +318,7 @@ namespace Pomp.VisualStudio.Commands
         private async Task PrefillChatAsync(ComposerPrefillPayload prefill)
         {
             await ShowChatAsync(focus: true);
-            if (services.Session is PompSession session) session.PrefillComposer(prefill);
+            services.ActiveSession?.PrefillComposer(prefill);
         }
 
         /// <summary>
@@ -353,7 +353,7 @@ namespace Pomp.VisualStudio.Commands
                 services.Logger.Warn("The clipboard could not be read: " + ex.Message);
                 return;
             }
-            if ((paths.Count > 0 || png != null) && services.Session is PompSession session) await session.PasteIntoBasketAsync(paths, png, package.DisposalToken);
+            if ((paths.Count > 0 || png != null) && services.ActiveSession is PompSession session) await session.PasteIntoBasketAsync(paths, png, package.DisposalToken);
         }
 
         /// <summary>
@@ -364,7 +364,7 @@ namespace Pomp.VisualStudio.Commands
         public async Task DropIntoBasketAsync(IReadOnlyList<string> paths)
         {
             if (paths.Count == 0) paths = await SolutionExplorerSelectionAsync();
-            if (paths.Count > 0 && services.Session is PompSession session) await session.PasteIntoBasketAsync(paths, null, package.DisposalToken);
+            if (paths.Count > 0 && services.ActiveSession is PompSession session) await session.PasteIntoBasketAsync(paths, null, package.DisposalToken);
         }
 
         private async Task<IReadOnlyList<string>> SolutionExplorerSelectionAsync()

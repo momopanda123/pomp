@@ -16,7 +16,6 @@ namespace Pomp.VisualStudio.ToolWindow
     internal sealed class CursorVisibilityGuard : IDisposable
     {
         private const int CursorShowing = 0x1;
-        private const int CheckIntervalMs = 100;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct CursorInfo
@@ -37,7 +36,6 @@ namespace Pomp.VisualStudio.ToolWindow
 
         private readonly IPompLogger logger;
         private bool installed;
-        private int lastCheck;
         private bool reported;
 
         public CursorVisibilityGuard(IPompLogger logger)
@@ -65,13 +63,8 @@ namespace Pomp.VisualStudio.ToolWindow
                 return;
             }
 
-            var now = Environment.TickCount;
-            if (unchecked(now - lastCheck) < CheckIntervalMs)
-            {
-                return;
-            }
-
-            lastCheck = now;
+            // Check every move. A pointer can cross onto WPF content and stop within 100 ms of the last
+            // visible check; throttling then leaves it hidden until another mouse movement.
             try
             {
                 var info = new CursorInfo { Size = Marshal.SizeOf(typeof(CursorInfo)) };

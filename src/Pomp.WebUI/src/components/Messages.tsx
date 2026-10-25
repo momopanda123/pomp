@@ -1,4 +1,4 @@
-import { memo, useRef, useState } from 'react';
+import { memo, useRef, useState, useSyncExternalStore } from 'react';
 import { parseSentCaseFeedback, sentCaseFeedbackText } from '../caseFeedbackMessage';
 import { clip, copyText } from '../format';
 import { useT } from '../i18n';
@@ -176,6 +176,7 @@ export const UserMessage = memo(function UserMessage({ item }: { item: UserItem 
       {/* No badge = the conversation itself answered; a badge names the one-message target (an agent, team or running member). */}
       {item.target && item.target.kind !== 'main' && <TargetBadge target={item.target} />}
       {item.steered && <div className={item.withdrawn ? 'message-steered-badge withdrawn' : 'message-steered-badge'} data-testid="message-steered" title={t(item.withdrawn ? 'msg.steerWithdrawnTitle' : 'msg.steeredTitle')}><Icon name={item.withdrawn ? 'stop' : 'zap'} size={12} /><span>{t(item.withdrawn ? 'msg.steerWithdrawn' : 'msg.steered')}</span></div>}
+      {item.subagentAccepted && <div className="message-steered-badge" data-testid="message-subagent-accepted" title={t('msg.subagentAcceptedTitle')}><Icon name="check" size={12} /><span>{t('msg.subagentAccepted')}</span></div>}
       <UserTextBody text={item.text} />
       {item.attachments && item.attachments.length > 0 && <AttachmentSummary files={item.attachments} testId="user-attachments" />}
       <EditorContextChip context={item.editorContext} />
@@ -190,18 +191,42 @@ export const UserMessage = memo(function UserMessage({ item }: { item: UserItem 
   );
 });
 
-/** Collapsible reasoning text; while it streams, the collapsed header shows the latest line as a live preview. */
+/** A viewer preference shared by every reasoning block, without rewriting an explicitly opened/closed block. */
+const THINKING_EXPAND_KEY = 'pomp.thinking.autoExpand';
+let thinkingAutoExpand = (() => {
+  try { return localStorage.getItem(THINKING_EXPAND_KEY) === 'true'; } catch { return false; }
+})();
+const thinkingListeners = new Set<() => void>();
+const subscribeThinking = (listener: () => void) => {
+  thinkingListeners.add(listener);
+  return () => { thinkingListeners.delete(listener); };
+};
+const setThinkingAutoExpand = (value: boolean) => {
+  thinkingAutoExpand = value;
+  try { localStorage.setItem(THINKING_EXPAND_KEY, String(value)); } catch { /* Storage is an optional viewer preference. */ }
+  thinkingListeners.forEach(listener => listener());
+};
+
+/** Reasoning may be toggled per message; the persisted preference applies to every block by default. */
 function Thinking({ text, live }: { text: string; live: boolean }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const autoExpand = useSyncExternalStore(subscribeThinking, () => thinkingAutoExpand, () => thinkingAutoExpand);
+  const [manualOpen, setManualOpen] = useState<boolean | undefined>();
+  const open = manualOpen ?? autoExpand;
   const preview = live && !open ? clip(text.slice(-240).trim().split('\n').pop() ?? '', 140) : '';
   return (
     <div className={live ? 'thinking live' : 'thinking'}>
-      <button type="button" className="thinking-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <Icon name="chevron" size={12} className={open ? 'chevron open' : 'chevron'} />
-        <span className="thinking-title">{live ? t('msg.thinkingLive') : t('msg.thinking')}</span>
-        {preview && <span className="thinking-preview">{preview}</span>}
-      </button>
+      <div className="thinking-controls">
+        <button type="button" className="thinking-head" aria-expanded={open} onClick={() => setManualOpen(!open)}>
+          <Icon name="chevron" size={12} className={open ? 'chevron open' : 'chevron'} />
+          <span className="thinking-title">{live ? t('msg.thinkingLive') : t('msg.thinking')}</span>
+          {preview && <span className="thinking-preview">{preview}</span>}
+        </button>
+        <button type="button" className="thinking-auto" data-testid="thinking-auto-expand" aria-pressed={autoExpand}
+          title={t('msg.thinkingAutoExpand')} onClick={() => { setManualOpen(undefined); setThinkingAutoExpand(!autoExpand); }}>
+          {t('msg.thinkingAutoExpand')}
+        </button>
+      </div>
       {open && <div className="thinking-body">{text}</div>}
     </div>
   );

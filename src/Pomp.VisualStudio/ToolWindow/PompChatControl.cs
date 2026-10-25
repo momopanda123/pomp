@@ -2,11 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.VisualStudio.PlatformUI;
 using Microsoft.VisualStudio.Shell;
@@ -536,6 +538,7 @@ namespace Pomp.VisualStudio.ToolWindow
                 return;
             }
 
+            KeepEditingKeysInPage(view);
             var core = view.CoreWebView2;
             await ConfigureCoreAsync(core, webUiFolder, generation);
             if (Superseded())
@@ -560,6 +563,43 @@ namespace Pomp.VisualStudio.ToolWindow
             // The agent is not started here: the page has not loaded yet. OnNavigationCompleted starts it once it did.
             core.Navigate(StartUrl);
             logger.Info("Chat UI navigating to " + StartUrl + " (user data: " + userDataFolder + ").");
+        }
+
+        /// <summary>
+        /// Visual Studio docks tool windows in a WPF TabControl, which takes Home and End from anything inside it as "first/last tab": in
+        /// the chat Home did nothing and End moved the keyboard focus to the last tab of the group, so what was typed next was lost. The
+        /// WPF WebView2 raises such a key as WPF key events before the page gets it, and keeps it from the page once one was handled. The
+        /// chat handles Home and End before the TabControl sees them, then hands them back to the page.
+        /// </summary>
+        private void KeepEditingKeysInPage(WebView2 view)
+        {
+            var controller = FindController(view, 1);
+            if (controller == null)
+            {
+                logger.Warn("The WebView2 controller was not found: Home and End stay with Visual Studio in the chat.");
+                return;
+            }
+            view.KeyDown += (_, e) => { if (e.Key == Key.Home || e.Key == Key.End) e.Handled = true; };
+            // Subscribed after the WPF control's own handler (EnsureCoreWebView2Async attached it), so this runs after it.
+            const uint vkEnd = 0x23, vkHome = 0x24;
+            controller.AcceleratorKeyPressed += (_, e) => { if (e.VirtualKey == vkHome || e.VirtualKey == vkEnd) e.Handled = false; };
+        }
+
+        /// <summary>
+        /// The WPF control's controller is not public: WebView2 1.0.1901 (shipped for VS 2017/2019) has it on the control, the copy
+        /// VS 2022+ load keeps it on an inner WebView2Base the control holds.
+        /// </summary>
+        private static CoreWebView2Controller? FindController(object owner, int depth)
+        {
+            const BindingFlags members = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            foreach (var property in owner.GetType().GetProperties(members))
+                if (property.PropertyType == typeof(CoreWebView2Controller) && property.GetIndexParameters().Length == 0 && property.GetValue(owner) is CoreWebView2Controller controller)
+                    return controller;
+            if (depth == 0) return null;
+            foreach (var field in owner.GetType().GetFields(members))
+                if (field.FieldType.Assembly == typeof(WebView2).Assembly && field.GetValue(owner) is object inner && FindController(inner, depth - 1) is CoreWebView2Controller found)
+                    return found;
+            return null;
         }
 
         private async Task ConfigureCoreAsync(CoreWebView2 core, string webUiFolder, int generation)
@@ -994,7 +1034,7 @@ namespace Pomp.VisualStudio.ToolWindow
 
         private void OnVsKeyRequested(object? sender, string chord)
         {
-            focusKeeper.NoteChatKey();
+            focusKeeper.NoteChatKey(chord);
             _ = joinableTaskFactory.RunAsync(async () =>
             {
                 try

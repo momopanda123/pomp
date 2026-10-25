@@ -363,6 +363,9 @@ namespace Pomp.VisualStudio.Editor
             var path = pendingPath; var buffer = pendingBuffer; var point = pendingPoint;
             pendingPath = null; pendingBuffer = null; pendingPoint = null;
             if (disposed || !Enabled || path == null || buffer == null || point == null || LiveEditFeature.EditorInteractionActive) return;
+            // OpenDocumentViaProject and ShowInFront can move native focus even when ShowNoActivate is used.
+            // Remember the exact window (chat input, another tool pane, etc.), not just whether the chat was active.
+            var focusedWindow = NativeMethods.GetFocusedWindow();
             var chat = services.Package.FindToolWindow(typeof(ToolWindow.PompChatToolWindow), 0, false) as ToolWindow.PompChatToolWindow;
             var restoreChat = chat?.Control.HasKeyboardFocus == true;
             try
@@ -393,17 +396,15 @@ namespace Pomp.VisualStudio.Editor
             catch (Exception ex) { context.LogUnexpected("Following a POMP edit", ex); Status(Pomp.Hosting.PompLanguage.Pick("POMP Live: 고친 파일을 열지 못했어요: ", "POMP Live could not show the edited file: ") + ex.Message); }
             finally
             {
-                // Selecting an already-open shell tab can activate its editor despite ShowInFront.
-                // Restore only the chat that owned focus before this synchronous operation.
+                // Selecting a tab must not become an implicit request to type into that editor.
+                // Conversely, do not send focus to the chat when the user was working in some other pane.
+                NativeMethods.RestoreFocus(focusedWindow);
                 if (restoreChat && chat != null)
                 {
-                    // Restore the shell's active pane as well as WebView focus; otherwise the shell
-                    // can subsequently restore focus to the newly selected document tab. This runs in a timer tick:
-                    // a frame that is closing (or a shell shutting down) must not turn into an unhandled exception.
                     try
                     {
                         if (chat.Frame is IVsWindowFrame chatFrame) ErrorHandler.ThrowOnFailure(chatFrame.Show());
-                        chat.Control.FocusChat();
+                        chat.Control.RestoreFocus();
                     }
                     catch (Exception ex) { context.LogUnexpected("Returning focus to the chat after a POMP edit", ex); }
                 }
@@ -414,12 +415,31 @@ namespace Pomp.VisualStudio.Editor
         internal static IVsWindowFrame OpenDocumentNoActivate(VsAdapterContext context, string path, bool show = false)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            var opener = context.GetService<IVsUIShellOpenDocument>(typeof(SVsUIShellOpenDocument));
-            var logicalView = VSConstants.LOGVIEWID_TextView;
-            ErrorHandler.ThrowOnFailure(opener.OpenDocumentViaProject(path, ref logicalView, out _, out _, out _, out var frame));
-            if (frame == null) throw new InvalidOperationException("Visual Studio did not create an editor for " + path);
-            if (show) ErrorHandler.ThrowOnFailure(frame.ShowNoActivate());
-            return frame;
+            var focusedWindow = NativeMethods.GetFocusedWindow();
+            var chat = context.Package.FindToolWindow(typeof(ToolWindow.PompChatToolWindow), 0, false) as ToolWindow.PompChatToolWindow;
+            var restoreChat = chat?.Control.HasKeyboardFocus == true;
+            try
+            {
+                var opener = context.GetService<IVsUIShellOpenDocument>(typeof(SVsUIShellOpenDocument));
+                var logicalView = VSConstants.LOGVIEWID_TextView;
+                ErrorHandler.ThrowOnFailure(opener.OpenDocumentViaProject(path, ref logicalView, out _, out _, out _, out var frame));
+                if (frame == null) throw new InvalidOperationException("Visual Studio did not create an editor for " + path);
+                if (show) ErrorHandler.ThrowOnFailure(frame.ShowNoActivate());
+                return frame;
+            }
+            finally
+            {
+                NativeMethods.RestoreFocus(focusedWindow);
+                if (restoreChat && chat != null)
+                {
+                    try
+                    {
+                        if (chat.Frame is IVsWindowFrame chatFrame) ErrorHandler.ThrowOnFailure(chatFrame.Show());
+                        chat.Control.RestoreFocus();
+                    }
+                    catch (Exception ex) { context.LogUnexpected("Returning focus to the chat after opening an edit target", ex); }
+                }
+            }
         }
 
         private void BookmarkAction(Action action, string operation)

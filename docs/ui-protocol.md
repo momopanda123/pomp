@@ -44,6 +44,10 @@ The VS host enforces these limits. The constants live in `WebViewUiChannel`.
 - The page refuses to send a message whose text exceeds omp's per-message limit, about 1 MiB of UTF-8. It keeps the draft.
 - Both permission requests and generic questions block new chat submissions and retries. Editable drafts are preserved.
 - Generic input/editor Enter handling ignores IME composition, including legacy keyCode 229.
+- The chat composer also handles a Chromium race with the Korean IME: a key the IME lets through (Space, punctuation, Enter) can arrive before the IME's commit of the syllable being composed.
+  - Text typed that way during an open composition keeps its place: once the composition ends, the caret goes back after it (the late commit had left the caret in front of it, so the next words landed before the space).
+  - Enter that arrives with a real key code while the browser still reports the composition (`isComposing`) is held and handled as a normal Enter once the composition ends: it sends, picks from an open list, or breaks the line as usual.
+  - A key the browser types outside any composition while the composer still counts one open (its end never came, e.g. the text was replaced while composing) clears that state, so sending is not left disabled; an Enter that shows it is handled again right after.
 
 ### Outbound queue and delivery failure
 
@@ -269,6 +273,7 @@ Host text the page shows says what happened, the current state or a reason.
 | `session/info` | `{ model?, thinkingLevel?, sessionId?, sessionName?, contextUsage?, isStreaming, workingDirectory?, fastMode? }` | Session state for the composer. See "session/info" below. |
 | `chat/turnStarted` | `{ promptId, clientMessageId?, text?, attachments?, editorContext?, team?, agent?, agentInstance?, main? }` | The host took a user message as a prompt. See "chat/turnStarted" below. |
 | `chat/steered` | `{ steerId, clientMessageId?, text, attachments?, editorContext? }` | A message steered into the running agent. See "Steering" below. |
+| `chat/subagentAccepted` | `{ messageId, clientMessageId?, text, agentInstance, attachments?, editorContext? }` | Existing subagent RPC acknowledged a direct message. It is acceptance, not that child's completion or a main turn. |
 | `chat/steerWithdrawn` | `{ steerIds }` | Stop took these steered messages back before the agent read them; their bubbles show 전달 안 됨 / Not delivered. See "Steering" below. |
 | `chat/assistantStart` | `{ messageId }` | New assistant bubble. |
 | `chat/assistantDelta` | `{ messageId, kind: "text"\|"thinking", delta }` | Append; render markdown incrementally. |
@@ -671,9 +676,8 @@ Payload:
 
 **Turn start and queueing**
 
-- A message sent while idle starts a turn.
-- A message sent while busy enters the host command queue.
-- A queued message receives `chat/queued`, not `chat/turnStarted`.
+- A main, role, or team message sent while idle starts a turn; while busy it enters the host command queue and receives `chat/queued`, not `chat/turnStarted`.
+- `agentInstance` goes directly to the running child even while the main turn is busy. Acceptance is `chat/subagentAccepted`; rejection is a paired failed turn. It does not start a main model turn.
 
 **Attachments**
 
@@ -684,10 +688,10 @@ Payload:
 
 - `team` is an optional team id. When set, the message is dispatched to that team through `/pomp-team`.
 - `agent` is a role name. It makes the message a new assignment run by exactly that agent (`/pomp-agent`).
-- `agentInstance` is a subagent id from this conversation's `workspace/backgroundState` jobs.
-- `agentInstance` delivers the message to that existing agent over omp's IRC (`/pomp-dm`).
+- `agentInstance` is a running subagent id from this conversation's `workspace/backgroundState` jobs.
+- `agentInstance` sends the message through omp `steer_subagent`, not a main-model relay; the child may reject it, particularly with native Codex in-flight restrictions.
 - At most one of `team`/`agent`/`agentInstance` may be set.
-- An unknown target ends the turn with `send_failed` (docs/architecture.md §8.3).
+- An unknown child target ends the failed turn with `subagent_rejected`; other invalid targets end with `send_failed` (docs/architecture.md §8.3).
 - `main: true` makes the conversation answer itself, without a team conversation's team routing.
 - Uses of `main: true`: page actions such as work plan continue, code-review discuss and editor menu auto-send; retries of such answers.
 - Editor menu requests belong to the Default (POMP) tab's conversation: from an agent or team tab the page switches there first and the request waits in the input.
@@ -802,11 +806,11 @@ Payload:
 
 - The host runs omp's `/computer on|off`, with no model request.
 - It runs in order with the chat commands.
-- Switching on is refused during a reply.
+- A request to switch on during a reply waits for that reply to end; switching off can cancel a queued on-request.
 - Answered by `computer/reply`.
 - The page handles a typed `/computer` itself: it acts like a click on the composer's screen & input control button (`computer-toggle`, after Live).
   With the option off the button is hidden and the page says in the chat that it is unavailable. A typed `/computer` that cannot switch
-  (another conversation holds it, a reply runs, the host refuses) is told in the chat as well; a click on the button reports to the status bar.
+  (another conversation holds it or the host refuses) is told in the chat as well; a click on the button reports to the status bar.
 - Variants such as `/computer:<suffix>` or ones with unusual whitespace that reach the host are intercepted and refused (`send_failed`).
 - One conversation on the PC holds computer use. The host keeps the record in `%LOCALAPPDATA%\Pomp\state\computer-owner.json`
   (`{ instance, pid, processStart, sessionId, label, workspace, updatedAt }`), read and written under the named mutex `Local\Pomp.ComputerOwner`.
@@ -927,13 +931,13 @@ Payload:
 
 ### Conversation tabs
 
-Every chat tab is its own omp conversation: the Default (POMP) tab's, and one per open agent or team tab.
+Each open chat tab owns a separate omp process and conversation: the Default (POMP) tab and one per open agent or team.
 
 | type | direction | payload |
 |---|---|---|
 | `conversation/tab` | UI → host | `{ requestId, action: "open"\|"activate"\|"close", partner?: { kind: "agent"\|"team", id }, sessionId? }` |
 | `conversation/tabReply` | host → UI | `{ requestId, ok, error? }`: only for `close` of a tab that is not the current conversation. |
-| `conversation/tabsState` | host → UI | `{ sessionId?, partner: { kind, id? }, title?, message?, main?, tabs: [{ sessionId, partner, title? }] }` |
+| `conversation/tabsState` | host → UI | `{ sessionId?, partner: { kind, id? }, title?, message?, main?, mainRunning?, pendingAction?, pendingRequestId?, pendingPartner?, pendingSessionId?, tabs: [{ sessionId, partner, title?, isRunning? }] }` |
 
 **Actions**
 
@@ -943,7 +947,11 @@ Every chat tab is its own omp conversation: the Default (POMP) tab's, and one pe
 - `session/new` makes a new conversation in the current tab: a new agent or team conversation in that tab (a POMP conversation in the Default tab, or when the role or team no longer exists). Deleting the current conversation does the same.
 - A `session/history` `switch` to a listed agent or team conversation makes it the current conversation of that partner's tab; the tab keeps its place and the conversation it had stays listed. A POMP conversation becomes the Default tab's.
 - A tab whose conversation the engine never wrote (no message was sent) starts a new conversation for its partner instead of switching.
-- `open`, `activate` and `close` of the current tab change the conversation: they answer with exactly one `session/newResult { requestId, status, message? }` and replay the transcript like a `session/history` switch. They are refused while a reply, approval, question or background work runs.
+- `open`, `activate` and `close` of the current tab answer with exactly one `session/newResult { requestId, status, message? }`;
+  switching replays that tab's transcript. Other tabs keep responding and awaiting approvals independently.
+  A close of a running tab explicitly stops its engine after confirmation. Opening an inactive tab may take time to start or restore its engine,
+  but never waits for the current tab's turn. A second tab switch while one is starting is refused by the page.
+  `session/new` and history switches **within the same tab** still wait for that tab's busy engine to settle.
 
 **State**
 
@@ -951,6 +959,8 @@ Every chat tab is its own omp conversation: the Default (POMP) tab's, and one pe
 - `main`: the Default tab's conversation id, or `null`.
 - `tabs`: the open agent and team tabs in order. The page also shows the current conversation as a tab when its tab was closed.
 - `message`: a team conversation's note that its previous members are gone.
+- `mainRunning` and `tabs[].isRunning` report each open tab's own active work. `pendingAction`, `pendingRequestId`,
+  `pendingPartner` and `pendingSessionId` describe same-tab new/history changes that wait for the current engine.
 
 **Routing**
 
@@ -1025,8 +1035,8 @@ Every chat tab is its own omp conversation: the Default (POMP) tab's, and one pe
 
 ### Steering
 
-A steer is a message for the agent that is working now. omp delivers it at the agent's next step (`steer`, interrupt mode
-`immediate`); the running turn goes on with it and ends as usual.
+For non-Codex models, a steer is a message for the agent that is working now. omp delivers it at the agent's next step (`steer`,
+interrupt mode `immediate`); the running turn goes on with it and ends as usual.
 
 - `/steer <text>` (page command) and the queue's `steer` action send one. Without text (and without attachments) `/steer` is an
   inline composer error.
@@ -1036,8 +1046,9 @@ A steer is a message for the agent that is working now. omp delivers it at the a
   text. It goes to this conversation itself: a message with a chosen recipient or a slash command is sent normally instead.
 - On the chat command queue, right before the command, the host checks under its state lock that a turn is open or omp is streaming
   and that Stop has not been pressed since. If not, the message is an ordinary send (queued while busy, like `chat/send`).
-- A steer never registers a turn: no `chat/turnStarted`, no `chat/turnEnd`, no second prompt id.
-- After omp accepts it, `chat/steered` shows the user's bubble where it was sent, marked 작업 중 전달 / Steered. `chat/steered` is part
+- A non-Codex steer never registers a turn: no `chat/turnStarted`, no `chat/turnEnd`, no second prompt id.
+- For native Codex (`openai-codex-responses`), omp rejects stateful in-flight steering. The host instead admits `/steer` or Send now to its own queue as the next independent turn; this is not an immediate edit to the running model's context.
+- After omp accepts a non-Codex steer, `chat/steered` shows the user's bubble where it was sent, marked 작업 중 전달 / Steered. `chat/steered` is part
   of the replayed transcript. After a conversation switch, the restored transcript shows the steered message once, as a user message
   of its own.
 - When the run ended before omp took the steer, the host takes it back with `remove_queued_message` (queue `steering`) and sends it
@@ -1048,6 +1059,9 @@ A steer is a message for the agent that is working now. omp delivers it at the a
   withdrawn this way is not sent; a notice says how many, and `chat/steerWithdrawn` (part of the replayed transcript) marks the newest
   that many steered bubbles of the run 전달 안 됨 / Not delivered (omp delivers steers in order, so the ones it still held are the newest).
 - Failures (omp refused it, too large, connection lost) are a `chat/notice`; nothing is resent.
+Messages targeting an existing `agentInstance` use omp `steer_subagent` directly, not a main-model relay. `chat/subagentAccepted`
+confirms the child RPC took the message, not its completion; a refused message has a paired failed turn. The bundled RPC steers the
+child as an in-flight message, so a native Codex child may still reject it: omp does not expose a follow-up mode for that command.
 
 ### Side questions (/btw)
 
@@ -1913,7 +1927,7 @@ The palette lists the plain name; the host sends the registered one.
 - A short name the user defined is kept; the POMP counterpart is then not listed under that name.
 - The registered names, such as `/pomp-workflow`, keep working when typed, and are not listed.
 - POMP's plumbing commands are never listed; typing them still sends them.
-  They are `pomp-tools`, `pomp-inline`, `pomp-stop`, `pomp-feedback-guard`, `pomp-agent`, `pomp-dm`, `pomp-team` and `pomp-plan-note`.
+  They include `pomp-tools`, `pomp-inline`, `pomp-stop`, `pomp-feedback-guard`, `pomp-agent`, `pomp-team` and `pomp-plan-note`.
 - `/pomp-compact` no longer exists.
   - The engine's `compact` is dispatchable over RPC.
   - POMP's compaction hook (`session.compacting`) already adds the Visual Studio facts to every compaction.
@@ -1935,7 +1949,7 @@ The palette lists the plain name; the host sends the registered one.
   chat and keeps the typed text in the input.
 - A missing argument names the syntax: "목표가 비어 있어요. 사용법: /goal 목표" / "The goal is empty. Usage: /goal goal".
   The same goes for `/plan`, `/steer`, `/btw`, `/agent`, `/team` (also an unknown name) and `/rename`.
-- The other page refusals: `/new` and `/permissions` while a reply, approval or terminal job runs; `/rename` and `/compact` behind
+- The other page refusals: `/new` or `/permissions` behind another session request; `/rename` and `/compact` behind
   another session request (see "Sessions"); `/computer` with the option off or while it cannot switch; a send that failed.
 - POMP's engine commands refuse in the engine and tell it with a `notify` warning, which the host shows as a chat notice, in the
   POMP language: an empty `/workflow` or `/plan` task, an empty or unknown `/skill`, `/command` or `/recipe` name.
@@ -2161,7 +2175,7 @@ Word completion has no messages of its own: the page completes words locally whi
 
 **`switch`**
 
-- Refused while streaming, with an open approval/question, or with unfinished terminal jobs.
+- A request while streaming waits until the current engine is idle; pending approval/question or unfinished terminal work also delays it.
 - When omp cannot restore the saved model, the host sends the switch again with `provider`/`modelId` of the current model.
   omp 18.6.3 and later report this as `Could not restore model …`.
 - The host then posts an info notice.
@@ -2184,7 +2198,14 @@ Word completion has no messages of its own: the page completes words locally whi
 
 - It moves that listed session file of this workspace, and its artifacts folder, to the Recycle Bin.
 - It is never a permanent delete.
-- The current conversation is replaced by a new one first.
+- The current conversation is replaced by a new one first. The engine keeps the current file open for appending, so the host
+  reads its header with shared access and measures the file again after leaving it, just before recycling.
+- A finished subagent stays live (idle) for follow-up messages and keeps its transcript in the artifacts folder open until the
+  engine parks it (`task.agentIdleTtlMs`, 7 minutes by default). So that a conversation can be recycled right after it is left,
+  the omp extension (`conversation-leave.ts`) parks the leaving conversation's idle subagents when the main conversation switches
+  (new, fork, resume). Parked subagents are revived on demand when the user returns; running ones are not touched.
+- A deletion that fails for any other reason than the checks above shows the generic error; the log keeps the cause
+  (`Conversation deletion failed: …`).
 - POMP's own per-session data is dropped: recent entry, knowledge selection, partner preference, queued items, run history.
 - Refused: anything not in the listing, outside the engine sessions folder, or containing links.
 
@@ -2565,7 +2586,7 @@ UsageReport = { provider, account?, plan?,
 - When it expires, the host resolves the request itself and sends `permission/dismiss`.
 - While a request is pending, the composer stays usable, so the user can type a follow-up.
 - *Send* is disabled meanwhile.
-- A new conversation, a session switch and a retry wait for the answer.
+- A new conversation or a session switch can be requested while a card waits, but the host does not apply it until the request is answered.
 
 ## Theme variables (`theme/changed.colors`)
 
@@ -2587,7 +2608,7 @@ UsageReport = { provider, account?, plan?,
 - `Esc` inside the tool window returns focus to the composer.
 - `Enter` sends and `Shift+Enter` inserts a newline (`host/hello.shortcuts.send` = `Enter`).
 - With `Ctrl+Enter`, only Ctrl+Enter sends and Enter inserts a newline.
-- While busy, the Send button becomes Stop and *New chat* is disabled.
+- While busy, the Send button becomes Stop. New chat and conversation navigation remain available, but a requested switch waits for the current reply to finish.
 - Busy means a turn of this page is open or `session/info.isStreaming`.
 
 **Page chords**

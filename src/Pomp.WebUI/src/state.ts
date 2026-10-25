@@ -54,6 +54,8 @@ export interface UserItem {
   steered?: boolean;
   /** A steered message Stop took back before the agent read it (`chat/steerWithdrawn`). */
   withdrawn?: boolean;
+  /** Direct RPC delivery was accepted by the existing subagent; its reply is not finished. */
+  subagentAccepted?: boolean;
 }
 
 export interface AssistantItem {
@@ -447,8 +449,7 @@ function withItem(state: AppState, build: (key: string) => TranscriptItem, items
 
 /**
  * What a completed new session clears: the transcript, the turn in progress and every question that waits for an answer.
- * The old session id is forgotten as well, so the `session/info` that follows (the new id) is not reported as a session
- * change against messages the user may already have typed into the new session.
+ * Keep the latest session/info: the host may have already published the new session before its correlated result.
  */
 function clearedForNewSession(state: AppState): AppState {
   return {
@@ -461,7 +462,6 @@ function clearedForNewSession(state: AppState): AppState {
     replayTruncated: false,
     phase: 'idle',
     activePromptId: undefined,
-    session: state.session ? { ...state.session, sessionId: undefined } : state.session,
     selectedTarget: undefined,
     activeRules: [],
     permissions: [],
@@ -655,6 +655,24 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
       // A busy-rejected second prompt never takes over the turn represented by the first prompt.
       if (next.activePromptId !== undefined && next.activePromptId !== promptId) return { ...next, pendingSends };
       return { ...next, pendingSends, phase: 'running', activePromptId: promptId };
+    }
+
+    case 'chat/subagentAccepted': {
+      const { messageId, clientMessageId, text, agentInstance, attachments, editorContext } = msg.payload;
+      if (!messageId || !agentInstance || state.items.some(item => item.kind === 'user' && item.promptId === messageId)) return state;
+      const target: SendTarget = { kind: 'instance', id: agentInstance };
+      const index = findLastIndex(state.items, item => item.kind === 'user' && item.clientMessageId === clientMessageId);
+      const pending = [...state.pendingSends, ...state.pendingQueued].find(item => item.clientMessageId === clientMessageId);
+      const accepted: UserItem = index >= 0 && state.items[index]?.kind === 'user'
+        ? { ...state.items[index] as UserItem, promptId: messageId, target, editorContext, subagentAccepted: true, failed: undefined }
+        : { ...(pending ?? { kind: 'user', key: `u:${messageId}`, clientMessageId: clientMessageId ?? messageId, text, target,
+          attachments: attachments?.filter(entry => typeof entry?.path === 'string').map(entry => fileFromAttachment(entry.path)) }),
+          promptId: messageId, target, editorContext, subagentAccepted: true, failed: undefined };
+      const pendingSends = state.pendingSends.filter(item => item.clientMessageId !== clientMessageId);
+      const pendingQueued = state.pendingQueued.filter(item => item.clientMessageId !== clientMessageId);
+      return { ...state, items: index >= 0 ? replaceAt(state.items, index, accepted) : [...state.items, accepted],
+        pendingSends, pendingQueued,
+        phase: state.activePromptId !== undefined ? state.phase : pendingSends.length > 0 ? 'sending' : 'idle' };
     }
 
     case 'chat/steered': {
