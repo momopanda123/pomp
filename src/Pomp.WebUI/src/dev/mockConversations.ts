@@ -45,8 +45,13 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
     queue.sessionId = options.sessionId(); queue.items.push({ id, text: input.text, includeEditorContext: input.includeEditorContext, attachments: input.attachments, team: input.team ?? undefined, agent: input.agent ?? undefined, agentInstance: input.agentInstance ?? undefined, createdAt: new Date().toISOString(), canSteer });
     post('chat/queued', { clientMessageId: input.clientMessageId, itemId: id }); publishQueue(); return true;
   };
-  // Like the host: an item steers when it goes to this conversation itself (no chosen target) and is no slash command.
-  const tryQueue = (input: UiToHost['chat/send']) => { if (!options.busy() && !queue.items.length) return false; enqueue(route(input), !input.team && !input.agent && !input.agentInstance && !input.text.trimStart().startsWith('/')); return true; };
+  // Like the host, a steering wrapper is message text; other slash commands cannot be sent in-flight.
+  const steerText = (text: string) => text.trimStart().replace(/^\/(?:steer|stear)(?:\s+|$)/u, '').trim();
+  const canSteer = (input: { text: string; team?: string | null; agent?: string | null; agentInstance?: string | null; attachments?: { path: string }[] }) => {
+    const text = steerText(input.text);
+    return !input.team && !input.agent && !input.agentInstance && !text.startsWith('/') && (!!text || !!input.attachments?.length);
+  };
+  const tryQueue = (input: UiToHost['chat/send']) => { if (!options.busy() && !queue.items.length) return false; enqueue(route(input), canSteer(input)); return true; };
   const pause = (reason: string) => { if (!queue.items.length) return; queue.paused = true; queue.reason = reason; publishQueue(); };
   /** The current conversation changed; `assign` makes it that partner's new conversation. A listed one opens as its partner's tab, any other becomes Default's. */
   const changedSession = (assign?: ConversationPartner) => {
@@ -85,12 +90,12 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
       else if (p.action === 'clear') queue = { sessionId: null, items: [], paused: false };
       else if (index < 0) error = 'Queue item no longer exists.';
       else if (p.action === 'remove') queue.items.splice(index, 1);
-      else if (p.action === 'edit') { if (!p.text?.trim()) error = 'Message is empty.'; else queue.items[index]!.text = p.text; }
+      else if (p.action === 'edit') { if (!p.text?.trim()) error = 'Message is empty.'; else { const item = queue.items[index]!; item.text = p.text; item.canSteer = canSteer(item); } }
       else if (p.action === 'move') { const item = queue.items.splice(index, 1)[0]!; queue.items.splice(Math.max(0, Math.min(p.index ?? 0, queue.items.length)), 0, item); }
       else if (p.action === 'steer') {
         const item = queue.items[index]!;
         if (!item.canSteer) error = 'A message with a chosen recipient or a command cannot be sent now.';
-        else { queue.items.splice(index, 1); window.setTimeout(() => options.steer({ clientMessageId: `queued-${item.id}`, text: item.text, attachments: item.attachments, includeEditorContext: item.includeEditorContext }), 0); }
+        else { queue.items.splice(index, 1); window.setTimeout(() => options.steer({ clientMessageId: `queued-${item.id}`, text: steerText(item.text), attachments: item.attachments, includeEditorContext: item.includeEditorContext }), 0); }
       }
       if (!queue.items.length) queue.sessionId = null;
       post('chat/queueReply', { requestId: p.requestId, ok: !error, error }); publishQueue(); if (!error && p.action === 'resume') drain(); return true;

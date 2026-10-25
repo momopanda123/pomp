@@ -7,7 +7,7 @@ runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+)
 
 | Component | Version | What it does |
 |---|---|---|
-| POMP | 0.5.9 | The Visual Studio extension: chat UI, Visual Studio tools, approval cards, agents and teams |
+| POMP | 0.5.10 | The Visual Studio extension: chat UI, Visual Studio tools, approval cards, agents and teams |
 | omp | 18.12.6 | The bundled conversation and agent engine, [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT) |
 
 ![POMP intro](docs/media/pomp-intro.gif)

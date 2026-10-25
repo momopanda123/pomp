@@ -29,10 +29,22 @@ namespace Pomp.Hosting
         // Read and written under _stateLock alongside the current session's model and connection.
         private bool _steerRequiresSeparateTurn;
 
-        /// <summary>Goes to this conversation itself (no chosen team, agent or instance) and is no slash command, which steering does not run.</summary>
-        private static bool CanSteer(ChatSendPayload send) =>
-            string.IsNullOrWhiteSpace(send.Team) && string.IsNullOrWhiteSpace(send.Agent) && string.IsNullOrWhiteSpace(send.AgentInstance)
-            && !(send.Text ?? string.Empty).TrimStart().StartsWith("/", StringComparison.Ordinal);
+        /// <summary>Steering commands are message wrappers, not commands for the running engine to execute.</summary>
+        private static string SteerText(string? text)
+        {
+            var value = (text ?? string.Empty).TrimStart();
+            if ((value.StartsWith("/steer", StringComparison.Ordinal) || value.StartsWith("/stear", StringComparison.Ordinal))
+                && (value.Length == 6 || char.IsWhiteSpace(value[6]))) return value.Substring(6).Trim();
+            return value;
+        }
+
+        /// <summary>Goes to this conversation itself, with message text rather than an engine slash command.</summary>
+        private static bool CanSteer(ChatSendPayload send)
+        {
+            if (!string.IsNullOrWhiteSpace(send.Team) || !string.IsNullOrWhiteSpace(send.Agent) || !string.IsNullOrWhiteSpace(send.AgentInstance)) return false;
+            var text = SteerText(send.Text);
+            return !text.StartsWith("/", StringComparison.Ordinal) && (text.Length > 0 || send.Attachments?.Count > 0);
+        }
 
         private bool IsSteerableLocked(long generation) =>
             generation == _chatStopGeneration && (_turns.Count > 0 || _info.IsStreaming) && _bridge.State == BridgeState.Running && !_sessionSwitchUncertain;
@@ -69,6 +81,7 @@ namespace Pomp.Hosting
                     item = _chatQueue.FirstOrDefault(q => q.Id == id) ?? throw new ArgumentException(PompLanguage.Pick("대기열 항목을 찾을 수 없어요.", "Queue item was not found."));
                     if (!CanSteer(item.Send)) throw new InvalidOperationException(PompLanguage.Pick("대상을 고른 메시지나 명령은 지금 보낼 수 없어요.", "A message with a chosen recipient or a command cannot be sent now."));
                     if (_queueSession != _info.SessionId) throw new InvalidOperationException(PompLanguage.Pick("이 대기열은 다른 대화의 항목이에요.", "This queue belongs to another conversation."));
+                    item.Send.Text = SteerText(item.Send.Text);
                     generation = _chatStopGeneration;
                     session = _queueSession;
                     if (IsSteerableLocked(generation) && _steerRequiresSeparateTurn)

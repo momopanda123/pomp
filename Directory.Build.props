@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <Deterministic>true</Deterministic>
-    <Version>0.5.9</Version>
+    <Version>0.5.10</Version>
     <Company>deanpinb@gmail.com</Company>
     <Authors>deanpinb@gmail.com</Authors>
     <Product>POMP</Product>

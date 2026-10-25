@@ -1710,7 +1710,7 @@ namespace Pomp.Ui
         public string? AgentInstance { get; set; }
         public string CreatedAt { get; set; } = string.Empty;
 
-        /// <summary>The item can be steered into the running agent: it goes to this conversation itself (no chosen target) and is no slash command.</summary>
+        /// <summary>The item can be steered into this conversation (no chosen target): plain text or a /steer (/stear) message wrapper, not an engine command.</summary>
         public bool CanSteer { get; set; }
     }
 

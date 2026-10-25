@@ -108,11 +108,12 @@ namespace Pomp.VisualStudio.Editor
                 ThreadHelper.ThrowIfNotOnUIThread();
                 var services = PompServices.Current;
                 if (closed || pending != null) return;
-                if (services?.Settings.NativeCodeLensCaptionsEnabled != true || services.Session is not IInlineAssistant assistant)
+                if (services?.Settings.NativeCodeLensCaptionsEnabled != true)
                 { result.Text = Korean ? "네이티브 CodeLens 캡션이 꺼져 있거나 POMP가 열려 있지 않아요" : "Native CodeLens captions are off or POMP is not open."; return; }
                 if (view.IsClosed || view.TextSnapshot != snapshot || snapshot.Length > 500000 || detail.Start < 0 || detail.Length <= 0 || detail.Start > snapshot.Length - detail.Length ||
                     !documents.TryGetTextDocument(view.TextBuffer, out var document) || !string.Equals(document.FilePath, detail.Path, StringComparison.OrdinalIgnoreCase))
                 { result.Text = Korean ? "코드 위치가 바뀌었어요" : "Source location changed."; return; }
+                var assistant = services.ActiveSession;
                 var tokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(60)); pending = tokenSource;
                 var token = tokenSource.Token; var file = document.FilePath; var exactText = snapshot.GetText();
                 request.IsEnabled = false; result.Text = Pomp.Hosting.PompLanguage.Pick("소스 확인 중", "Checking source");
