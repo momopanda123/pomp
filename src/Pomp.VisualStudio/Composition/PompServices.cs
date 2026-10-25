@@ -20,11 +20,9 @@ using Task = System.Threading.Tasks.Task;
 namespace Pomp.VisualStudio.Composition
 {
     /// <summary>
-    /// Composition root of the Visual Studio layer: owns the logger, settings, host environment, adapters and the chat
-    /// session, and keeps the session in step with solution and settings changes.
-    /// <para>
-    /// The ONE place that decides which <see cref="IPompSession"/> runs is <see cref="CreateSession"/>.
-    /// </para>
+    /// Composition root of the Visual Studio layer: owns the logger, settings, host environment, adapters and the
+    /// conversation host. The host owns one session per open conversation and follows solution changes; settings
+    /// changes restart every owned session.
     /// </summary>
     internal sealed class PompServices : IDisposable
     {
@@ -105,6 +103,8 @@ namespace Pomp.VisualStudio.Composition
                 }
             }
         }
+        /// <summary>The selected conversation for editor commands that act on chat input or model context.</summary>
+        public PompSession ActiveSession => ((PompConversationHost)Session).ActiveSession;
 
         /// <summary>The knowledge of the open workspace for the editor (menu, line colors): the session's, or null when it offers none or the services are disposed.</summary>
         public IKnowledgeEditor? KnowledgeEditor
@@ -234,23 +234,22 @@ namespace Pomp.VisualStudio.Composition
             Logger.Dispose();
         }
 
-        /// <summary>Creates one registry and session per IDE instance; the tool window attaches its UI separately.</summary>
+        /// <summary>Each open conversation receives its own registry and engine; the tool window keeps one UI owner.</summary>
         private IPompSession CreateSession()
         {
-            var registry = new CustomToolRegistry();
-
-            // The logger lets the tool layer record unexpected adapter failures (COMException...) in the ActivityLog.
-            foreach (var tool in HostToolCatalog.CreateDefault(Adapters, Environment, Logger))
+            ICustomToolRegistry CreateRegistry()
             {
-                registry.Register(tool);
+                var registry = new CustomToolRegistry();
+                foreach (var tool in HostToolCatalog.CreateDefault(Adapters, Environment, Logger))
+                    registry.Register(tool);
+                return registry;
             }
-
-            return new PompSession(Settings, Environment, Adapters, registry, Logger);
+            return new PompConversationHost(Settings, Environment, Adapters, Logger, CreateRegistry);
         }
 
         private void SubscribeLifecycleEvents()
         {
-            // PompSession owns solution-root changes. Subscribing here too would restart omp twice.
+            // The conversation host owns solution-root changes; subscribing here would restart engines twice.
             Settings.Changed += OnSettingsChanged;
         }
 

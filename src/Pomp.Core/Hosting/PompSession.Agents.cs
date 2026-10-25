@@ -443,15 +443,15 @@ namespace Pomp.Hosting
         }
 
         /// <summary>
-        /// The prompt text for the message's target (docs/architecture.md §8.2, §8.3): a team, one agent (a new assignment) or an agent
-        /// this conversation ran (a direct message). No target: <paramref name="message"/> unchanged. Throws when the target cannot take it.
+        /// The prompt text for a new agent assignment or team. A message to an existing subagent uses
+        /// <c>steer_subagent</c> instead, never a main-model relay.
         /// </summary>
         private Task<string> ApplyTargetAsync(ChatSendPayload send, string message, CancellationToken cancellationToken)
         {
             var targets = new[] { send.Team, send.Agent, send.AgentInstance }.Count(target => !string.IsNullOrWhiteSpace(target));
             if (targets > 1 || (targets > 0 && send.Main == true)) throw new InvalidOperationException(PompLanguage.Pick("보낼 대상이 너무 많아요.", "Too many targets."));
+            if (!string.IsNullOrWhiteSpace(send.AgentInstance)) throw new InvalidOperationException(PompLanguage.Pick("기존 에이전트에게 직접 보내는 메시지는 메인 턴을 시작하지 않아요.", "A direct message to an existing agent must not start a main turn."));
             if (!string.IsNullOrWhiteSpace(send.Agent)) return Task.FromResult(ApplyAgent(send.Agent!.Trim(), message));
-            if (!string.IsNullOrWhiteSpace(send.AgentInstance)) return Task.FromResult(ApplyAgentInstance(send.AgentInstance!.Trim(), message));
             return ApplyTeamAsync(send.Team, message, cancellationToken);
         }
 
@@ -465,19 +465,17 @@ namespace Pomp.Hosting
             return "/pomp-agent " + role.Name + " " + message;
         }
 
-        private string ApplyAgentInstance(string id, string message)
+        private void ValidateAgentInstance(string id)
         {
             // Only an agent this conversation has run: the id is checked against what omp reported for the current session.
             var view = _backgroundAgents.View();
             string? currentSession;
             lock (_stateLock) currentSession = _info.SessionId;
             var known = AgentInstanceId.IsMatch(id) && (string?)view["sessionId"] == currentSession
-                && (view["jobs"] as JArray)?.OfType<JObject>().Any(job => (string?)job["id"] == id) == true;
+                && (view["jobs"] as JArray)?.OfType<JObject>().Any(job => (string?)job["id"] == id && (string?)job["status"] == "running") == true;
             if (!known)
-                throw new InvalidOperationException(PompLanguage.Pick("이 대화에서 실행한 에이전트를 찾을 수 없어요.", "That agent was not run in this conversation."));
+                throw new InvalidOperationException(PompLanguage.Pick("이 대화에서 실행 중인 에이전트를 찾을 수 없어요.", "That agent is not running in this conversation."));
             RefuseInReviewOnlyWorkspace();
-            _backgroundAgents.SetCurrentTurnTeam(null);
-            return "/pomp-dm " + id + " " + message;
         }
 
         private static readonly System.Text.RegularExpressions.Regex AgentInstanceId = new System.Text.RegularExpressions.Regex(@"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$");
@@ -564,6 +562,7 @@ namespace Pomp.Hosting
                     try
                     {
                         var launch = new OmpLaunchOptions { ExecutablePath = engine, WorkingDirectory = folder };
+                        BundledEngine.UseOwnNatives(launch, _environment.DataDirectory);
                         foreach (var argument in new[] { "agents", "unpack", "--dir", folder, "--force" }) launch.Arguments.Add(argument);
                         try { await OmpUsageRunner.RunAsync(_processLauncher, launch, TimeSpan.FromSeconds(30), 64 * 1024, _logger, _disposeCts.Token).ConfigureAwait(false); }
                         catch (ProviderSetupException ex)

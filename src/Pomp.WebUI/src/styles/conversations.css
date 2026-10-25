@@ -11,6 +11,9 @@
 .partner-tab:first-child { min-width: calc(4em + 28px); }
 .partner-tab:hover, .partner-tab.active { background: var(--pomp-hover-bg); color: var(--pomp-fg); }
 .partner-tab.active { border-bottom-color: var(--pomp-accent); }
+.partner-tab.pending { border-bottom-color: var(--pomp-muted-fg); }
+.partner-pending { display: block; padding: 3px 6px; color: var(--pomp-muted-fg); font-size: .8rem; }
+.partner-close-confirm.confirm-popover { top: 100%; bottom: auto; left: auto; right: 3px; width: min(270px, calc(100% - 6px)); z-index: 31; }
 .partner-tab-main, .partner-tab-close, .partner-tab-add { border: 0; border-radius: 0; background: transparent; color: inherit; cursor: pointer; }
 .partner-tab-main { display: inline-flex; flex: 1; align-items: center; gap: 4px; min-width: 0; padding: 0 6px; font-size: .85rem; }
 .partner-tab-main > svg, .partner-tab-add > svg { flex: none; }

@@ -6,9 +6,9 @@ using Pomp.Protocol;
 namespace Pomp.Hosting
 {
     /// <summary>
-    /// Recognizes omp's tool-approval prompt (an extension UI <c>select</c> titled <c>Allow tool: &lt;name&gt;</c> with the options
-    /// <c>Approve</c>/<c>Deny</c>, optionally with omp's <c>Approve &lt;subject&gt; for this session</c> between them) and maps it onto a
-    /// <see cref="PermissionRequest"/>. The host answers only <c>Approve</c> or <c>Deny</c>, so every call still passes its gate.
+    /// Maps omp's tool-approval select onto a <see cref="PermissionRequest"/>. The host only answers
+    /// the call-once option ("Approve" or "Approve Once") or "Deny", never an engine session/target/directory
+    /// grant that would bypass the host gate on subsequent calls.
     /// </summary>
     internal static class OmpApprovalMapper
     {
@@ -22,18 +22,38 @@ namespace Pomp.Hosting
             "edit", "write", "delete", "move", "rename", "ast_edit", "notebook", "notebook_edit", "patch", "apply_patch",
         };
 
-        /// <summary>True when the request has exactly the shape of omp's approval prompt.</summary>
+        /// <summary>True when the request has omp's approval title and its known call-once/grant option ordering.</summary>
         public static bool IsApprovalPrompt(ExtensionUiRequestFrame request)
         {
             var options = request.Options;
-            return request.Method == OmpUiMethods.Select
-                && request.Title != null
-                && request.Title.StartsWith(OmpApprovalPrompt.TitlePrefix, StringComparison.Ordinal)
-                && options != null
-                && (options.Count == 2 || (options.Count == 3 && IsSessionOption(options[1])))
-                && options[0] == OmpApprovalPrompt.Approve
-                && options[options.Count - 1] == OmpApprovalPrompt.Deny;
+            if (request.Method != OmpUiMethods.Select || request.Title == null
+                || !request.Title.StartsWith(OmpApprovalPrompt.TitlePrefix, StringComparison.Ordinal)
+                || options == null || options.Count < 2 || options.Count > 7
+                || options[options.Count - 1] != OmpApprovalPrompt.Deny) return false;
+            var onceIndex = options.IndexOf(OmpApprovalPrompt.ApproveOnce);
+            if (onceIndex < 0)
+                return (options.Count == 2 || (options.Count == 3 && IsSessionOption(options[1])))
+                    && options[0] == OmpApprovalPrompt.Approve;
+            var sessionCount = options.Count - onceIndex - 2;
+            if (sessionCount < 0 || sessionCount > 1 || (sessionCount == 1 && !IsSessionOption(options[onceIndex + 1])))
+                return false;
+            if (onceIndex != 2 && onceIndex != 4) return false;
+            var grants = onceIndex / 2;
+            for (var i = 0; i < grants; i++)
+            {
+                var label = options[i];
+                if (label != OmpApprovalPrompt.Approve && label != "Approve File"
+                    && (label == null || !label.StartsWith("Approve Directory: ", StringComparison.Ordinal)
+                        || label.Length <= "Approve Directory: ".Length)) return false;
+                if (options[i + grants] != "Always " + label) return false;
+            }
+            return grants != 2 || options[0]!.StartsWith("Approve Directory: ", StringComparison.Ordinal)
+                && (options[1] == OmpApprovalPrompt.Approve || options[1] == "Approve File");
         }
+
+        /// <summary>The only approval answer that does not install an engine-side remembered grant.</summary>
+        public static string ApproveThisCall(ExtensionUiRequestFrame request) =>
+            request.Options?.Contains(OmpApprovalPrompt.ApproveOnce) == true ? OmpApprovalPrompt.ApproveOnce : OmpApprovalPrompt.Approve;
 
         private static bool IsSessionOption(string? option) =>
             option != null
@@ -68,10 +88,10 @@ namespace Pomp.Hosting
         }
 
         /// <summary>
-        /// A prompt that omp shows even where a user "allow" rule or yolo mode would skip it: a <c>Reason:</c> line (the tool's own
-        /// policy, e.g. a dangerous command) or a <c>Provider safety checks:</c> section (the model provider's pending computer-use
-        /// safety checks). Such a prompt is answered for this call only, never from a remembered grant. Lines of the tool's details
-        /// that happen to look like a marker only make the prompt stricter.
+        /// A prompt omp forces despite its ordinary approval tier: a <c>Reason:</c> line (the tool's own
+        /// policy, e.g. a dangerous command) or <c>Provider safety checks:</c> (computer use). The
+        /// request cannot create a remembered grant. The host's auto-all mode may still answer
+        /// a non-computer tool for this call; screen/browser control always needs a person.
         /// </summary>
         public static bool IsForcedPrompt(string title)
         {

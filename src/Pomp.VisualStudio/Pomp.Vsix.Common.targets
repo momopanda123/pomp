@@ -8,12 +8,12 @@
       PompLoaderArch         x86 | x64    architecture of the devenv.exe process (selects WebView2Loader.dll)
       PompShipNewtonsoftJson true | false whether Newtonsoft.Json.dll is packaged (VS 2017 and VS 2019 only)
 
-    The omp engine: every VSIX ships the omp build pinned in engines\omp\engine.props as omp\omp.exe, with omp\engine.json (version,
-    SHA-256, size) that POMP checks before it starts the engine (docs/architecture.md "엔진 버전"). The build downloads it into
-    artifacts\engines\omp\<version>\ once and fails when its SHA-256 differs from the pinned one (POMP1011 / POMP1012).
+    Every VSIX ships the locally patched omp build pinned in engines\omp\engine.props as omp\omp.exe, with omp\engine.json
+    (version, SHA-256, size) that POMP verifies before starting it. build\build.ps1 creates the patched engine in
+    artifacts\engines\omp\<version>\ when missing; direct MSBuild needs the verified file prepared first (POMP1013).
 
     Optional command-line properties:
-      -p:PompOmpExe=<path>   take the pinned engine from this file instead of the download cache (it must still have the pinned SHA-256).
+      -p:PompOmpExe=<path>   take the same pinned patched engine from this file instead of the cache (still SHA-256 verified).
                              Must be the ABSOLUTE path of an existing file, otherwise the build fails (POMP1001 / POMP1002);
                              build\build.ps1 -OmpExe resolves and escapes it.
       -p:PompBundleOmp=false a development package without an engine (POMP then uses an installed omp and says it is not verified).
@@ -167,7 +167,7 @@
   </ItemGroup>
 
   <!--
-    omp\omp.exe : only when -p:PompOmpExe=<absolute path> points to an existing file (hybrid strategy, docs/architecture.md section 7).
+    An optional -p:PompOmpExe=<absolute path> overrides the normal cache (docs/architecture.md "엔진 버전").
     "Absolute" means fully qualified: a drive letter with a separator (C:\...) or a UNC path (\\server\share\...). Path.IsPathRooted also
     accepts C:omp.exe (relative to the current directory of drive C) and \omp.exe (relative to the current drive), whose meaning depends
     on where the build runs; .NET Framework MSBuild has no Path.IsPathFullyQualified, hence the pattern.
@@ -176,8 +176,8 @@
     <PompOmpExeIsFullPath>$([System.Text.RegularExpressions.Regex]::IsMatch('$(PompOmpExe)', '^([A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+)'))</PompOmpExeIsFullPath>
   </PropertyGroup>
   <!--
-    The pinned omp engine, its manifest and its licence texts go into every VSIX (unless PompBundleOmp=false). The download happens once
-    per version; every build re-checks the SHA-256 of what it packages, so a corrupted cache or a wrong -p:PompOmpExe never ships.
+    The pinned locally patched omp engine, its manifest and licence texts go into every VSIX (unless PompBundleOmp=false).
+    Every build re-checks the SHA-256; an upstream binary must never replace this patched build.
   -->
   <Target Name="PompPrepareOmpEngine" BeforeTargets="BeforeBuild" DependsOnTargets="PompValidateOmpExe" Condition="'$(PompBundleOmp)' == 'true'">
     <PropertyGroup>
@@ -189,8 +189,8 @@
       <_PompOmpManifest>$(_PompOmpStage)engine.json</_PompOmpManifest>
     </PropertyGroup>
     <MakeDir Directories="$(PompOmpCacheDir)" />
-    <Message Importance="high" Condition="'$(PompOmpExe)' == '' And !Exists('$(_PompOmpEngine)')" Text="Downloading omp $(PompOmpVersion) ($(PompOmpAsset)) into $(PompOmpCacheDir)" />
-    <DownloadFile Condition="'$(PompOmpExe)' == '' And !Exists('$(_PompOmpEngine)')" SourceUrl="$(PompOmpReleaseUrl)$(PompOmpAsset)" DestinationFolder="$(PompOmpCacheDir)" DestinationFileName="omp.exe" Retries="2" />
+    <Error Code="POMP1013" Condition="!Exists('$(_PompOmpEngine)')"
+           Text="Patched omp engine '$(_PompOmpEngine)' is missing. Run build\build-omp.ps1 first (or build\build.ps1, which builds it when needed); the unpatched upstream release is not a substitute." />
     <DownloadFile Condition="!Exists('$(_PompOmpNotices)')" SourceUrl="$(PompOmpReleaseUrl)THIRD-PARTY-NOTICES.txt" DestinationFolder="$(PompOmpCacheDir)" DestinationFileName="THIRD-PARTY-NOTICES.txt" Retries="2" />
     <GetFileHash Files="$(_PompOmpEngine)" Algorithm="SHA256" HashEncoding="hex">
       <Output TaskParameter="Hash" PropertyName="_PompOmpActualSha256" />
@@ -202,7 +202,7 @@
       <_PompOmpHashOk>$([System.String]::Equals('$(_PompOmpActualSha256.ToLowerInvariant())', '$(PompOmpSha256.ToLowerInvariant())'))</_PompOmpHashOk>
       <_PompOmpNoticesHashOk>$([System.String]::Equals('$(_PompOmpNoticesActualSha256.ToLowerInvariant())', '$(PompOmpNoticesSha256.ToLowerInvariant())'))</_PompOmpNoticesHashOk>
     </PropertyGroup>
-    <!-- A bad download must not stay in the cache: the next build fetches it again. -->
+    <!-- A mismatched cache must never become a VSIX; the next build rebuilds it from patched source. -->
     <Delete Condition="'$(_PompOmpHashOk)' != 'true' And '$(PompOmpExe)' == ''" Files="$(_PompOmpEngine)" />
     <Delete Condition="'$(_PompOmpNoticesHashOk)' != 'true'" Files="$(_PompOmpNotices)" />
     <Error Code="POMP1011" Condition="'$(_PompOmpHashOk)' != 'true'"
@@ -210,7 +210,7 @@
     <Error Code="POMP1012" Condition="'$(_PompOmpNoticesHashOk)' != 'true'"
            Text="omp's THIRD-PARTY-NOTICES.txt has SHA-256 $(_PompOmpNoticesActualSha256), expected $(PompOmpNoticesSha256) (engines\omp\engine.props)." />
     <WriteLinesToFile File="$(_PompOmpManifest)" Overwrite="true" WriteOnlyWhenDifferent="true"
-                      Lines="{&quot;version&quot;:&quot;$(PompOmpVersion)&quot;,&quot;sha256&quot;:&quot;$(PompOmpSha256.ToLowerInvariant())&quot;,&quot;size&quot;:$(PompOmpSize),&quot;asset&quot;:&quot;$(PompOmpAsset)&quot;,&quot;source&quot;:&quot;$(PompOmpReleaseUrl)$(PompOmpAsset)&quot;}" />
+                      Lines="{&quot;version&quot;:&quot;$(PompOmpVersion)&quot;,&quot;sha256&quot;:&quot;$(PompOmpSha256.ToLowerInvariant())&quot;,&quot;size&quot;:$(PompOmpSize),&quot;asset&quot;:&quot;$(PompOmpAsset)&quot;,&quot;source&quot;:&quot;$(PompOmpSource)&quot;}" />
     <!-- An engine given with -p:PompOmpExe may have any file name: it is staged as omp.exe (copied only when it changed). -->
     <Copy Condition="'$(PompOmpExe)' != ''" SourceFiles="$(PompOmpExe)" DestinationFiles="$(_PompOmpStage)omp.exe" SkipUnchangedFiles="true" />
     <Copy SourceFiles="$(PompSrcDir)..\engines\omp\LICENSE.upstream" DestinationFiles="$(_PompOmpStage)LICENSE.txt" SkipUnchangedFiles="true" />
@@ -294,6 +294,12 @@
            Text="The UI bundle changed or failed its integrity check while the VSIX was being built. Run npm run build in src\Pomp.WebUI, then build again." />
     <Warning Code="POMP1006" Condition="'$(_PompUiPackagingIntegrityExitCode)' != '0' And '$(Configuration)' != 'Release'"
              Text="The UI bundle changed or failed its integrity check while the VSIX was being built. This Debug VSIX may contain an invalid UI bundle." />
+  </Target>
+
+  <!-- VSSDK 17.14's detokenizer leaves an existing manifest untouched when its contents change without changing length
+       (for example 0.5.8 -> 0.5.9). Regenerate this small derived file so every source and resolved-reference change is applied. -->
+  <Target Name="PompRegenerateVsixManifest" BeforeTargets="DetokenizeVsixManifestFile" Condition="'$(PompVsFlavor)' == 'VS2022'">
+    <Delete Files="$(IntermediateVsixManifest)" />
   </Target>
 
   <!-- Microsoft.VSSDK.BuildTools: pkgdef generation, VSCT compilation, VSIX container. -->

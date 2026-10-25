@@ -460,6 +460,7 @@ namespace Pomp.Features
             }
 
             var launch = new OmpLaunchOptions { ExecutablePath = resolution.Path!, WorkingDirectory = workspace };
+            BundledEngine.UseOwnNatives(launch, _environment.DataDirectory);
             foreach (var pair in _credentials.GetLaunchEnvironment())
             {
                 if (!pair.Key.StartsWith("POMP_", StringComparison.OrdinalIgnoreCase)) launch.Environment[pair.Key] = pair.Value;

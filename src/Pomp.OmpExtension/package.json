@@ -24,6 +24,7 @@
       "./extensions/role-memory.ts",
       "./extensions/partner.ts",
       "./extensions/member-stop.ts",
+      "./extensions/conversation-leave.ts",
       "./extensions/advisor.ts",
       "./extensions/untrusted-content.ts",
       "./extensions/compaction-context.ts",

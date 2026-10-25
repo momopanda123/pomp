@@ -8,6 +8,7 @@ import { effectiveRoles, isRunnableTeam } from '../teamsCache';
 import { PickerPopover } from './ModelPickers';
 import { matches } from './ui';
 import { Icon } from './Icon';
+import { ConfirmPopover } from './ConfirmPopover';
 import { plainControls, revealControls } from './RevealControls';
 import { useStatusReport } from '../statusBar';
 
@@ -16,15 +17,12 @@ const partnerKey = (partner: ConversationPartner) => `${partner.kind}:${partner.
 
 export type TabSwitch = Omit<UiToHost['conversation/tab'], 'requestId'>;
 
-/**
- * The chat tabs (docs/architecture.md §8.8): Default (POMP) first, then the open agent and team tabs, each its own conversation. The host
- * keeps them per workspace; switching a tab switches the engine's conversation, so the other tabs are locked while a reply runs.
- */
-export function PartnerPicker({ tabs, agents, replies, sessionId, disabled, lockedTitle, request, onSwitch, onRefreshRoster }: {
-  tabs: TabsState | null; agents: AgentsStatePayload | null; replies: CommandReply[]; sessionId?: string; disabled: boolean;
-  /** Why the other tabs cannot be chosen now (a reply or a request card), for their tooltip. */
+/** Chat tabs have independent engines. An in-flight open takes time to initialize, but never waits for the current run to finish. */
+export function PartnerPicker({ tabs, agents, replies, sessionId, disabled, lockedTitle, busy, request, onSwitch, onRefreshRoster }: {
+  tabs: TabsState | null; agents: AgentsStatePayload | null; replies: CommandReply[]; sessionId?: string; disabled: boolean; busy: boolean;
+  /** Why a switch is temporarily unavailable, for the tooltip. */
   lockedTitle?: string;
-  /** Open (or switch to) an agent or team tab from elsewhere: the Agents tab or `/agent name`. Applied once the strip is unlocked. */
+  /** Open (or switch to) an agent or team tab from elsewhere: the Agents tab or `/agent name`. */
   request?: { partner: ConversationPartner; seq: number };
   /** Sends a conversation-changing tab command (the page waits for its `session/newResult`); false when it cannot go now. */
   onSwitch: (command: TabSwitch) => boolean;
@@ -32,6 +30,7 @@ export function PartnerPicker({ tabs, agents, replies, sessionId, disabled, lock
   onRefreshRoster?: () => void;
 }) {
   const t = useT(); const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState<{ tab: ConversationTab; name: string }>();
   const [query, setQuery] = useState(''); useEffect(() => { if (!open) setQuery(''); }, [open]);
   const handled = useRef(request?.seq ?? 0); const pending = useRef<ConversationPartner | undefined>(undefined);
   const root = useRef<HTMLDivElement>(null); const add = useRef<HTMLButtonElement>(null);
@@ -57,8 +56,15 @@ export function PartnerPicker({ tabs, agents, replies, sessionId, disabled, lock
   const activeKey = current?.sessionId ?? MAIN;
   const keys = [MAIN, ...extras.map(tab => tab.sessionId)];
   const locked = disabled || closing || !sessionId;
+  const pendingTab = tabs?.pendingSessionId;
+  const pendingPartner = tabs?.pendingPartner;
+  const pendingName = pendingPartner ? pendingPartner.kind === 'main' ? t('partner.main')
+    : pendingPartner.kind === 'agent' ? roleTitle(roles.find(role => role.name === pendingPartner.id), t, pendingPartner.id)
+    : teams.find(team => team.id === pendingPartner.id)?.title || pendingPartner.id
+    : pendingTab === tabs?.main ? t('partner.main') : extras.find(tab => tab.sessionId === pendingTab)?.title || extras.find(tab => tab.sessionId === pendingTab)?.partner.id;
 
   useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
+  useEffect(() => { if (confirming && !extras.some(tab => tab.sessionId === confirming.tab.sessionId)) setConfirming(undefined); }, [confirming, extras]);
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false); };
@@ -95,7 +101,7 @@ export function PartnerPicker({ tabs, agents, replies, sessionId, disabled, lock
     const observer = new ResizeObserver(() => scrollTab(activeKey));
     observer.observe(strip); return () => observer.disconnect();
   }, [activeKey]);
-  // A tab requested elsewhere opens once the strip is unlocked (not during a reply).
+  // A tab requested elsewhere opens when switching is available; keep the request if an in-flight switch raced this render.
   useEffect(() => {
     if (!request || request.seq === handled.current) return;
     handled.current = request.seq; pending.current = request.partner;
@@ -103,10 +109,14 @@ export function PartnerPicker({ tabs, agents, replies, sessionId, disabled, lock
   useEffect(() => {
     const target = pending.current;
     if (!target || locked) return;
-    pending.current = undefined;
-    openPartner(target);
+    if (openPartner(target)) pending.current = undefined;
   });
-  const close = (tab: ConversationTab) => {
+  const close = (tab: ConversationTab, label: string) => {
+    if (tab.sessionId === activeKey ? busy : tab.isRunning) { setConfirming({ tab, name: label }); setOpen(false); return; }
+    closeConfirmed(tab);
+  };
+  const closeConfirmed = (tab: ConversationTab) => {
+    setConfirming(undefined);
     // Closing the current tab returns to the Default tab (a switch of conversation); another tab just goes.
     if (tab.sessionId === activeKey) switchTo({ action: 'close', sessionId: tab.sessionId });
     else if (post('conversation/tab', { action: 'close', sessionId: tab.sessionId })) tabButtons.current.get(activeKey)?.focus({ preventScroll: true });
@@ -138,18 +148,27 @@ export function PartnerPicker({ tabs, agents, replies, sessionId, disabled, lock
         const testKey = tab ? partnerKey(tab.partner) : MAIN;
         // A disabled button shows no tooltip in every browser: the tab itself says why it cannot be chosen now.
         const title = locked && !active && lockedTitle ? lockedTitle : plainControls(`${t('partner.label')}: ${label}`);
-        return <div key={key} className={`partner-tab${active ? ' active' : ''}`} data-testid={`partner-tab-${testKey}`} title={title}>
-          <button ref={button => { if (button) tabButtons.current.set(key, button); else tabButtons.current.delete(key); }} type="button" role="tab" className="partner-tab-main" aria-selected={active} tabIndex={active ? 0 : -1} disabled={locked && !active}
+        return <div key={key} className={`partner-tab${active ? ' active' : ''}${pendingTab === key ? ' pending' : ''}`} data-testid={`partner-tab-${testKey}`} title={title}>
+          <button ref={button => { if (button) tabButtons.current.set(key, button); else tabButtons.current.delete(key); }} type="button" role="tab" className="partner-tab-main" aria-selected={active} aria-busy={pendingTab === key || undefined} tabIndex={active ? 0 : -1} disabled={locked && !active}
             title={title} onClick={() => { if (!locked) activate(key); }} onFocus={() => scrollTab(key)}>
             <Icon name={!tab ? 'chat' : tab.partner.kind === 'team' ? 'users' : 'user'} size={12} /><span className="partner-tab-text">{revealControls(label)}</span>
           </button>
           {tab && <button type="button" className="partner-tab-close" data-testid={`partner-close-${testKey}`} disabled={active && locked}
-            title={plainControls(t('partner.close', { name: label }))} aria-label={plainControls(t('partner.close', { name: label }))} onClick={() => close(tab)}><Icon name="x" size={10} /></button>}
+            title={plainControls(t('partner.close', { name: label }))} aria-label={plainControls(t('partner.close', { name: label }))} onClick={() => close(tab, label)}><Icon name="x" size={10} /></button>}
         </div>;
       })}
       <button ref={add} type="button" className="partner-tab-add" data-testid="partner-chip" disabled={locked} title={locked && lockedTitle ? lockedTitle : t('partner.add')} aria-label={t('partner.add')}
         aria-expanded={open} aria-haspopup="listbox" onClick={() => { if (!open) onRefreshRoster?.(); setOpen(!open); }}><Icon name="plus" size={12} /></button>
     </div>
+    {tabs?.pendingAction && <span className="partner-pending" role="status" data-testid="partner-pending">
+      {tabs.pendingAction === 'new' ? t('partner.pendingNew') : t('partner.pending', { name: pendingName || t('partner.main') })}
+    </span>}
+    {confirming && <ConfirmPopover anchorRef={root} testId="partner-close-confirm" className="partner-close-confirm"
+      label={t('partner.close', { name: confirming.name })} question={t('partner.closeRunningQuestion', { name: confirming.name })}
+      cancelLabel={t('session.cancel')} confirmLabel={t('partner.closeRunning')}
+      cancelTestId="partner-close-cancel" confirmTestId="partner-close-accept" confirmDisabled={locked}
+      onCancel={() => { setConfirming(undefined); tabButtons.current.get(confirming.tab.sessionId)?.focus(); }}
+      onConfirm={() => closeConfirmed(confirming.tab)} />}
     {open && <PickerPopover placement="inline" anchorRef={root} id="partner-picker" testId="partner-popover" label={t('partner.add')} items={items}
       search={roles.length + teams.length > 10 ? { value: query, onChange: setQuery, placeholder: t('ui.search'), label: t('ui.search') } : undefined}
       onEscape={() => { setOpen(false); add.current?.focus(); }} onChoose={item => {

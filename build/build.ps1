@@ -13,9 +13,9 @@
     3. Copies the packages to artifacts\ as Pomp.VS2017-<version>.vsix / Pomp.VS2019-<version>.vsix / Pomp.VS2022-<version>.vsix
        (<version> = the <Version> of Directory.Build.props, the same number the manifests carry).
 
-    Every VSIX ships the omp engine pinned in engines\omp\engine.props (version, size, SHA-256): the build takes it from
-    artifacts\engines\omp\<version>\, downloads it from the omp GitHub release when it is not there yet, and fails when the file
-    is not exactly the pinned one (POMP1011/POMP1012).
+    Every VSIX ships the locally patched omp engine pinned in engines\omp\engine.props (version, size, SHA-256).
+    If the cache is missing or mismatched, this script builds the pinned upstream source plus engines\omp\pomp-v18.12.6.patch
+    with build\build-omp.ps1. Git, Bun, Rust/Cargo and Visual Studio C++ build tools are required for a clean build.
 
     Works in Windows PowerShell 5.1 and PowerShell 7.
 
@@ -29,8 +29,8 @@
     Do not run npm: use an existing src\Pomp.WebUI\dist (or the placeholder page) and src\Pomp.OmpExtension\vendor.
 
 .PARAMETER OmpExe
-    Optional local copy of the pinned omp engine to package as omp\omp.exe instead of the download cache (MSBuild property
-    PompOmpExe), e.g. for an offline build. It must be exactly the engine engines\omp\engine.props pins (same SHA-256), otherwise
+    Optional local copy of the pinned locally patched omp engine to package as omp\omp.exe instead of the build cache
+    (MSBuild property PompOmpExe), e.g. for an offline build. It must match engines\omp\engine.props (same SHA-256);
     the build fails (POMP1011). A relative path is resolved against the current directory (not the project directory, as MSBuild
     would do) and the script fails when the file does not exist; the resolved absolute path is what MSBuild receives.
 
@@ -200,7 +200,25 @@ else {
     }
 }
 
-# ---- 2. VSIX --------------------------------------------------------------------------------------------
+# ---- 2. Patched omp engine ------------------------------------------------------------------------------
+
+if (-not $OmpExe) {
+    $engineProps = [xml](Get-Content -LiteralPath (Join-Path $repoRoot 'engines\omp\engine.props') -Raw)
+    $engineVersion = $engineProps.Project.PropertyGroup.PompOmpVersion
+    $engineFile = Join-Path $artifactsDir "engines\omp\$engineVersion\omp.exe"
+    $needsEngine = -not (Test-Path -LiteralPath $engineFile -PathType Leaf)
+    if (-not $needsEngine) {
+        $needsEngine = (Get-FileHash -LiteralPath $engineFile -Algorithm SHA256).Hash -ne
+            $engineProps.Project.PropertyGroup.PompOmpSha256
+    }
+    if ($needsEngine) {
+        Write-Step 'Building locally patched omp engine'
+        if ($DryRun) { Write-Host '[dry-run] build\build-omp.ps1' }
+        else { & (Join-Path $PSScriptRoot 'build-omp.ps1') }
+    }
+}
+
+# ---- 3. VSIX --------------------------------------------------------------------------------------------
 
 Write-Step 'Locating MSBuild'
 $msbuild = if ($DryRun -and -not $MSBuildPath) { try { Find-MSBuild } catch { 'MSBuild.exe' } } else { Find-MSBuild }

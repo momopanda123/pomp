@@ -1,8 +1,9 @@
 export interface ConversationPartner { kind: 'main' | 'agent' | 'team'; id?: string }
 /** An open agent or team tab: its own conversation. */
-export interface ConversationTab { sessionId: string; partner: ConversationPartner; title?: string }
+export interface ConversationTab { sessionId: string; partner: ConversationPartner; title?: string; isRunning?: boolean }
 /** The current conversation's partner and the workspace's chat tabs; `main` is the Default (POMP) tab's conversation. */
-export interface TabsState { sessionId?: string | null; partner: ConversationPartner; title?: string; message?: string; main?: string | null; tabs: ConversationTab[] }
+export interface TabsState { sessionId?: string | null; partner: ConversationPartner; title?: string; message?: string; main?: string | null; tabs: ConversationTab[];
+  pendingAction?: 'open' | 'activate' | 'close' | 'new'; pendingRequestId?: string; pendingPartner?: ConversationPartner; pendingSessionId?: string; mainRunning?: boolean }
 export interface CommandReply { requestId: string; ok: boolean; error?: string }
 export interface QueueItem {
   id: string; text: string; attachments?: { path: string }[]; includeEditorContext: boolean;

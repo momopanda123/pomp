@@ -141,11 +141,13 @@
   font-size: 0.95em;
 }
 
+.thinking-controls { display: flex; align-items: center; gap: 6px; min-width: 0; }
+
 .thinking-head {
   display: flex;
   align-items: center;
   gap: 4px;
-  width: 100%;
+  flex: 1;
   min-width: 0;
   padding: 1px 0;
   border: 0;
@@ -158,6 +160,10 @@
 .thinking-head:hover {
   color: var(--pomp-fg);
 }
+
+.thinking-auto { flex: none; border: 0; padding: 1px 3px; background: none; color: var(--pomp-muted-fg); font: inherit; font-size: .8em; cursor: pointer; }
+.thinking-auto:hover, .thinking-auto[aria-pressed="true"] { color: var(--pomp-fg); }
+.thinking-auto[aria-pressed="true"] { text-decoration: underline; text-underline-offset: 2px; }
 
 .thinking-title {
   flex: none;

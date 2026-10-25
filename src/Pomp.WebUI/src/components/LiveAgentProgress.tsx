@@ -14,8 +14,8 @@ export function currentTurnJobs(state: BackgroundAgentState | undefined, session
   if (!promptId || !sessionId || state?.state !== 'live' || state.sessionId !== sessionId) return [];
   const start = items.findLastIndex(item => item.kind === 'user' && item.promptId === promptId);
   if (start < 0) return [];
-  // A steered message is part of the running turn, not the start of the next one.
-  const next = items.findIndex((item, index) => index > start && item.kind === 'user' && item.promptId !== undefined && item.promptId !== promptId && !item.steered);
+  // Messages accepted by an existing subagent also belong beside the current turn; neither starts a main-agent turn.
+  const next = items.findIndex((item, index) => index > start && item.kind === 'user' && item.promptId !== undefined && item.promptId !== promptId && !item.steered && !item.subagentAccepted);
   const toolIds = new Set(start < 0 ? [] : items.slice(start + 1, next < 0 ? undefined : next).filter(item => item.kind === 'tool').map(item => item.toolCallId));
   return state.jobs.filter(job => (job.status === 'running' || job.status === 'pending') && (job.promptId ? job.promptId === promptId : !!job.parentToolCallId && toolIds.has(job.parentToolCallId)));
 }

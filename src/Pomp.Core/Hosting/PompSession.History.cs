@@ -82,7 +82,7 @@ namespace Pomp.Hosting
             }));
         }
 
-        private async Task HandleRecentSessionsAsync(JObject args)
+        private async Task HandleRecentSessionsAsync(JObject args, Func<string, string, bool>? ownedElsewhere = null)
         {
             var requestId = args.GetString("requestId"); var action = args.GetString("action") ?? "refresh"; var switched = false; string? pageSession = null;
             string knownRoot; lock (_stateLock) knownRoot = _workingDirectory;
@@ -91,6 +91,11 @@ namespace Pomp.Hosting
             try
             {
                 if (action != "refresh" && action != "switch" && action != "messages" && action != "preview" && action != "rename" && action != "compact" && action != "delete") throw new ArgumentException(PompLanguage.Pick("알 수 없는 세션 기록 명령이에요.", "Unknown session-history command."));
+                if (action == "switch" && SessionChangeBusy())
+                {
+                    DeferSessionChange(() => HandleRecentSessionsAsync(args), requestId ?? "", "history-switch", null, null);
+                    return;
+                }
                 string? name = null; string? instructions = null;
                 if (action == "rename")
                 {
@@ -181,7 +186,7 @@ namespace Pomp.Hosting
                     catch (Exception ex) when (!(ex is OperationCanceledException)) { _logger.Warn("Could not restore the switched session's transcript: " + ex.Message); }
                 }
                 if (action == "delete")
-                    await DeleteRecentSessionAsync(store, args, root, connection!, token.Token).ConfigureAwait(false);
+                    await DeleteRecentSessionAsync(store, args, root, connection!, token.Token, ownedElsewhere).ConfigureAwait(false);
                 if (action == "rename" || action == "compact")
                 {
                     var command = action == "rename" ? new JObject { ["type"] = "set_session_name", ["name"] = name } : OmpCommands.Compact(instructions);
@@ -220,7 +225,12 @@ namespace Pomp.Hosting
             }
             catch (Exception ex)
             {
-                if (action == "delete") answer["error"] = ex is SessionDeletionException ? ex.Message : PompLanguage.Pick("대화를 삭제하지 못했어요.", "Could not delete the conversation.");
+                if (action == "delete")
+                {
+                    answer["error"] = ex is SessionDeletionException ? ex.Message : PompLanguage.Pick("대화를 삭제하지 못했어요.", "Could not delete the conversation.");
+                    // The page shows only the generic text for these: the log keeps what actually failed.
+                    if (!(ex is SessionDeletionException)) _logger.Warn("Conversation deletion failed: " + ex.GetType().Name + ": " + ex.Message + (ex.InnerException != null ? " (" + ex.InnerException.Message + ")" : ""));
+                }
                 else answer["error"] = (_sessionSwitchUncertain ? PompLanguage.Pick("세션 전환 결과가 확실하지 않아요. ", "Session switch outcome is uncertain. ") : "") + (switched ? PompLanguage.Pick("세션은 바뀌었지만 기록을 불러오지 못했어요: ", "Session changed, but history could not be loaded: ") : "") + ex.Message;
                 // The page shows no session-list error for a rename or /compact: the chat says what happened (for /compact like its start and end).
                 if (action == "compact") PostNotice("warning", PompLanguage.Pick("컨텍스트를 압축하지 못했어요: ", "The context could not be compacted: ") + ex.Message);

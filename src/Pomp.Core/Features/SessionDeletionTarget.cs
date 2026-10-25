@@ -18,6 +18,8 @@ namespace Pomp.Features
         public string SessionId { get; }
         public string Artifacts { get; }
         public IReadOnlyList<string> Paths => Directory.Exists(Artifacts) ? new[] { Artifacts, Path } : new[] { Path };
+        /// <summary>The same validated file, measured again: after the engine has left the conversation (it may write on leaving).</summary>
+        public SessionDeletionTarget Remeasure() => new SessionDeletionTarget(Path, SessionId, Artifacts);
         public void Validate()
         {
             CheckpointStore.CheckDirectPath(Path);

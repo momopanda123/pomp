@@ -3,7 +3,9 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
+using System.Threading;
 using Newtonsoft.Json.Linq;
+using Pomp.Bridge;
 using Pomp.Internal;
 
 namespace Pomp.Hosting
@@ -58,6 +60,10 @@ namespace Pomp.Hosting
 
         // The hash of a 240 MB engine takes about a second: computed once per file version (path, size, last write time) per process.
         private static readonly ConcurrentDictionary<string, string> Hashes = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>omp's own override of the folder it extracts its embedded native addon into (a <c>&lt;version&gt;</c> folder is added).</summary>
+        internal const string NativesDirectoryVariable = "PI_NATIVES_DIR";
+        private static int nativesPruned;
 
         public static BundledEngineCheck Inspect(string? extensionDirectory)
         {
@@ -140,6 +146,60 @@ namespace Pomp.Hosting
             return PompLanguage.Pick(
                 "POMP 설치 파일이 없거나 바뀌었어요.",
                 "POMP's installed files are missing or were changed.");
+        }
+
+        /// <summary>
+        /// Where the bundled engine at <paramref name="enginePath"/> keeps its extracted native addon, or null for any other omp. The patched
+        /// engine keeps upstream's version, and omp re-extracts its addon into <c>~/.omp/natives/&lt;version&gt;</c> only when the cached
+        /// file's size differs: a rebuilt patch of the same size would run the previous build's native code, and a standalone omp of the same
+        /// version would share and overwrite that folder. Each bundled build gets its own folder under POMP's data, named by the SHA-256 its
+        /// <c>engine.json</c> pins (not hashed again). The folders of other builds are removed once per process, except one whose addon a
+        /// running engine (another Visual Studio) still has loaded: Windows refuses to delete it.
+        /// </summary>
+        public static string? NativesDirectory(string? enginePath, string dataDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(enginePath)) return null;
+            try
+            {
+                var engine = System.IO.Path.GetFullPath(enginePath!);
+                if (!string.Equals(System.IO.Path.GetFileName(engine), "omp.exe", StringComparison.OrdinalIgnoreCase)) return null;
+                var manifestPath = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(engine)!, ManifestName);
+                var manifest = new FileInfo(manifestPath);
+                if (!manifest.Exists || manifest.Length > MaxManifestBytes) return null;
+                var hash = JObject.Parse(File.ReadAllText(manifestPath)).GetString("sha256")?.ToLowerInvariant();
+                if (hash == null || !Sha256Pattern.IsMatch(hash)) return null;
+                var root = System.IO.Path.Combine(System.IO.Path.GetFullPath(dataDirectory), "omp", "natives");
+                var folder = System.IO.Path.Combine(root, hash.Substring(0, 16));
+                if (Interlocked.Exchange(ref nativesPruned, 1) == 0) PruneNatives(root, folder);
+                return folder;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException || ex is NotSupportedException || ex is Newtonsoft.Json.JsonException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>Points a launch of the bundled engine at its own native addon folder (<see cref="NativesDirectory"/>); other omp are left alone.</summary>
+        public static void UseOwnNatives(OmpLaunchOptions launch, string dataDirectory)
+        {
+            var folder = NativesDirectory(launch.ExecutablePath, dataDirectory);
+            if (folder != null) launch.Environment[NativesDirectoryVariable] = folder;
+        }
+
+        private static void PruneNatives(string root, string keep)
+        {
+            if (!Directory.Exists(root)) return;
+            foreach (var folder in Directory.EnumerateDirectories(root))
+            {
+                if (string.Equals(folder, keep, StringComparison.OrdinalIgnoreCase)) continue;
+                try
+                {
+                    // Only folders omp created here: a linked folder is never followed.
+                    if ((File.GetAttributes(folder) & FileAttributes.ReparsePoint) != 0) continue;
+                    Directory.Delete(folder, recursive: true);
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
+            }
         }
 
         /// <summary>The version an <c>omp --version</c> run printed ("omp/18.8.6" → "18.8.6"), or null.</summary>

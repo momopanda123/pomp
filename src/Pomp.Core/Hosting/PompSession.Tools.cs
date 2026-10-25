@@ -314,7 +314,7 @@ namespace Pomp.Hosting
             lock (_computerLock) computer = _computerOptions;
             var extensionArguments = _settings.LoadOmpExtensions ? OmpExtensionArguments.Build(_environment.ExtensionDirectory ?? string.Empty) : Array.Empty<string>();
             var worktreeBase = extensionArguments.Count > 0 && OmpExtensionArguments.ContainsModule(_environment.ExtensionDirectory, "./extensions/teams.ts") ? ProjectData.Folder(root, "wt") : null;
-            WriteOverlay(Path.Combine(dataDirectory, "omp", "pomp-overlay.yml"), root, hostTools, blockNetwork ? OmpNetworkTools.Names : null, computer, _settings.ApprovalMode == OmpApprovalMode.Yolo, _settings.UseRpcUiMode, worktreeBase);
+            WriteOverlay(Path.Combine(dataDirectory, "omp", "pomp-overlay-" + _engineKey + ".yml"), root, hostTools, blockNetwork ? OmpNetworkTools.Names : null, computer, _settings.ApprovalMode == OmpApprovalMode.Yolo, _settings.UseRpcUiMode, worktreeBase);
         }
         // ui/ready holds the hub lock while taking the session snapshot: never take the hub lock under _stateLock.
         private bool ResourcesBusy() { var pending = _ui.PendingRequestCount > 0; lock (_stateLock) return pending || ResourcesBusyLocked(); }

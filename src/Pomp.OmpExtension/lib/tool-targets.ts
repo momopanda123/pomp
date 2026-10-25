@@ -118,6 +118,7 @@ export function mutationTargets(toolName: string, input: unknown): MutationTarge
 	const args = isRecord(input) ? input : {};
 	switch (toolName) {
 		case "edit":
+		case "apply_patch":
 			return { files: editTargets(args), scopes: [] };
 		case "write": {
 			const path = typeof args.path === "string" ? unwrapReadHeader(args.path) : "";

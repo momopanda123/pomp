@@ -63,7 +63,7 @@ docs/                                    이 문서, ui-protocol.md
 ### 의존과 조립
 
 - 의존 방향: `Pomp.VisualStudio → Pomp.Core → Pomp.Contracts`, `Pomp.VisualStudio → Pomp.Tools → Pomp.Contracts`.
-- 호스트 composition은 `HostToolCatalog.CreateDefault`로 **제공 가능한 19개 툴만** 레지스트리에 등록하고 실제 `PompSession`을 만든다.
+- 호스트 composition은 `PompConversationHost`를 만들고, 열린 탭마다 `PompSession`과 `HostToolCatalog.CreateDefault`의 **제공 가능한 19개 툴** 레지스트리를 따로 만든다.
 - `remove_project_file`은 영구 제외다. 파일 삭제는 omp의 승인 게이트가 있는 `delete` 툴을 따른다(§5, §6).
 - JSON은 `Newtonsoft.Json`을 쓴다. VS가 제공하는 어셈블리를 쓰고, VS 2019용 VSIX만 폴백 사본을 포함한다.
 
@@ -165,10 +165,10 @@ omp 정식 명세: <https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md>
 ### 턴과 중지
 
 - 턴 완료 판정은 같은 id의 `prompt_result`이다. 세션 완전 종료는 `session_settled`이다.
-- **한 번에 한 메시지**: 턴이 열려 있거나 omp가 스트리밍 중일 때의 `chat/send`는 omp에 보내지 않고 호스트 명령 대기열에 넣는다.
+- **한 번에 한 메인 메시지**: 메인·역할·팀 대상의 `chat/send`는 턴이 열려 있거나 omp가 스트리밍 중이면 호스트 명령 대기열에 넣는다.
   페이지는 `chat/turnStarted` 대신 `chat/queued`를 받는다. 대기열 규칙은 §8.8 "명령 대기열"에 있다.
   omp는 대기열의 후속 메시지(followUp)를 `abort` 뒤에도 유지한다. omp 안에 줄을 세우면 중지가 무력해진다.
-  사용자가 명시적으로 고른 조향만 예외다(아래 "조향").
+  실행 중인 기존 구성원에게 보내는 `agentInstance`는 `steer_subagent`로 직접 전달하며 메인 턴을 열지 않는다. 명시적 조향도 예외다(아래 "조향" 참고).
 - **중지** 순서:
   1. 응답 대기/컨텍스트 수집과 아직 제출되지 않은 메시지를 취소한다.
   2. omp가 기다리는 승인 프롬프트를 거부로 풀어 준다.
@@ -246,7 +246,7 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
 `--no-extensions` 검증 기록:
 
 - omp 18.4.3·18.8.6·18.10.3: 작업 폴더 프로브 확장은 로드되지 않고, 옵션을 켜면 로드된다.
-- omp 18.10.4·18.12.1: pomp 패키지의 명령과 `vs-project`가 로드된다.
+- omp 18.10.4·18.12.1·18.12.6: pomp 패키지의 명령과 `vs-project`가 로드된다.
 
 ### 프로세스 작업 폴더
 
@@ -261,7 +261,7 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
   - 모든 공급자 형식의 MCP 서버 목록
   - 도구 코드(`.omp/tools` 등)
   - 컨텍스트 파일의 `@경로` 포함
-- omp 18.12.1에도 프로젝트 신뢰 확인이 없다.
+- omp 18.12.6에도 프로젝트 신뢰 확인이 없다.
 - POMP는 이런 구성이 있는 작업 영역에서, 사용자가 그 내용을 신뢰하기 전에는 omp를 시작하지 않는다. 자세한 내용은 아래 "작업 영역 신뢰".
 
 ### 실행 파일 해석
@@ -352,7 +352,7 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
 
 ### 작업 영역 신뢰
 
-omp(18.4.3부터 현재 18.12.1까지)는 프로젝트 신뢰를 확인하지 않는다(`isProjectTrusted: () => true`).
+omp(18.4.3부터 현재 18.12.6까지)는 프로젝트 신뢰를 확인하지 않는다(`isProjectTrusted: () => true`).
 작업 폴더에서 읽는 다음 구성은 시작과 동시에 코드를 실행하거나, 승인을 바꾸거나, 바깥 파일을 대화에 넣는다.
 MCP stdio 서버는 엔진 환경을 그대로 받는다. POMP가 넣은 API 키도 포함된다.
 
@@ -422,16 +422,18 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
 
 #### 버전 정의
 
-- `engines/omp/engine.props` 한 곳에서 정한다.
-- 담는 값: 버전, 공식 릴리스 URL(`github.com/can1357/oh-my-pi`), 자산 이름(`omp-windows-x64.exe`), 크기, SHA-256, `THIRD-PARTY-NOTICES.txt`의 SHA-256.
-- 현재 **omp 18.12.1**이다. 크기 222,742,016바이트, SHA-256은 `1ba0274b`로 시작해 `77bb`로 끝난다.
+- `engines/omp/engine.props`가 버전, 패치 빌드 출처, 자산 이름, 크기, SHA-256과 공식 릴리스의 고지 파일 SHA-256을 고정한다.
+- 현재 상위 omp **18.12.6**(커밋 `45c35e40c46166dc726ccc52f5d27f40f2449f99`)에 `engines/omp/pomp-v18.12.6.patch`를
+  적용한 빌드다. 크기 **243,028,992바이트**, SHA-256 `ba640f8485748d6777387a12335a851a2b5fd4b05494fbe26889183f66e1f6d3`.
 - 라이선스는 MIT(`engines/omp/LICENSE.upstream`).
 
-#### 빌드 (`Pomp.Vsix.Common.targets`의 `PompPrepareOmpEngine`)
+#### 빌드 (`build/build-omp.ps1`, `Pomp.Vsix.Common.targets`의 `PompPrepareOmpEngine`)
 
-- `artifacts\engines\omp\<버전>\`에 엔진이 없으면 릴리스에서 내려받는다.
-- 크기·해시가 고정값과 다르면 받은 파일을 지우고 빌드를 실패시킨다. 엔진은 POMP1011, 고지 파일은 POMP1012.
-- `-p:PompOmpExe=<절대 경로>`(build.ps1 `-OmpExe`)는 오프라인 빌드용 로컬 사본일 뿐이다. 같은 해시 검사를 거치므로 고정되지 않은 omp는 패키지에 넣을 수 없다.
+- `build/build.ps1`은 캐시에 해당 해시의 실행 파일이 없으면 `build/build-omp.ps1`로 고정된 상위 소스와 패치를 빌드한다.
+  Git·Bun·Rust/Cargo(MSVC x64)·Visual Studio C++ 빌드 도구가 필요하다. MSBuild만 직접 실행할 때는 패치 빌드를 미리 준비해야 한다(POMP1013).
+- VSIX는 매번 해시를 검증한다. 공식 릴리스 실행 파일이나 다른 빌드는 패키지에 넣을 수 없다(POMP1011).
+  공식 릴리스에서는 `THIRD-PARTY-NOTICES.txt`만 내려받아 별도 해시로 검증한다(POMP1012).
+- `-p:PompOmpExe=<절대 경로>`(build.ps1 `-OmpExe`)는 동일한 패치 빌드의 로컬 사본에만 쓴다.
 - `-p:PompBundleOmp=false`는 엔진 없는 개발 패키지를 만든다.
 - 모든 VSIX에 들어가는 파일:
 
@@ -442,7 +444,7 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
 | `omp\LICENSE.txt` | omp 라이선스 |
 | `omp\THIRD-PARTY-NOTICES.txt` | 제3자 고지 |
 
-- 패키지 크기: Release VSIX 약 117 MB, Debug 약 245 MB.
+- 이번 Release VSIX의 크기는 약 129–130 MB(로컬 패치 빌드 기준)다.
 
 #### 실행 (`BundledEngine.Inspect`, `PompSession.Engine.cs`)
 
@@ -452,6 +454,9 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
 - 매니페스트가 있는데 엔진이 없거나 다르면 시작하지 않고 POMP 재설치를 안내한다. 재시도하지 않는다.
 - PATH나 설치 위치의 다른 omp로 몰래 대체하지 않는다.
 - 로그인 도우미와 `omp usage` 실행도 같은 규칙을 따른다(`BundledEngine.Refusal`).
+- 번들 엔진은 네이티브 애드온을 `%LOCALAPPDATA%\Pomp\omp\natives\<engine.json SHA-256 앞 16자>\<버전>\`에 풀도록 `PI_NATIVES_DIR`를 받는다(`BundledEngine.UseOwnNatives`, 채팅 엔진·로그인·`omp usage`·`agents unpack` 모두).
+  패치 빌드는 상위 버전 번호를 그대로 쓰고, omp는 `~/.omp/natives/<버전>`에 이미 있는 애드온을 크기만 비교해 다시 풀기 때문이다. 크기가 같은 새 패치는 이전 빌드의 네이티브 코드로 돌고, 같은 버전의 단독 omp와 폴더를 함께 쓰게 된다.
+  다른 빌드의 폴더는 VS 프로세스당 한 번 지운다. 다른 VS의 엔진이 아직 그 애드온을 읽어 둔 폴더는 Windows가 지우지 못하게 해서 남는다.
 - 이 검사는 손상·교체·호환성 사고를 막기 위한 것이다. 확장 폴더에 쓸 수 있는 사용자의 의도적인 변조까지 막는 보안 경계는 아니다.
 
 #### 고급 재정의
@@ -529,7 +534,11 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
 ### 에이전트·팀과 컴퓨터 사용
 
 구현 계약은 §8 "에이전트·팀 구현 계약"에 있고, 사용 안내는 `docs/agent-teams.md`에 있다.
-기본 omp(현재 18.12.1)만으로 동작하고 엔진 패치는 필요 없다.
+엔진의 Win32 `takeover` 클릭과 Codex 하위 에이전트 메시지에 소스 패치가 필요하다(`engines/omp/pomp-v18.12.6.patch`).
+열린 대화 탭마다 별도 omp 프로세스를 실행한다. 다른 탭의 응답·승인·대기열은 유지되며 전환을 기다리지 않는다.
+같은 탭의 새 대화·기록 전환은 해당 엔진이 바쁠 때 보류하고, 컴퓨터 입력 제어는 탭 전체에서 한 곳만 허용한다.
+기록 목록에서 지난 대화를 열 때도 그 대화 상대의 탭을 선택한 뒤 해당 엔진만 전환한다. 다른 탭에서 열린 대화는 먼저 탭을 닫아야 삭제할 수 있다.
+탭 열기·닫기·기록 전환·삭제는 호스트 큐에서 직렬화하며, 최근 대화 참조 파일의 쓰기도 프로세스 내 공유 잠금으로 보호한다.
 
 #### 에이전트와 팀
 
@@ -574,6 +583,7 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
   - `/computer:` 형태, 앞뒤 특이 공백, 정규화된 철자도 호스트에서 차단한다.
   - 검사는 `ComputerUse.IsComputerCommand`: FormKC, 대소문자 무시, 명령 경계 검사.
   - 엔진으로 직접 넘어가 권한을 켤 수 없다. 페이지의 `computer/set`만 토글한다. 페이지는 `/computer`를 그 버튼 누르기로 처리한다.
+- 응답 중의 켜기 요청은 보류하고, 메인 턴이 끝나면 현재 엔진 상태를 재확인해 처리한다. 보류된 켜기는 끄기 요청이나 대화 변경으로 취소된다.
 - 켜기 전에 같은 세션의 상태 파일을 먼저 쓴다. 끄기는 omp가 확인한 뒤에 파일을 바꾼다.
 - 엔진 재시작이면 꺼진다. 다른 대화로 바뀌면 엔진 쪽은 꺼진다(아래 "한 PC 한 대화").
 - 켜져 있는 동안 확장(`extensions/computer-guard.ts`)이 메인 대화의 시스템 프롬프트 끝에 영어 안내 한 절(`## Screen & input control (pomp)`)을 붙인다.
@@ -606,7 +616,7 @@ omp는 `computer` prelude 호출 승인을 도구 UI로 묻는다. 이 UI는 `--
 | 모두 자동(Yolo) | 쓰지 않음: 모든 호출을 묻지 않고 실행 | 쓰지 않음. 화면 보기도 확인이면 `prompt`(모든 호출 확인) |
 | 그 밖의 승인 모드 | `allow`: 화면을 다루는 Eval 호출 자체가 먼저 승인을 받는다(Eval은 exec 단계) | 화면 보기도 확인이면 `prompt`. 아니면 omp 단계대로: 화면 캡처는 묻지 않고, 클릭·입력·클립보드 쓰기는 매번 묻는다 |
 
-- 공급자 안전 확인(`Provider safety checks:`)이 붙은 호출은 어느 모드에서나 묻는다.
+- 엔진이 직접 `computer`·`browser` 도구에 요구하는 공급자 안전 확인은 어느 모드에서나 묻는다. Eval prelude의 화면 동작은 위 표와 옵션대로 처리한다.
 - `computer.control.acquire`(포그라운드 제어)의 확인도 같은 도구 UI로 묻는다. `rpc`에서는 묻지 못해 항상 거절되고, `rpc-ui`에서는 승인 모드와 관계없이 대화 상자로 묻는다.
 - 호스트 게이트는 엔진이 보낸 `computer`·`browser` 승인을 승인 모드로 자동 허용하지 않는다. 위 표에서 묻는 경우에만 승인 창이 뜬다.
 - `.pomp/permissions.json`은 `computer` prelude 호출을 보지 못한다. prelude 호출은 `tool_call`을 거치지 않고, 정책은 그 호출을 담은 `eval`로 판단한다. 그래서 `computer` 허용 규칙은 컴퓨터 사용을 허용하지 않는다. 기본 거부인 정책 파일에 그 규칙만 있으면 `bash` 같은 다른 도구가 모두 막힌다.
@@ -1075,6 +1085,7 @@ omp --mode rpc --no-session --no-extensions --no-skills --no-rules --model opena
 WebView2 안의 키:
 
 - WebView2 안의 키는 VS 명령 라우팅에 가지 않는다.
+- VS가 도구 창을 넣는 WPF TabControl은 안쪽 어디서 온 Home/End든 첫·마지막 탭 이동으로 쓴다. WPF WebView2는 이런 키를 페이지보다 먼저 WPF 키 이벤트로 올리고, 누가 처리하면 페이지에 주지 않는다. 그래서 채팅에서 Home은 동작하지 않았고 End는 같은 그룹의 마지막 탭(예: Git 변경 내용)으로 포커스를 옮겨 이어서 친 글이 사라졌다. 채팅 컨트롤(`PompChatControl.KeepEditingKeysInPage`)이 WebView2의 `KeyDown`에서 Home/End를 먼저 처리해 TabControl까지 가지 않게 하고, 그 뒤에 실행되는 `CoreWebView2Controller.AcceleratorKeyPressed` 처리기에서 다시 페이지로 돌려준다.
 - 페이지가 `host/hello.shortcuts.toggleFocus`의 조합(기본 **Alt+J**)을 직접 잡는다. Meta·AltGr는 제외하고, IME 조합·키 반복 중에는 무시한다.
 - 페이지는 호스트 내부 메시지 `ui/toggleFocus`로 알리고, 호스트가 편집기로 포커스를 돌려준다.
 - 채팅 페이지 자체의 단축키는 도구 > 옵션 > Pomp > 일반 > 단축키에서 바꾸며 `host/hello.shortcuts`로 페이지에 전달된다(docs/settings.md "단축키").
@@ -1093,8 +1104,8 @@ WebView2 안의 키:
 빌드·실행 뒤 포커스(`ChatFocusKeeper`):
 
 - VS는 디버깅을 마치며(설계 모드 복귀) 코드 편집기를 활성화한다. 실행한 프로그램 창도 그동안 앞에 온다. 채팅에서 F5를 누른 사용자가 이어서 치면 코드에 오타가 들어갔다.
-- 세션 시작: 설계 모드에서 첫 `OnBuildBegin` 또는 `OnEnterRunMode`. 이때 채팅에 포커스가 있었는지 기억한다. 채팅에서 넘긴 VS 키(F5, Ctrl+Shift+B) 10초 안에 시작했으면 채팅에서 시작한 것으로 본다. VS가 빌드 시작 전에 출력 창을 띄워 포커스를 가져가기 때문이다.
-- 세션 끝: `OnEnterDesignMode`(실행 뒤) 또는 `OnBuildDone` 1.5초 뒤에도 실행 모드에 들어가지 않은 경우(빌드만, `Ctrl+F5`).
+- 세션 시작: 설계 모드에서 첫 `OnBuildBegin`·`OnEnterRunMode`, 또는 `Debug.Start`·`Debug.StartWithoutDebugging` 명령 실행 직전(`CommandEvents.BeforeExecute`). 프로젝트가 최신이면 빌드 이벤트가 없고 `Ctrl+F5`는 디버거 이벤트도 없어서, 명령 이벤트가 없으면 세션이 시작되지 않았다. 이때 채팅에 포커스가 있었는지 기억한다. 채팅에서 넘긴 VS 키(F5, Ctrl+F5, Ctrl+Shift+B) 10초 안에 시작했으면 채팅에서 시작한 것으로 본다. VS가 빌드 시작 전에 출력 창을 띄워 포커스를 가져가기 때문이다.
+- 세션 끝: `OnEnterDesignMode`(실행 뒤), 또는 `OnBuildDone`이나 시작 명령 실행 1.5초 뒤 빌드 중이 아니고 실행 모드에도 들어가지 않은 경우(빌드만, `Ctrl+F5`).
 - 복원: VS가 다시 활성 앱이고 모달 대화 상자가 없는 상태가 0.3초 이어지고, 그동안 VS가 다른 창을 활성화하지 않았으면 채팅 프레임을 `Show`하고 사용자가 마지막으로 포커스를 둔 요소(`data-pomp-last-focus`, `focusMemory.ts`)에 포커스를 준다. 없으면 `document.activeElement`, 그것도 없으면 입력창이다. 표시는 글 입력칸이 받은 포커스, 사용자가 방금 누른 요소가 받은 포커스, Tab·방향키 1초 안에 받은 포커스에만 붙인다. VS가 창을 옮기는 동안 WebView2는 포커스를 여러 번 얻고 잃으며, Chromium이 포커스를 첫 요소(채팅 탭)로 옮기기 때문이다. 그 뒤 3초 동안 VS가 다른 창을 또 활성화하면 한 번 더 되돌린다. 30분이 지나면 포기한다.
 - 사용자가 직접 옮긴 경우는 되돌리지 않는다.
   - VS 창 위에서 마우스 단추를 누른 채 다른 창이 활성화됨(클릭). 앞에 뜬 대화 상자("빌드하시겠습니까?", "마지막으로 성공한 빌드를 실행하시겠습니까?")의 단추 클릭은 넣지 않는다. 그 뒤 VS가 출력·오류 목록 창을 스스로 활성화하기 때문이다.
@@ -1395,7 +1406,7 @@ WebView2 안의 키:
 | 대상 | 필드 | 동작 |
 |---|---|---|
 | 새 일 | `chat/send.agent` = 역할 `name` | 메인 대화가 그 에이전트 하나만 새로 실행한다 |
-| 이어 보내기 | `chat/send.agentInstance` = 하위 에이전트 id | 이 대화에서 이미 실행한 에이전트에게 메시지를 전한다 |
+| 이어 보내기 | `chat/send.agentInstance` = 실행 중인 하위 에이전트 id | 이 대화의 실행 중인 구성원에게 직접 메시지를 전한다 |
 
 **새 일**
 
@@ -1406,19 +1417,18 @@ WebView2 안의 키:
 
 **이어 보내기**
 
-- 호스트는 그 id가 현재 대화의 작업 목록에 있는지 확인한다. 실행 중인 것과 끝난 것을 모두 포함한다.
-- 메인 대화는 `write agent://<id>`로 메시지를 그대로 전한다.
-- 답을 따로 기다리지 않는다. 답이 메시지로 들어오면 보여 준다. `wait`는 자기가 시작한 작업만 기다린다.
-- 그 에이전트는 자기 맥락을 이어서 답한다. 쉬거나 보관된 에이전트는 깨운다.
-- 그 턴에는 새 에이전트를 띄우지 않는다.
-- `write agent://`도 쓰기 도구다. 승인 모드에 따라 확인을 받을 수 있다.
+- 호스트는 그 id가 현재 대화의 **실행 중** 작업인지 확인한다. 완료·실패·중단된 작업은 대상이 아니다.
+- 메인 모델을 호출하지 않고 omp `steer_subagent` RPC로 전한다. 엔진의 수락은 `chat/subagentAccepted`이고 완료 응답이 아니다.
+  Codex 네이티브 턴이면 지원하지 않는 진행 중 조향 대신 해당 턴 다음의 `followUp`으로 전달한다.
+- 전달을 거부하거나 실패하면 `chat/turnStarted`와 `chat/turnEnd`의 오류로 표시한다.
+- 검토 전용 정책은 직접 전달도 거부한다.
 
 **공통**
 
 - 대상은 한 번에 하나다. `team`, `agent`, `agentInstance` 중 하나만 쓴다.
 - 검토 전용 프로젝트에서는 거부한다.
-- 응답 중에 보낸 메시지는 실행 중인 턴에 끼워 넣지 않고 호스트 대기열에 넣는다(§8.8). 끼워 넣은 메시지는 중지 뒤에도 남는다.
-  지금 바로 전하려면 `/steer`나 대기열의 지금 보내기를 쓴다(§3 "조향"). 중지는 이렇게 보낸 메시지도 거둬들인다.
+- 메인·새 역할·팀 대상 메시지는 응답 중 호스트 대기열에 넣는다(§8.8). 지금 바로 전하려면 `/steer`나 대기열의 지금 보내기를 쓴다(§3 "조향").
+  기존 실행 중 구성원 대상의 직접 전달은 이 메인 대기열을 거치지 않는다.
 
 **입력 경로**
 
@@ -1542,6 +1552,7 @@ WebView2 안의 키:
 - 행을 누르면 그 대화를 지금 탭에서 연다. 탭은 그대로이고, 전에 보던 대화는 그 탭의 목록에 남는다. 현재 대화는 체크 표시이고 버튼이 아니다. 응답·승인 중에는 열 수 없다.
 - 행의 ⋯ 메뉴: 미리보기는 그 행 바로 아래에 펼치고 접는다. 이름 바꾸기는 현재 대화만 된다.
 - 삭제는 확인 뒤 대화 파일을 휴지통으로 옮긴다. 현재 대화를 지우면 먼저 지금 탭에서 새 대화를 시작한다.
+  - 끝난 하위 에이전트는 후속 메시지를 받으려고 엔진이 7분(`task.agentIdleTtlMs`) 동안 살려 두며, 그동안 대화 자료 폴더의 기록 파일을 열어 둔다. 그래서 하위 에이전트를 쓴 대화는 바로 지울 수 없었다(공유 위반). omp 확장 `conversation-leave.ts`가 메인 대화가 바뀔 때(새 대화·포크·다시 열기) 떠나는 대화의 유휴 하위 에이전트를 엔진의 park로 바로 쉬게 한다. 기록 파일이 닫히고, 그 대화로 돌아오면 필요할 때 되살아난다. 실행 중인 하위 에이전트는 건드리지 않는다.
 
 ### 8.7 메시지 보충
 

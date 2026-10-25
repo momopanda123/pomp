@@ -19,7 +19,7 @@ namespace Pomp.VisualStudio
     /// binding path, and owns <see cref="PompServices"/>. Loads in the background (async package).
     /// </summary>
     [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
-    [InstalledProductRegistration("Pomp", "AI coding partner for Visual Studio.", "0.5.8")]
+    [InstalledProductRegistration("Pomp", "AI coding partner for Visual Studio.", "0.5.9")]
     [ProvideMenuResource("Menus.ctmenu", 1)]
     [ProvideBindingPath]
     // The chat opens as a tab of the Solution Explorer group (right edge, full height), like other assistant panes.

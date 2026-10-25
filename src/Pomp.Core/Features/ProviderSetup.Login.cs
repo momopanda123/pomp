@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using Pomp.Bridge;
 using Pomp.Diagnostics;
+using Pomp.Hosting;
 using Pomp.Internal;
 using Pomp.Protocol;
 
@@ -505,6 +506,8 @@ namespace Pomp.Features
                         UseShellExecute = false, CreateNoWindow = false,
                         RedirectStandardInput = false, RedirectStandardOutput = false, RedirectStandardError = false,
                     };
+                    var natives = BundledEngine.NativesDirectory(launch.ExecutablePath, _environment.DataDirectory);
+                    if (natives != null) startInfo.EnvironmentVariables[BundledEngine.NativesDirectoryVariable] = natives;
                     _login = _startLogin(startInfo);
                     _loginState = new JObject { ["state"] = "running", ["provider"] = provider };
                     return _login;

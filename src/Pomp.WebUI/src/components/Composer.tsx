@@ -181,11 +181,23 @@ function LiveEditorControls({ state, disabled, shortcuts, inputRef, t }: { state
   </span>;
 }
 
+/** An Enter held during a composition, through the composer's own key handling; one it leaves alone is the line break the browser would type. */
+function replayEnter(el: HTMLTextAreaElement, init: KeyboardEventInit): void {
+  if (!el.isConnected || document.activeElement !== el) return;
+  if (el.dispatchEvent(new window.KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true }))) document.execCommand('insertText', false, '\n');
+}
+
 export function Composer({ locale, workspaceKey, sessionId, model, session, setup, setupReplies, onManageAccounts, inputRef, connected, composerPredictions = false, wordCompletion = false, transcript, busy, queueBlocked = false, insertSkill, insertText, basketRequest = 0, basketTokens, requestPending, newSessionPending, includeEditorContext, onIncludeEditorContextChange, draft, dispatch, onSend, onStop, commands, commandsHidden, onCommand, onGoal, onSteer, skillsOff, prefill, agents, shortcuts = DEFAULT_SHORTCUTS, approvalMode, permissionModeReply, editorFollow, computer, computerReply, computerRequest, selectedTarget, onSelectTarget, partnerName, partner, onOpenPartner }: ComposerProps) {
   const t = useT();
   const focusInput = useCallback(() => inputRef.current?.focus(), [inputRef]);
   const [failure, setFailure] = useState<SendFailure | null>(null);
   const composing = useRef(false);
+  // Korean IME in WebView2 (Chromium on Windows): a key the IME lets through (Space, punctuation, Enter) can arrive before the IME's commit
+  // of the syllable being composed. The browser types the key after the composition, then the late commit puts the caret back in front of
+  // it, so the following text lands before the space (or Enter becomes a line break). The typed text's distance from the end puts the caret
+  // back after it; Enter waits for the commit.
+  const passedThrough = useRef<number | null>(null);
+  const heldEnter = useRef<KeyboardEventInit | null>(null);
   const latest = useRef(draft);
   latest.current = draft;
   const popupId = useId();
@@ -242,7 +254,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   const knownInstances = useRef<{ scope: string; jobs: BackgroundAgentJob[] }>({ scope: '', jobs: [] });
   const instances = useMemo(() => {
     const scope = `${workspaceKey ?? ''}\n${sessionId ?? ''}`;
-    if (background?.state === 'live' && background.sessionId === sessionId) knownInstances.current = { scope, jobs: background.jobs };
+    if (background?.state === 'live' && background.sessionId === sessionId) knownInstances.current = { scope, jobs: background.jobs.filter(job => job.status === 'running') };
     else if (background?.state === 'archived' || knownInstances.current.scope !== scope) knownInstances.current = { scope, jobs: [] };
     return knownInstances.current.jobs;
   }, [background, sessionId, workspaceKey]);
@@ -252,7 +264,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     ...instances.map(job => {
       const title = roleTitle(runnableRoles.find(role => role.name === job.agent), t, job.agent);
       const name = `${title} #${job.id.slice(-8)}`;
-      const status = t(`agents.status.${['pending', 'running', 'completed', 'failed', 'error', 'aborted'].includes(job.status) ? job.status : 'unknown'}` as MessageKey);
+      const status = t('agents.status.running');
       return { target: { kind: 'instance', id: job.id } as SendTarget, name, label: `${name} · ${status}`, chip: name, title: `${job.agent} · ${job.id}`, groupKey: 'instances', group: t('composer.targetInstances'), avatar: { kind: 'agent' as const, id: job.agent } };
     }),
   ], [runnableTeams, runnableRoles, instances, t]);
@@ -761,8 +773,29 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   // With "Enter" the key sends (Shift+Enter breaks the line, Ctrl+Enter sends too); with "Ctrl+Enter" only that sends and Enter breaks the line.
   const isSendKey = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => event.key === 'Enter' && !event.shiftKey && (shortcuts.send !== 'Ctrl+Enter' || event.ctrlKey);
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    const native = event.nativeEvent;
+    // The browser types this key outside any composition while the composer still counts one open: that composition's end never
+    // came (its text was replaced while composing). Without this the composer waits for it, with sending disabled; an Enter that
+    // shows it is handled again once the composer has re-rendered without it.
+    const stale = (composing.current || draft.composing) && !native.isComposing && event.keyCode !== 229;
+    if (stale) {
+      composing.current = false; passedThrough.current = null; heldEnter.current = null;
+      dispatch({ type: 'composerComposition', composing: false });
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const el = event.currentTarget; const init: KeyboardEventInit = { key: event.key, code: event.code, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, altKey: event.altKey, metaKey: event.metaKey };
+        window.setTimeout(() => replayEnter(el, init), 0);
+        return;
+      }
+    }
+    // A real key code while the browser still composes is a key the IME passed through ahead of its commit (see passedThrough).
+    if (event.key === 'Enter' && event.keyCode !== 229 && native.isComposing) {
+      event.preventDefault();
+      heldEnter.current = { key: event.key, code: event.code, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, altKey: event.altKey, metaKey: event.metaKey };
+      return;
+    }
     // React/native composition and the legacy IME keyCode must all be checked before handling popup or send keys.
-    if (composing.current || draft.composing || event.nativeEvent.isComposing || event.keyCode === 229) { discardPrediction(); return; }
+    if ((!stale && (composing.current || draft.composing)) || native.isComposing || event.keyCode === 229) { discardPrediction(); return; }
     // A word completion takes Tab before a sentence prediction; Esc clears both.
     if (word && !slash && !mention) {
       if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
@@ -921,7 +954,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
             </div>
           </div>
           <LiveEditorControls state={editorFollow} disabled={requestPending || newSessionPending || draft.composing} shortcuts={shortcuts} inputRef={inputRef} t={t} />
-          <ComputerToggle computer={computer} reply={computerReply} request={computerRequest} onCommandNotice={computerNotice} connected={connected} busy={busy} blocked={requestPending || newSessionPending} inputRef={inputRef} />
+          <ComputerToggle computer={computer} reply={computerReply} request={computerRequest} onCommandNotice={computerNotice} connected={connected} blocked={newSessionPending} inputRef={inputRef} />
           <button type="button" className="icon-btn" data-testid="editor-context" aria-pressed={includeEditorContext} title={t('composer.includeContext')} aria-label={t('composer.includeContext')} onClick={() => onIncludeEditorContextChange(!includeEditorContext)}><Icon name="context" size={14} /></button>
         </span>
         <ContextMeter session={session} basketTokens={basketTokens} workspaceKey={workspaceKey} sessionId={sessionId} includeEditorContext={includeEditorContext} attachmentPaths={attachmentPaths} connected={connected} />
@@ -984,6 +1017,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
           onChange={(event) => {
             discardPrediction();
             const el = event.currentTarget;
+            if (composing.current && (event.nativeEvent as InputEvent).inputType === 'insertText') passedThrough.current = el.value.length - el.selectionEnd;
             setCaret({ start: el.selectionStart, end: el.selectionEnd }); setHelpOpen(false);
             dispatch({ type: 'composerEdit', text: el.value, caret: el.selectionStart, selectionEnd: el.selectionEnd });
             if (failure) setFailure(null);
@@ -994,13 +1028,18 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
             if (el.selectionStart !== caret.start || el.selectionEnd !== caret.end) discardPrediction();
             if (!composing.current && document.activeElement === el) { setCaret({ start: el.selectionStart, end: el.selectionEnd }); dispatch({ type: 'composerCaret', caret: el.selectionStart, selectionEnd: el.selectionEnd }); }
           }}
-          onCompositionStart={() => { discardPrediction(); composing.current = true; dispatch({ type: 'composerComposition', composing: true }); }}
+          onCompositionStart={() => { discardPrediction(); composing.current = true; passedThrough.current = null; dispatch({ type: 'composerComposition', composing: true }); }}
           onCompositionEnd={(event) => {
             composing.current = false;
             const el = event.currentTarget;
+            const through = passedThrough.current; passedThrough.current = null;
+            if (through !== null) { const at = Math.max(0, el.value.length - through); el.setSelectionRange(at, at); }
             setCaret({ start: el.selectionStart, end: el.selectionEnd });
             dispatch({ type: 'composerComposition', composing: false });
             dispatch({ type: 'composerEdit', text: el.value, caret: el.selectionStart, selectionEnd: el.selectionEnd });
+            const enter = heldEnter.current; heldEnter.current = null;
+            // After this event's render, so the held Enter acts on the committed text like any Enter.
+            if (enter) window.setTimeout(() => replayEnter(el, enter), 0);
           }}
           onBlur={event => {
             discardPrediction(); setInputFocused(false);

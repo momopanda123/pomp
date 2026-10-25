@@ -18,6 +18,26 @@ namespace Pomp.Hosting
         private string _recoveryStatus = "ready";
         private string? _recoveryFile;
         private string? _recoverySession;
+        // The model and thinking level in force for the conversation being recovered: the new engine gets them back explicitly.
+        private ModelInfoPayload? _recoveryModel;
+        private string? _recoveryThinking;
+        /// <summary>Wait until the newly launched engine has established its tab's conversation and replayed its history.</summary>
+        internal async Task WaitForConversationAsync(CancellationToken token)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token, _disposeCts.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(100));
+            while (true)
+            {
+                lock (_stateLock)
+                {
+                    if (_recoveryStatus == "failed") throw new InvalidOperationException(_info.RecoveryMessage ?? "Conversation recovery failed.");
+                    if (_recoveryStatus == "ready" && !_sessionSwitchUncertain && _managedInitialTranscriptReady && !string.IsNullOrEmpty(_info.SessionId)) return;
+                }
+                if (_bridge.State == BridgeState.Failed || _bridge.State == BridgeState.Stopped)
+                    throw new InvalidOperationException("The conversation engine did not start.");
+                await Task.Delay(30, timeout.Token).ConfigureAwait(false);
+            }
+        }
         private string _recoveryRoot = "";
 
         /// <summary>How long recovery (and a session switch check) waits for the engine to settle before it judges, and how often it looks again.</summary>
@@ -60,11 +80,12 @@ namespace Pomp.Hosting
         {
             if (!string.Equals(NormalizePath(_workingDirectory), NormalizePath(_recoveryRoot), StringComparison.OrdinalIgnoreCase))
             {
-                _recoveryFile = null; _recoverySession = null;
+                _recoveryFile = null; _recoverySession = null; _recoveryModel = null; _recoveryThinking = null;
             }
             if (_recoveryStatus == "ready" && string.Equals(NormalizePath(_workingDirectory), NormalizePath(_sessionFolderRoot), StringComparison.OrdinalIgnoreCase))
             {
                 _recoveryFile = _sessionFile; _recoverySession = _info.SessionId;
+                _recoveryModel = _info.Model; _recoveryThinking = _info.ThinkingLevel;
             }
             _recoveryRoot = _workingDirectory;
             _recoveryStatus = "restoring";
@@ -92,10 +113,13 @@ namespace Pomp.Hosting
         private async Task RecoverSessionAsync()
         {
             OmpConnection? connection; CancellationToken token; string root; string? path, id;
+            ModelInfoPayload? model; string? thinking;
+            bool restoreInitial;
             lock (_stateLock)
             {
                 connection = _epochConnection; token = _epoch.Token; root = _recoveryRoot;
-                path = _recoveryFile; id = _recoverySession;
+                path = _recoveryFile; id = _recoverySession; model = _recoveryModel; thinking = _recoveryThinking;
+                restoreInitial = !_managedInitialTranscriptReady;
                 if (connection == null || _bridge.State != BridgeState.Running || _recoveryStatus == "ready") return;
                 _sessionSwitchUncertain = true;
             }
@@ -109,13 +133,14 @@ namespace Pomp.Hosting
                 var unsaved = false;
                 if (!string.IsNullOrEmpty(id) && (state.GetString("sessionId") != id || (!string.IsNullOrEmpty(path) && !SameSessionPath(state.GetString("sessionFile"), path))))
                 {
-                    // omp writes a session file only after the first answer: a conversation without one has nothing to restore.
+                    // A conversation omp never saved (no session file) has nothing to restore.
                     unsaved = string.IsNullOrEmpty(path) || !await Task.Run(() => { CheckpointStore.CheckDirectPath(path!); return File.Exists(path); }, token).ConfigureAwait(false);
                 }
                 if (unsaved)
                 {
                     id = null; path = null;
                     PostNotice("info", PompLanguage.Pick("이전 대화의 세션 파일이 없어 새 대화로 이어가요.", "The previous conversation has no session file; it continues as a new one."));
+                    state = await RestoreModelAsync(connection, state, model, thinking, token).ConfigureAwait(false);
                 }
                 else if (!string.IsNullOrEmpty(id) && (state.GetString("sessionId") != id || (!string.IsNullOrEmpty(path) && !SameSessionPath(state.GetString("sessionFile"), path))))
                 {
@@ -134,21 +159,57 @@ namespace Pomp.Hosting
                     reply = await connection.SendCommandAsync(OmpCommands.GetState(), TimeSpan.FromSeconds(15), token).ConfigureAwait(false);
                     if (!reply.Success || reply.Data is not JObject restored) throw new InvalidOperationException("Could not confirm the restored conversation.");
                     state = await WaitForSettledStateAsync(connection, restored, token).ConfigureAwait(false);
+                    // omp records no model_change for the model a new conversation inherits: its file alone would restart on the launch model.
+                    state = await RestoreModelAsync(connection, state, model, thinking, token).ConfigureAwait(false);
                 }
                 if (state.GetBool("isSettled") != true) throw new InvalidOperationException("The conversation is not settled yet.");
                 if (string.IsNullOrEmpty(state.GetString("sessionId")) || (!string.IsNullOrEmpty(id) && (state.GetString("sessionId") != id || (!string.IsNullOrEmpty(path) && !SameSessionPath(state.GetString("sessionFile"), path)))))
                     throw new InvalidOperationException("The requested conversation was not confirmed.");
                 token.ThrowIfCancellationRequested();
                 ApplyState(state, acceptRecovery: true, currentLocked: () => ReferenceEquals(connection, _epochConnection) && root == _workingDirectory, confirmSession: true);
+                if (restoreInitial)
+                {
+                    try { await RestoreTranscriptAsync(connection, token).ConfigureAwait(false); }
+                    catch (Exception ex) when (!(ex is OperationCanceledException)) { _logger.Warn("Could not restore the tab transcript: " + ex.Message); }
+                    finally { lock (_stateLock) _managedInitialTranscriptReady = true; }
+                }
                 // The host transcript is deliberately retained, including tool output and interrupted turns.
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             catch (Exception ex)
             {
+                lock (_stateLock) _managedInitialTranscriptReady = true;
                 if (PublishRecovery("failed", PompLanguage.Pick("이전 대화를 확인하지 못했어요. 기록은 유지했습니다.", "Could not confirm the previous conversation. Its displayed history was kept."),
                     () => ReferenceEquals(connection, _epochConnection) && !token.IsCancellationRequested))
                     _logger.Warn("Conversation recovery failed: " + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// The new engine starts on its launch model, and a conversation's session file may not name one (a new conversation's inherited
+        /// model is never written): a model or thinking level chosen in the picker (not saved in the settings) would silently change with a
+        /// restart, such as a new permission mode. A no-op when the recovered conversation already has them.
+        /// </summary>
+        private async Task<JObject> RestoreModelAsync(OmpConnection connection, JObject state, ModelInfoPayload? model, string? thinking, CancellationToken token)
+        {
+            var changed = false;
+            var current = state.GetObject("model");
+            if (model != null && !string.IsNullOrEmpty(model.Provider) && !string.IsNullOrEmpty(model.Id)
+                && (current?.GetString("provider") != model.Provider || current?.GetString("id") != model.Id))
+            {
+                var reply = await connection.SendCommandAsync(OmpCommands.SetModel(model.Provider, model.Id), TimeSpan.FromSeconds(30), token).ConfigureAwait(false);
+                if (reply.Success) changed = true;
+                else _logger.Warn("Could not keep the conversation's model after the engine restarted: " + reply.Error);
+            }
+            if (!string.IsNullOrEmpty(thinking) && !string.Equals(state.GetString("thinkingLevel"), thinking, StringComparison.Ordinal))
+            {
+                var reply = await connection.SendCommandAsync(OmpCommands.SetThinkingLevel(thinking!), TimeSpan.FromSeconds(15), token).ConfigureAwait(false);
+                if (reply.Success) changed = true;
+                else _logger.Warn("Could not keep the conversation's thinking level after the engine restarted: " + reply.Error);
+            }
+            if (!changed) return state;
+            var refreshed = await connection.SendCommandAsync(OmpCommands.GetState(), TimeSpan.FromSeconds(15), token).ConfigureAwait(false);
+            return refreshed.Success && refreshed.Data is JObject next ? next : state;
         }
 
         private static bool SameSessionPath(string? first, string? second) => !string.IsNullOrEmpty(first) && !string.IsNullOrEmpty(second)

@@ -612,6 +612,7 @@ namespace Pomp.Hosting
             }
 
             _ui.Post(UiMessageTypes.ChatTurnEnd, end);
+            PublishTabs();
             // A reply may have written a skill (the model was asked to make one): the list and the engine catch up.
             _commands.Enqueue(CatchUpSkillsAfterReplyAsync);
             if (history != null && runId != null)
@@ -715,6 +716,7 @@ namespace Pomp.Hosting
             }
 
             _ui.Post(UiMessageTypes.SessionInfo, updated, UiDelivery.State);
+            PublishTabs();
             if (!streaming) ScheduleQueueDispatch();
         }
 
@@ -809,6 +811,7 @@ namespace Pomp.Hosting
             lock (_stateLock)
             {
                 if ((!acceptRecovery && _recoveryStatus != "ready") || (currentLocked != null && !currentLocked())) return false;
+                _steerRequiresSeparateTurn = modelObject?.GetString("api") == "openai-codex-responses";
                 modelChanged = _info.Model?.Provider != model?.Provider || _info.Model?.Id != model?.Id;
                 thinkingChanged = !string.Equals(_info.ThinkingLevel, state.GetString("thinkingLevel"), StringComparison.Ordinal);
                 _sessionFile = state.GetString("sessionFile");
@@ -1353,7 +1356,7 @@ namespace Pomp.Hosting
                     _logger.Info("The user denied '" + permission.ToolName + "' with the note: " + response.Note);
                 }
 
-                var value = response.IsAllowed ? OmpApprovalPrompt.Approve : OmpApprovalPrompt.Deny;
+                var value = response.IsAllowed ? OmpApprovalMapper.ApproveThisCall(request) : OmpApprovalPrompt.Deny;
                 await SendFrameQuietlyAsync(OmpCommands.ExtensionUiValue(request.Id, value), origin).ConfigureAwait(false);
             }
         }

@@ -25,6 +25,7 @@ namespace Pomp.Features
         private static StringComparison Comparison => Path.DirectorySeparatorChar == '\\' ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         private static StringComparer PathComparer => Path.DirectorySeparatorChar == '\\' ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         private static readonly object CacheLock = new object();
+        private static readonly object WriteGate = new object();
         private static readonly Dictionary<string, CachedSession> Cache = new Dictionary<string, CachedSession>(PathComparer);
 
         public RecentSessionStore(string dataDirectory, string workspaceRoot)
@@ -36,20 +37,23 @@ namespace Pomp.Features
         /// <summary>Points the remembered conversations that were in <paramref name="fromFolder"/> at <paramref name="toFolder"/> (their files moved there).</summary>
         internal void Relocate(string fromFolder, string toFolder)
         {
-            CheckpointStore.CheckDirectPath(file);
-            if (!File.Exists(file)) return;
-            CheckpointStore.CheckDirectPath(file + ".lock");
-            using var lease = new FileStream(file + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            var rows = Read(); var changed = false;
-            var from = Path.GetFullPath(fromFolder).TrimEnd('\\', '/');
-            foreach (var row in rows.OfType<JObject>())
+            lock (WriteGate)
             {
-                var path = (string)row["path"]!;
-                if (!string.Equals(Path.GetDirectoryName(path), from, Comparison)) continue;
-                var moved = Path.Combine(Path.GetFullPath(toFolder), Path.GetFileName(path));
-                row["path"] = moved; row["id"] = ContentHash.Compute(moved); changed = true;
+                CheckpointStore.CheckDirectPath(file);
+                if (!File.Exists(file)) return;
+                CheckpointStore.CheckDirectPath(file + ".lock");
+                using var lease = new FileStream(file + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                var rows = Read(); var changed = false;
+                var from = Path.GetFullPath(fromFolder).TrimEnd('\\', '/');
+                foreach (var row in rows.OfType<JObject>())
+                {
+                    var path = (string)row["path"]!;
+                    if (!string.Equals(Path.GetDirectoryName(path), from, Comparison)) continue;
+                    var moved = Path.Combine(Path.GetFullPath(toFolder), Path.GetFileName(path));
+                    row["path"] = moved; row["id"] = ContentHash.Compute(moved); changed = true;
+                }
+                if (changed) AtomicFile.WriteAllText(file, new JObject { ["version"] = 1, ["root"] = root, ["entries"] = rows }.ToString(Formatting.None));
             }
-            if (changed) AtomicFile.WriteAllText(file, new JObject { ["version"] = 1, ["root"] = root, ["entries"] = rows }.ToString(Formatting.None));
         }
 
         public bool Remember(string sessionId, string sessionPath, string name)
@@ -59,16 +63,19 @@ namespace Pomp.Features
             if (!string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Expected a JSONL session file.");
             CheckpointStore.CheckDirectPath(path);
             if (!File.Exists(path)) return false; // omp may not have persisted an empty session yet
-            CheckpointStore.CheckDirectPath(file); Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-            CheckpointStore.CheckDirectPath(file + ".lock");
-            using var lease = new FileStream(file + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            var rows = Read();
-            foreach (var prior in rows.OfType<JObject>().Where(r => string.Equals((string?)r["path"], path, Comparison)).ToArray()) prior.Remove();
-            rows.Insert(0, new JObject { ["id"] = ContentHash.Compute(path), ["sessionId"] = sessionId, ["path"] = path, ["name"] = name.Length > 160 ? name.Substring(0,160) : name, ["visitedUtc"] = DateTimeOffset.UtcNow.ToString("O") });
-            var size = Encoding.UTF8.GetByteCount(new JObject { ["version"] = 1, ["root"] = root, ["entries"] = rows }.ToString(Formatting.None));
-            while (size > MaxStoreBytes && rows.Count > 1) { size -= Encoding.UTF8.GetByteCount(rows.Last!.ToString(Formatting.None)) + 1; rows.RemoveAt(rows.Count - 1); }
-            AtomicFile.WriteAllText(file, new JObject { ["version"] = 1, ["root"] = root, ["entries"] = rows }.ToString(Formatting.None));
-            return true;
+            lock (WriteGate)
+            {
+                CheckpointStore.CheckDirectPath(file); Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                CheckpointStore.CheckDirectPath(file + ".lock");
+                using var lease = new FileStream(file + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                var rows = Read();
+                foreach (var prior in rows.OfType<JObject>().Where(r => string.Equals((string?)r["path"], path, Comparison)).ToArray()) prior.Remove();
+                rows.Insert(0, new JObject { ["id"] = ContentHash.Compute(path), ["sessionId"] = sessionId, ["path"] = path, ["name"] = name.Length > 160 ? name.Substring(0,160) : name, ["visitedUtc"] = DateTimeOffset.UtcNow.ToString("O") });
+                var size = Encoding.UTF8.GetByteCount(new JObject { ["version"] = 1, ["root"] = root, ["entries"] = rows }.ToString(Formatting.None));
+                while (size > MaxStoreBytes && rows.Count > 1) { size -= Encoding.UTF8.GetByteCount(rows.Last!.ToString(Formatting.None)) + 1; rows.RemoveAt(rows.Count - 1); }
+                AtomicFile.WriteAllText(file, new JObject { ["version"] = 1, ["root"] = root, ["entries"] = rows }.ToString(Formatting.None));
+                return true;
+            }
         }
 
         public JObject List(string? currentSessionFile = null, string? currentSessionId = null, string? currentName = null)
@@ -124,8 +131,10 @@ namespace Pomp.Features
             var folder = Path.GetDirectoryName(Path.GetFullPath(currentSessionFile))!;
             if (!string.Equals(Path.GetDirectoryName(path), folder, Comparison)) throw new InvalidOperationException(PompLanguage.Pick("대화 파일이 현재 대화 폴더 밖에 있어요.", "The conversation file is outside the active conversation folder."));
             CheckpointStore.CheckDirectPath(path);
-            // Read the real header again; a cached title or remembered reference is not deletion authority.
-            using (var reader = new StreamReader(path, Encoding.UTF8, true))
+            // Read the real header again; a cached title or remembered reference is not deletion authority. The engine keeps the
+            // active conversation's file open for appending: read it shared, as Preview does, or the current conversation cannot be deleted.
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(stream, Encoding.UTF8, true))
             {
                 string? line; JObject? header = null;
                 for (var count = 0; count < 3 && (line = reader.ReadLine()) != null; count++)
@@ -147,13 +156,16 @@ namespace Pomp.Features
 
         internal void Forget(string sessionId, string path)
         {
-            CheckpointStore.CheckDirectPath(file); Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-            CheckpointStore.CheckDirectPath(file + ".lock");
-            using var lease = new FileStream(file + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            var rows = Read();
-            foreach (var row in rows.OfType<JObject>().Where(r => (string?)r["sessionId"] == sessionId || string.Equals((string?)r["path"], path, Comparison)).ToArray()) row.Remove();
-            AtomicFile.WriteAllText(file, new JObject { ["version"] = 1, ["root"] = root, ["entries"] = rows }.ToString(Formatting.None));
-            lock (CacheLock) if (Cache.TryGetValue(path, out var cached)) { cacheSize -= cached.Size; Cache.Remove(path); }
+            lock (WriteGate)
+            {
+                CheckpointStore.CheckDirectPath(file); Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                CheckpointStore.CheckDirectPath(file + ".lock");
+                using var lease = new FileStream(file + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                var rows = Read();
+                foreach (var row in rows.OfType<JObject>().Where(r => (string?)r["sessionId"] == sessionId || string.Equals((string?)r["path"], path, Comparison)).ToArray()) row.Remove();
+                AtomicFile.WriteAllText(file, new JObject { ["version"] = 1, ["root"] = root, ["entries"] = rows }.ToString(Formatting.None));
+                lock (CacheLock) if (Cache.TryGetValue(path, out var cached)) { cacheSize -= cached.Size; Cache.Remove(path); }
+            }
         }
 
         public JObject Preview(string id, string? currentSessionFile = null)

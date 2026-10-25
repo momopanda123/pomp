@@ -138,21 +138,26 @@ export function App() {
     ? roleTitle(effectiveRoles(state.agents?.roles ?? []).find(role => role.name === scopedTabs.partner.id), translate, scopedTabs.partner.id)
     : scopedTabs.title || state.agents?.teams.find(team => team.id === scopedTabs.partner.id)?.title || scopedTabs.partner.id) : undefined;
   const pendingSwitch = useRef<string | undefined>(undefined);
-  /** A tab command that changes the conversation (conversation/tab): the page waits for its session/newResult like a conversation switch. */
+  /** A tab can activate while another conversation runs; the result identifies the destination snapshot to display. */
   function switchTab(command: TabSwitch): boolean {
     // One at a time: the pending state reaches `latest` only with the next render.
-    if (pendingSwitch.current || !canChangeSession()) return false;
+    if (pendingSwitch.current || !canSwitchTab()) return false;
     const requestId = newId();
     if (!send('conversation/tab', { ...command, requestId })) { dispatch({ type: 'localNotice', level: 'error', message: makeTranslate(latest.current.locale)('error.hostUnavailable') }); return false; }
     pendingSwitch.current = requestId; dispatch({ type: 'newSessionRequested', requestId }); setListOpen(false); return true;
   }
   /** Editor requests belong to the Default (POMP) tab's conversation: from an agent or team tab the page switches there first. */
   const showPomp = () => latestPartnerTab() && switchTab({ action: 'activate' });
+  const pendingPartnerFocus = useRef<ConversationPartner | undefined>(undefined);
   const openPartner = (target: SendTarget) => {
-    if (target.kind === 'agent' || target.kind === 'team') setPartnerRequest(previous => ({ partner: { kind: target.kind as 'agent' | 'team', id: target.id }, seq: (previous?.seq ?? 0) + 1 }));
+    if (target.kind === 'agent' || target.kind === 'team') {
+      pendingPartnerFocus.current = { kind: target.kind, id: target.id };
+      setPartnerRequest(previous => ({ partner: { kind: target.kind as 'agent' | 'team', id: target.id }, seq: (previous?.seq ?? 0) + 1 }));
+    }
     // A running member of this conversation is a one-message target here.
     else dispatch({ type: 'selectTarget', target });
-    setTab('chat'); setListOpen(false); window.requestAnimationFrame(() => inputRef.current?.focus());
+    setTab('chat'); setListOpen(false);
+    if (target.kind === 'instance') window.requestAnimationFrame(() => inputRef.current?.focus());
   };
   const latest = useRef(state); latest.current = state;
   /** Whether the current conversation is an agent or team tab's (not the Default (POMP) tab's). */
@@ -162,7 +167,6 @@ export function App() {
   }
   const activeTab = setupRequired ? 'accounts' : tab;
   const tabBadges = useTabBadges(activeTab, { sessionId, items: state.items, replaying: state.replaying, replayRevision: state.replayRevision, requests: state.permissions.length + state.dialogs.length });
-  const attentionRef = useRef(attention); attentionRef.current = attention;
   const activeTabRef = useRef(activeTab); activeTabRef.current = activeTab;
   const wasRequired = useRef(false);
   useEffect(() => {
@@ -170,7 +174,20 @@ export function App() {
     wasRequired.current = setupRequired;
   }, [setupRequired]);
   const focused = useRef(false);
-  useEffect(() => { if (connected && activeTab === 'chat' && !focused.current) { focused.current = true; inputRef.current?.focus(); } }, [connected, activeTab]);
+  useEffect(() => {
+    if (!connected || activeTab !== 'chat') { focused.current = false; return; }
+    if (focused.current) return;
+    focused.current = true;
+    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
+    return () => { window.cancelAnimationFrame(frame); focused.current = false; };
+  }, [connected, activeTab]);
+  useEffect(() => {
+    const requested = pendingPartnerFocus.current;
+    if (!requested || state.tabs?.pendingAction || state.tabs?.sessionId !== sessionId || state.tabs?.partner.kind !== requested.kind
+      || state.tabs?.partner.id !== requested.id || activeTab !== 'chat') return;
+    pendingPartnerFocus.current = undefined;
+    window.requestAnimationFrame(() => { if (activeTabRef.current === 'chat') inputRef.current?.focus(); });
+  }, [state.tabs, sessionId, activeTab]);
 
   /** A message while a reply runs is queued, also a question sent from the code editor. */
   const sending = useRef(false); const queueSubmitting = useRef<string | undefined>(undefined);
@@ -261,21 +278,20 @@ export function App() {
   }, []);
   const dropPermission = useCallback((requestId: string) => dispatch({ type: 'permissionAnswered', requestId, outcome: 'expired', at: Date.now() }), []);
   const dropDialog = useCallback((requestId: string) => dispatch({ type: 'dialogAnswered', requestId, outcome: 'expired', at: Date.now() }), []);
-  const canChangeSession = useCallback(() => {
+  const canSwitchTab = useCallback(() => {
     const current = latest.current;
-    return current.pendingNewSession === undefined && !isBusy(current) && current.bridge.state === 'running' && current.pendingQueued.some(item => !item.failed) === false &&
-      current.permissions.length === 0 && current.dialogs.length === 0 && current.session?.recoveryStatus !== 'restoring' && current.session?.hasPendingAsyncWork !== true && attentionRef.current.terminal === 0;
+    return current.pendingNewSession === undefined && current.bridge.state === 'running' && current.session?.recoveryStatus !== 'restoring';
   }, []);
   const newSession = useCallback((): boolean => {
-    if (!canChangeSession()) return false;
+    if (!canSwitchTab()) return false;
     const requestId = newId();
     if (!send('session/new', { requestId })) { dispatch({ type: 'localNotice', level: 'error', message: makeTranslate(latest.current.locale)('error.hostUnavailable') }); return false; }
     dispatch({ type: 'newSessionRequested', requestId }); setTab('chat'); setListOpen(false); return true;
-  }, [canChangeSession]);
+  }, [canSwitchTab]);
   const switchSession = useCallback((requestId: string, root: string, id: string): boolean => {
-    if (!canChangeSession() || !send('session/history', { action: 'switch', requestId, root, id })) return false;
+    if (!canSwitchTab() || !send('session/history', { action: 'switch', requestId, root, id })) return false;
     dispatch({ type: 'newSessionRequested', requestId }); return true;
-  }, [canChangeSession]);
+  }, [canSwitchTab]);
   /** A refusal or failure of a slash command (or of the conversation's rename and compaction): a warning in the chat, where the command was typed. */
   const commandNotice = useCallback((message: string) => dispatch({ type: 'localNotice', level: 'warning', message }), []);
   const history = useSessionHistory(workspaceKey, sessionId, connected, state.locale, switchSession, commandNotice);
@@ -285,6 +301,7 @@ export function App() {
     if (before.workspaceKey !== workspaceKey || (before.sessionId !== sessionId && !history.pendingId)) setListOpen(false);
   }, [workspaceKey, sessionId, history.pendingId]);
   const sessionBlocked = !connected || recovering || busy || newSessionPending || modal || state.session?.hasPendingAsyncWork === true || attention.terminal > 0 || state.pendingQueued.some(item => !item.failed);
+  const tabBlocked = !connected || recovering || newSessionPending;
   const openList = () => { setTab('chat'); setListOpen(true); history.command('refresh'); };
   const closeList = () => { setListOpen(false); window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[data-testid="session-quick"]')?.focus()); };
   const openWork = (view?: RequestedWorkView) => { setWorkView(view ?? workView); setTab('work'); };
@@ -365,7 +382,7 @@ export function App() {
   const handleCommand = (name: BuiltinCommand, args: string): SendResult => {
     switch (name) {
       case 'new':
-        if (!canChangeSession()) return refuseCommand(translate('slash.newBlocked'));
+        if (!canSwitchTab()) return refuseCommand(translate('slash.newBlocked'));
         // newSession tells a failed send itself.
         return newSession() ? { ok: true } : { ok: false, reason: 'notified' };
       case 'sessions': openList(); return { ok: true };
@@ -399,15 +416,15 @@ export function App() {
     <TabBar active={activeTab} onChange={changeTab} bridge={state.bridge} required={setupRequired} badges={tabBadges} accountAttention={accountAttention} inert={false} engine={state.engine} />
     <main className="main">
       <section id="page-chat" className="tab-page chat-page" role="tabpanel" aria-labelledby="tab-chat" hidden={activeTab !== 'chat'} inert={activeTab !== 'chat' || undefined}>
-        <SessionHeader session={state.session} history={history} disabled={sessionBlocked} onNew={newSession} listOpen={listOpen} onToggleList={() => { if (listOpen) closeList(); else openList(); }}><PartnerPicker tabs={state.tabs} agents={state.agents} replies={state.conversationReplies} sessionId={sessionId} disabled={sessionBlocked} lockedTitle={connected && !recovering && !newSessionPending && sessionBlocked ? translate('partner.locked') : undefined} request={partnerRequest} onSwitch={switchTab} onRefreshRoster={() => { if (connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }} /></SessionHeader>
-        <div className="conversation-list-anchor">{listOpen && <div ref={listRef} id="conversation-list" className="conversation-list"><SessionHistory locale={state.locale} sessionId={sessionId} sessionName={state.session?.sessionName} partner={scopedTabs?.partner ?? { kind: 'main' }} history={history} disabled={sessionBlocked} onNew={newSession} onOpened={closeList} onClose={closeList} /></div>}</div>
+        <SessionHeader session={state.session} history={history} disabled={sessionBlocked} newDisabled={tabBlocked} onNew={newSession} listOpen={listOpen} onToggleList={() => { if (listOpen) closeList(); else openList(); }}><PartnerPicker tabs={state.tabs} agents={state.agents} replies={state.conversationReplies} sessionId={sessionId} disabled={tabBlocked} busy={busy || state.session?.hasPendingAsyncWork === true} lockedTitle={newSessionPending ? translate('partner.locked') : undefined} request={partnerRequest} onSwitch={switchTab} onRefreshRoster={() => { if (connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }} /></SessionHeader>
+        <div className="conversation-list-anchor">{listOpen && <div ref={listRef} id="conversation-list" className="conversation-list"><SessionHistory locale={state.locale} sessionId={sessionId} sessionName={state.session?.sessionName} partner={scopedTabs?.partner ?? { kind: 'main' }} history={history} disabled={sessionBlocked} newDisabled={tabBlocked} switchDisabled={tabBlocked} onNew={newSession} onOpened={closeList} onClose={closeList} /></div>}</div>
         <ConnectionBanner bridge={state.bridge} onRestart={() => send('bridge/restart', {})} onOpenLog={() => send('log/open', {})} /><EngineNotice engine={state.engine} /><UndeliveredStatusBanner />
         {(recovering || recoveryFailed) && <div className="composer-error" role="status" data-testid="session-recovery">
           {state.session?.recoveryMessage || (state.locale.startsWith('ko') ? '이전 대화를 확인하는 중' : 'Confirming the previous conversation')}
           {recoveryFailed && connected && <div>
             <button type="button" onClick={() => send('session/recover', {})}>{state.locale.startsWith('ko') ? '복원 재시도' : 'Retry recovery'}</button>
             <button type="button" onClick={openList}>{state.locale.startsWith('ko') ? '다른 기록 열기' : 'Open history'}</button>
-            <button type="button" disabled={sessionBlocked} onClick={newSession}>{state.locale.startsWith('ko') ? '새 대화' : 'New conversation'}</button>
+            <button type="button" disabled={tabBlocked} onClick={newSession}>{state.locale.startsWith('ko') ? '새 대화' : 'New conversation'}</button>
           </div>}
         </div>}
         <Transcript controlsEnabled={conversationReady && !newSessionPending && !state.replaying} root={workspaceKey} sessionId={sessionId} items={state.items} busy={busy} replaying={state.replaying} replayRevision={state.replayRevision} replayTruncated={state.replayTruncated} canRetry={conversationReady && !busy && !newSessionPending && !modal} onRetry={retryTurn} request={requestCard} />

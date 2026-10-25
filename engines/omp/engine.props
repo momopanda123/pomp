@@ -1,18 +1,17 @@
 <Project>
   <!--
-    The omp engine that every POMP VSIX ships (docs/architecture.md "엔진 버전"). One POMP release = one omp build: POMP uses only this
-    engine (verified by size and SHA-256 at start), so an omp update reaches users only through a POMP release.
-
-    To move to another omp version: change these values together (the official release's SHA256SUMS.txt lists the hashes), run the
-    self-test suites and the real-engine checks against the new engine, then release POMP. The build downloads the files below into
-    artifacts\engines\omp\<version>\ (git-ignored) when they are not there yet and fails when a hash does not match.
+    Every POMP VSIX ships this locally patched omp build. The version, size and hash are verified at build time and at startup;
+    the official upstream executable cannot be substituted. The upstream tag/commit and patch are pinned in build/build-omp.ps1.
+    To update omp, rebuild from the new pinned source and patch, verify behavior, then update the size, hash and provenance together.
+    The official release URL is used only for the separately hashed THIRD-PARTY-NOTICES.txt.
   -->
   <PropertyGroup>
-    <PompOmpVersion>18.12.1</PompOmpVersion>
-    <PompOmpReleaseUrl>https://github.com/can1357/oh-my-pi/releases/download/v18.12.1/</PompOmpReleaseUrl>
-    <PompOmpAsset>omp-windows-x64.exe</PompOmpAsset>
-    <PompOmpSha256>1ba0274b48e6d6d095727faf36ec55114f5a6ac05bde5b8714d1565b2b7477bb</PompOmpSha256>
-    <PompOmpSize>222742016</PompOmpSize>
+    <PompOmpVersion>18.12.6</PompOmpVersion>
+    <PompOmpReleaseUrl>https://github.com/can1357/oh-my-pi/releases/download/v18.12.6/</PompOmpReleaseUrl>
+    <PompOmpAsset>omp.exe</PompOmpAsset>
+    <PompOmpSource>oh-my-pi@45c35e40c46166dc726ccc52f5d27f40f2449f99 + engines/omp/pomp-v18.12.6.patch</PompOmpSource>
+    <PompOmpSha256>ad4651ef95cb3c99f3629e2c4b935fc3e511e666754cf9e1df6a2704427a0461</PompOmpSha256>
+    <PompOmpSize>243010048</PompOmpSize>
     <PompOmpNoticesSha256>768612d40a4d1788813b997b011290d0f08c426add452de6560bf227cd1fc29d</PompOmpNoticesSha256>
   </PropertyGroup>
 </Project>
