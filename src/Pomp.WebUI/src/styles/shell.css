@@ -194,6 +194,14 @@
   .context-tools .icon-btn { width: 18px; height: 18px; }
   .context-count { padding: 1px 3px; }
 }
+/* Six tabs: below the width that holds every name (wider for the longer English names), only the open tab keeps its name; the
+   others keep their icon, with the name in the tooltip and the accessible name. Below 300 px no tab shows a name (above). */
+@media (max-width: 399px) {
+  .shell-tab:not([aria-selected='true']) .tab-label { display: none; }
+}
+@media (max-width: 449px) {
+  html:lang(en) .shell-tab:not([aria-selected='true']) .tab-label { display: none; }
+}
 .shell-menu-info { margin-top: 3px; padding: 5px 8px 3px; border-top: 1px solid var(--pomp-border); color: var(--pomp-muted-fg); font-size: .92em; overflow-wrap: anywhere; cursor: default; }
 .shell-menu-info.unverified { color: var(--pomp-warning); }
 .engine-notice > .icon { color: var(--pomp-warning); flex: none; }

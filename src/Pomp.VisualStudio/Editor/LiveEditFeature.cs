@@ -10,6 +10,7 @@ using System.Windows.Media;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
+using Microsoft.VisualStudio.Text.Formatting;
 using Microsoft.VisualStudio.Utilities;
 using Pomp.VisualStudio.Composition;
 using Pomp.VisualStudio.Options;
@@ -66,6 +67,20 @@ namespace Pomp.VisualStudio.Editor
             foreach (var item in Views)
                 if (!ReferenceEquals(item.service, PompServices.Current?.EditorFollow)) item.Refresh();
             LiveScrollMargin.RefreshAll();
+        }
+
+        /// <summary>The rendered right edge on this visual row, including Live marks and conflict labels.</summary>
+        internal static double GetLineControlsRight(IWpfTextView view, ITextViewLine line)
+        {
+            var right = line.TextRight;
+            foreach (var item in view.GetAdornmentLayer(ControlsLayer).Elements)
+            {
+                var adornment = item.Adornment;
+                var top = Canvas.GetTop(adornment);
+                if (top < line.TextBottom && top + adornment.DesiredSize.Height > line.TextTop)
+                    right = Math.Max(right, Canvas.GetLeft(adornment) + adornment.DesiredSize.Width);
+            }
+            return right;
         }
 
         private sealed class ViewController
@@ -209,6 +224,7 @@ namespace Pomp.VisualStudio.Editor
                                 if (left) { symbol.Margin = new Thickness((Math.Ceiling(lineHeight) + 4 - symbol.Width) / 2, (line.TextHeight - symbol.Height) / 2, 0, 0); column!.Place(symbol, line.TextTop); }
                                 else
                                 {
+                                    symbol.Measure(new Size(double.PositiveInfinity, line.TextHeight));
                                     Canvas.SetLeft(symbol, line.TextRight + 4); Canvas.SetTop(symbol, line.TextTop + (line.TextHeight - symbol.Height) / 2);
                                     controls.AddAdornment(AdornmentPositioningBehavior.TextRelative, line.ExtentIncludingLineBreak, entry, symbol, null);
                                 }
@@ -221,7 +237,12 @@ namespace Pomp.VisualStudio.Editor
                         }
                     }
                 }
-                finally { rendering = false; }
+                finally
+                {
+                    rendering = false;
+                    // Live state can change without a text layout (hide, clear, conflict, mark position).
+                    CodeCaptionFeature.Refresh(View);
+                }
             }
 
             /// <summary>

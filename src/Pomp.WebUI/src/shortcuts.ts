@@ -89,7 +89,7 @@ export function vsKeyChord(event: KeyboardEvent): string | null {
 export function normalizeShortcuts(partial: Partial<PageShortcuts> | null | undefined): PageShortcuts {
   const value: PageShortcuts = { ...DEFAULT_SHORTCUTS };
   if (!partial || typeof partial !== 'object') return value;
-  for (const key of ['sendTargetPicker', 'previousTarget', 'nextTarget', 'contextBasket', 'editorContext', 'liveFollow', 'liveBookmarks', 'permissionMode', 'allow', 'deny', 'permissionsView', 'toggleFocus'] as const) {
+  for (const key of ['sendTargetPicker', 'previousTarget', 'nextTarget', 'previousChatTab', 'nextChatTab', 'contextBasket', 'editorContext', 'liveFollow', 'liveBookmarks', 'permissionMode', 'allow', 'deny', 'permissionsView', 'toggleFocus'] as const) {
     const raw = partial[key];
     if (typeof raw !== 'string') continue;
     if (raw.trim() === '') value[key] = '';

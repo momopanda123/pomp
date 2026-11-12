@@ -36,7 +36,9 @@ namespace Pomp.Features
         internal static readonly string[] Arguments =
         {
             "--mode", "rpc", "--no-session", "--no-extensions", "--no-skills", "--no-rules",
-            "--model", "openai/gpt", "--api-key", PlaceholderApiKey,
+            // An exact id: since omp 18.14 a provider-qualified --model that is not one stops the start ("Model not found"). gpt-5.5
+            // is omp's default OpenAI model; the closed base URL keeps the placeholder key from reaching anything.
+            "--model", "openai/gpt-5.5", "--api-key", PlaceholderApiKey,
         };
 
         private static readonly TimeSpan StopGrace = TimeSpan.FromSeconds(3);

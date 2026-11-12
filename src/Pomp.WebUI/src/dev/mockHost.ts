@@ -63,6 +63,7 @@ import type {
   SetupProvider,
   SetupSavedKey,
   SetupLocalServer,
+  SetupModelShare,
   SetupStatePayload,
   SetupUsagePayload,
   Team,
@@ -515,6 +516,32 @@ export function installMockHost(): void {
   let localServers: SetupLocalServer[] = Array.from({ length: Math.max(0, Math.min(1000, Number(new URLSearchParams(window.location.search).get('localServers')) || 0)) },
     (_, index) => ({ id: `local-box-${index + 1}`, name: `Box ${index + 1}`, address: `http://10.0.0.${(index % 250) + 1}:8000/v1`, hasKey: index % 2 === 0, savedUtc: new Date(Date.UTC(2026, 9, 1)).toISOString() }));
   const availableModels = (): SetupModel[] => MODEL_LIST.filter((item) => authenticated.has(item.provider) || keys.some((key) => key.provider === item.provider));
+
+  // ---- Model sharing (?modelShare=0 hides it, like a host that does not offer it) ----
+  const shareOffered = new URLSearchParams(window.location.search).get('modelShare') !== '0';
+  let modelShare: SetupModelShare = {
+    state: 'off', error: null, address: '192.168.0.71', port: 47611,
+    addresses: [{ address: '192.168.0.71', name: 'Ethernet' }, { address: '10.20.0.5', name: 'Wi-Fi' }, { address: '127.0.0.1', name: 'Loopback Pseudo-Interface 1' }],
+    models: null, code: null, clients: [],
+  };
+  let shareTimer: number | undefined;
+  const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  /** A grouped 24-character code (the mock's secret and pin are both random) valid for 10 minutes. */
+  const newShareCode = (): SetupModelShare['code'] => {
+    const bytes = crypto.getRandomValues(new Uint8Array(24));
+    const text = Array.from(bytes, (byte) => BASE32[byte % 32]).join('');
+    return { code: text.match(/.{4}/g)!.join('-'), expiresUtc: new Date(Date.now() + 10 * 60_000).toISOString() };
+  };
+  /** Starts sharing: "starting", then "on" with 55 models and (no client yet) a code; `done` answers the command that asked. */
+  const startSharing = (done: () => void): void => {
+    window.clearTimeout(shareTimer);
+    modelShare = { ...modelShare, state: 'starting', error: null, models: null, code: null };
+    postSetup();
+    shareTimer = later(1_500, () => {
+      modelShare = { ...modelShare, state: 'on', models: 55, code: modelShare.clients.length === 0 ? newShareCode() : null };
+      done();
+    });
+  };
 
   // ---- Session header, history and context usage ----
   let sessions = buildSessions();
@@ -972,7 +999,7 @@ export function installMockHost(): void {
   };
 
   // ---- Engine setup (accounts / login / API keys / model / usage); nobody is signed in at the start of the "setup" scenario ----
-  const hasProvider = (): boolean => authenticated.size > 0 || keys.length > 0;
+  const hasProvider = (): boolean => authenticated.size > 0 || keys.length > 0 || localServers.some((server) => server.shared);
   let bridgeRunning = false;
   const postCommands = (): void => post('commands/state', {
     commands: bridgeRunning && opts.commands !== 'empty' ? ENGINE_COMMANDS : [],
@@ -1054,6 +1081,7 @@ export function installMockHost(): void {
       ...(usage ? { usage } : {}),
       ...(usageLoading ? { usageLoading } : {}),
       ...(restartRecommended ? { restartRecommended } : {}),
+      ...(shareOffered ? { modelShare } : {}),
     });
 
   const resolveEditorModel = (requestId: string): void => {
@@ -1535,7 +1563,7 @@ export function installMockHost(): void {
         const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'server';
         let id = existing?.id ?? `local-${slug}`;
         for (let n = 2; !existing && localServers.some((item) => item.id === id); n++) id = `local-${slug}-${n}`;
-        const row = { id, name, address: command.address, hasKey: !!command.key || !!existing?.hasKey, savedUtc: new Date().toISOString() };
+        const row: SetupLocalServer = { id, name, address: command.address, hasKey: !!command.key || !!existing?.hasKey, savedUtc: new Date().toISOString(), ...(existing?.shared ? { shared: true } : {}) };
         localServers = existing ? localServers.map((item) => (item.id === id ? row : item)) : [...localServers, row];
         credentialsChanged('key');
         postSetup(requestId);
@@ -1545,6 +1573,86 @@ export function installMockHost(): void {
         localServers = localServers.filter((item) => item.id !== command.id);
         postSetup(requestId);
         break;
+      case 'shareEnable':
+        if (command.enabled) {
+          if (modelShare.state === 'on' || modelShare.state === 'starting') { postSetup(requestId); break; }
+          startSharing(() => postSetup(requestId));
+          break;
+        }
+        window.clearTimeout(shareTimer);
+        modelShare = { ...modelShare, state: 'off', error: null, models: null, code: null };
+        postSetup(requestId);
+        break;
+      case 'shareConfigure': {
+        const ko = opts.locale.startsWith('ko');
+        if (!modelShare.addresses.some((item) => item.address === command.address)) {
+          postSetup(requestId, ko ? '이 PC에 없는 주소예요.' : 'This PC has no such address.');
+          break;
+        }
+        if (!Number.isInteger(command.port) || command.port < 1024 || command.port > 65535) {
+          postSetup(requestId, ko ? '포트가 올바르지 않아요.' : 'The port is invalid.');
+          break;
+        }
+        const moved = command.address !== modelShare.address;
+        modelShare = { ...modelShare, address: command.address, port: command.port };
+        if (modelShare.state === 'on' || modelShare.state === 'starting') {
+          // A new address gets a new certificate: the connected PCs must connect again with a new code.
+          if (moved) modelShare = { ...modelShare, clients: [] };
+          startSharing(() => postSetup(requestId));
+        } else postSetup(requestId);
+        break;
+      }
+      case 'shareNewCode':
+        if (modelShare.state !== 'on') {
+          postSetup(requestId, opts.locale.startsWith('ko') ? '모델 공유가 켜져 있지 않아요.' : 'Model sharing is not on.');
+          break;
+        }
+        modelShare = { ...modelShare, code: newShareCode() };
+        postSetup(requestId);
+        break;
+      case 'shareRevoke':
+        if (!modelShare.clients.some((client) => client.name === command.name)) {
+          postSetup(requestId, opts.locale.startsWith('ko') ? '그 PC는 연결되어 있지 않아요.' : 'That PC is not connected.');
+          break;
+        }
+        modelShare = { ...modelShare, clients: modelShare.clients.filter((client) => client.name !== command.name) };
+        postSetup(requestId);
+        break;
+      case 'connectSharedModels': {
+        const ko = opts.locale.startsWith('ko');
+        const match = /^([a-z0-9.-]{1,253}):(\d{1,5})$/.exec(command.address);
+        if (!match || Number(match[2]) < 1 || Number(match[2]) > 65535) {
+          postSetup(requestId, ko ? '공유 PC 주소가 올바르지 않아요.' : 'The sharing PC address is invalid.');
+          break;
+        }
+        if (!/^[A-Z2-7]{24}$/.test(command.code)) {
+          postSetup(requestId, ko ? '연결 코드 형식이 올바르지 않아요.' : 'The connection code is malformed.');
+          break;
+        }
+        const code = command.code;
+        later(900, () => {
+          // A code starting with AAAA stands for a wrong or used one; this PC's own current code connects it to itself.
+          if (code.startsWith('AAAA')) {
+            postSetup(requestId, ko ? '연결 코드가 맞지 않거나 이미 사용됐어요. 공유 PC에서 새 코드를 만드세요.' : 'The connection code is wrong or was already used. Create a new code on the sharing PC.');
+            return;
+          }
+          const own = modelShare.code?.code.replace(/-/g, '') === code;
+          if (own) modelShare = { ...modelShare, code: null, clients: [...modelShare.clients, { name: `PROJECT-PC${modelShare.clients.length ? `-${modelShare.clients.length + 1}` : ''}`, createdUtc: new Date().toISOString() }] };
+          const address = `https://${match[1]}:${match[2]}/v1`;
+          const existing = localServers.find((item) => item.address.toLowerCase() === address);
+          const savedUtc = new Date().toISOString();
+          if (existing) {
+            localServers = localServers.map((item) => (item.id === existing.id ? { ...item, hasKey: true, shared: true, savedUtc } : item));
+          } else {
+            let name = 'SHARE-PC';
+            for (let n = 2; localServers.some((item) => item.name.toLowerCase() === name.toLowerCase()); n++) name = `SHARE-PC-${n}`;
+            localServers = [...localServers, { id: `local-${name.toLowerCase()}`, name, address, hasKey: true, savedUtc, shared: true }];
+          }
+          credentialsChanged('key');
+          postSetup(requestId);
+        });
+        break;
+      }
       case 'removeKey':
         if (!keys.some((item) => item.provider === command.provider)) {
           postSetup(requestId, 'No saved key for this provider.');
@@ -1579,6 +1687,7 @@ export function installMockHost(): void {
         break;
       }
       case 'listModels':
+      case 'refreshModels':
         if (!bridgeRunning) {
           postSetup(requestId, 'Not connected.');
           break;
@@ -1947,8 +2056,8 @@ export function installMockHost(): void {
     work.snapshot();
     postInteractive();
     // The real host sends engine/info at every engine start and in the ui/ready snapshot.
-    if (opts.engine === 'bundled') post('engine/info', { source: 'bundled', version: '18.12.6', verified: true, expectedVersion: '18.12.6' });
-    else if (opts.engine === 'settings') post('engine/info', { source: 'settings', version: '18.9.0', verified: false, expectedVersion: '18.12.6', path: 'D:\\tools\\omp-next\\omp.exe' });
+    if (opts.engine === 'bundled') post('engine/info', { source: 'bundled', version: '18.18.9', verified: true, expectedVersion: '18.18.9' });
+    else if (opts.engine === 'settings') post('engine/info', { source: 'settings', version: '18.9.0', verified: false, expectedVersion: '18.18.9', path: 'D:\\tools\\omp-next\\omp.exe' });
     else if (opts.engine === 'installed') post('engine/info', { source: 'installed', version: '18.4.1', verified: false, path: 'C:\\Users\\dev\\AppData\\Local\\omp\\omp.exe' });
     postHistory(undefined, opts.sessions === 'error' ? 'The session list could not be read (mock failure).' : undefined);
     if (new URLSearchParams(window.location.search).get('taskApproval') === '1') post('permission/request', {

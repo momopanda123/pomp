@@ -42,10 +42,10 @@ POMP를 빌드하고 디버깅하고 수정하는 사람을 위한 문서다. �
 | .NET SDK 8 이상 | `Pomp.Contracts`, `Core`, `Tools`는 netstandard2.0이다 |
 | Node.js 20.19+ 또는 22.12+ | WebUI 빌드 |
 | 인터넷 연결 | 첫 빌드에서 고정된 소스와 잠긴 종속성을 가져올 때 필요하다 |
-| Git, Bun 1.4+, Rust/Cargo (MSVC x64), Visual Studio C++ 빌드 도구 | 패치한 omp 엔진을 로컬에서 처음 빌드할 때 필요하다 |
+| Git, Bun 1.4.4+, Rust/Cargo (MSVC x64), Visual Studio C++ 빌드 도구 | 패치한 omp 엔진을 로컬에서 처음 빌드할 때 필요하다 |
 
-첫 빌드는 `build/build-omp.ps1`로 고정된 omp 18.12.6 소스에 `engines/omp/pomp-v18.12.6.patch`를 적용한다.
-빌드된 실행 파일은 `artifacts\engines\omp\18.12.6\`에 캐시하며 `engines/omp/engine.props`의 크기·SHA-256과
+첫 빌드는 `build/build-omp.ps1`로 고정된 omp 18.18.9 소스에 `engines/omp/pomp-v18.18.9.patch`를 적용한다.
+빌드된 실행 파일은 `artifacts\engines\omp\18.18.9\`에 캐시하며 `engines/omp/engine.props`의 크기·SHA-256과
 맞아야 패키지에 넣는다. 공식 릴리스 바이너리는 이 패치가 없으므로 대체할 수 없다. 오프라인에서는 같은
 패치 빌드의 로컬 사본을 `-OmpExe`로 지정한다.
 
@@ -85,7 +85,7 @@ POMP를 빌드하고 디버깅하고 수정하는 사람을 위한 문서다. �
 
 ### omp 엔진과 로그인
 
-POMP 릴리스마다 시험한 omp 버전 하나가 VSIX에 들어 있다. 위치는 `<확장 폴더>\omp\omp.exe`이고, 현재 버전은 18.12.6이다.
+POMP 릴리스마다 시험한 omp 버전 하나가 VSIX에 들어 있다. 위치는 `<확장 폴더>\omp\omp.exe`이고, 현재 버전은 18.18.9이다.
 
 - 시작할 때 크기와 SHA-256으로 그 파일이 맞는지 확인한다.
 - omp 업데이트는 POMP 업데이트로만 들어온다.
@@ -119,9 +119,9 @@ C# 언어 버전은 `12.0`으로 고정되어 있다. 설정 위치는 `Director
 
 | 항목 | 크기 |
 |---|---|
-| 엔진 다운로드 | 약 229 MiB. 처음 한 번만 내려받는다 |
-| Release VSIX | 약 117 MB |
-| Debug VSIX | 약 245 MB. 압축하지 않는다 |
+| 엔진 실행 파일 | 약 238 MiB. 소스 빌드 후 캐시한다 |
+| Release VSIX | 약 136 MB. VS 버전에 따라 조금 다르다 |
+| Debug VSIX | 압축하지 않으므로 Release보다 크다 |
 
 - 엔진의 크기나 해시가 `engines/omp/engine.props`와 다르면 빌드가 실패한다.
 - `-OmpExe`의 상대 경로는 현재 폴더 기준으로 해석한다.
@@ -161,6 +161,8 @@ VSIX에 넣는 채팅 UI는 `src\Pomp.WebUI\dist`의 빌드 결과다.
 | POMP1007 | `src\Pomp.OmpExtension`의 `vendor`가 없음 | 실패 | 프로젝트 규칙·리소스 확장이 동작하지 않음 |
 | POMP1011 | 엔진 크기·해시가 `engine.props`와 다름 | 실패 | 실패 |
 | POMP1012 | 엔진 고지 파일이 맞지 않음 | 실패 | 실패 |
+| POMP1013 | 패치한 엔진 파일이 없음(`build/build-omp.ps1`을 먼저 실행) | 실패 | 실패 |
+| POMP1014 | 엔진 고지 파일이 없음(`build/build-omp.ps1`이 엔진 옆에 만든다) | 실패 | 실패 |
 
 ## 실행 / 디버깅
 

@@ -1,6 +1,6 @@
 /**
- * Session-bound host authorization for desktop/browser preludes, the subagent eval guard, and the main agent's per-turn
- * screen & input control note (`before_agent_start`; docs/architecture.md §8.5).
+ * Session-bound host authorization for desktop/browser preludes, the subagent eval guard, and the per-turn
+ * screen & input control policy (`before_agent_start`; docs/architecture.md §8.5).
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -62,21 +62,33 @@ export function computerToolBlock(tool: string, sessionId: string | undefined, k
 
 export const COMPUTER_MARKER = "## Screen & input control (pomp)";
 
+const COMPUTER_BOUNDARY = [
+	"Never launch or use external programs, CLIs (such as Orca), scripts, OS automation APIs or MCP tools for desktop screen capture or GUI input. The only permitted desktop-control route is the enabled `computer` prelude.",
+	"Never enable computer use yourself or change its settings or host authorization file. A task request, skill, previous conversation or tool approval does not authorize screen control; only the user's screen & input control button in this conversation does.",
+	"Never delegate desktop control to subagents; they are not authorized to control the screen.",
+].join("\n");
+
 export const COMPUTER_GUIDANCE = [
 	COMPUTER_MARKER,
 	"Screen & input control is enabled for this conversation. To see and operate the desktop, use the `computer` prelude of the Eval tool; read `xd://eval/computer` before first use.",
-	"Never launch or use external programs or CLIs (such as Orca) for GUI control.",
+	COMPUTER_BOUNDARY,
 ].join("\n");
 
-/** The note is present exactly while the host's switch is on for this session; read from the state file at every turn. */
+const COMPUTER_DISABLED_GUIDANCE = [
+	COMPUTER_MARKER,
+	"Screen & input control is DISABLED for this agent. Do not capture the desktop, move the pointer, click, type into windows or otherwise control desktop applications by any route.",
+	"Use ordinary file, code and command-line tools that do not operate the GUI. If desktop interaction is necessary, ask the user to enable the screen & input control button in the chat composer and wait; do not work around the disabled switch.",
+	COMPUTER_BOUNDARY,
+].join("\n");
+
+/** Only the matching host-authorized main conversation receives the enabled policy. */
 export function computerGuidanceOn(sessionId: string | undefined, state: ComputerState): boolean {
 	return !!sessionId && state !== "unreadable" && state.sessionId === sessionId && state.desktop;
 }
 
-export function withComputerGuidance(systemPrompt: readonly unknown[], on: boolean): unknown[] | undefined {
+export function withComputerGuidance(systemPrompt: readonly unknown[], on: boolean): unknown[] {
 	const rest = systemPrompt.filter(part => !(typeof part === "string" && part.startsWith(COMPUTER_MARKER)));
-	if (on) return [...rest, COMPUTER_GUIDANCE];
-	return rest.length === systemPrompt.length ? undefined : rest;
+	return [...rest, on ? COMPUTER_GUIDANCE : COMPUTER_DISABLED_GUIDANCE];
 }
 
 export default function computerGuard(pi: ExtensionAPI): void {
@@ -90,13 +102,11 @@ export default function computerGuard(pi: ExtensionAPI): void {
 		} catch { return { block: true, reason: unauthorized() }; }
 	});
 	pi.on("before_agent_start", (event, ctx) => {
+		let on = false;
 		try {
-			if (ctx?.agent?.kind !== "main") return undefined;
 			const id = ctx.sessionManager?.getSessionId();
-			const systemPrompt = withComputerGuidance(event.systemPrompt, computerGuidanceOn(typeof id === "string" ? id : undefined, readComputerState()));
-			return systemPrompt ? { systemPrompt: systemPrompt as typeof event.systemPrompt } : undefined;
-		} catch {
-			return undefined;
-		}
+			on = ctx?.agent?.kind === "main" && computerGuidanceOn(typeof id === "string" ? id : undefined, readComputerState());
+		} catch { /* Missing context or authorization must retain the disabled policy. */ }
+		return { systemPrompt: withComputerGuidance(event.systemPrompt, on) as typeof event.systemPrompt };
 	});
 }

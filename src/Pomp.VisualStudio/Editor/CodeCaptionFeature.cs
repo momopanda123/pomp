@@ -40,6 +40,11 @@ namespace Pomp.VisualStudio.Editor
         private Controller Get(IWpfTextView view) => view.Properties.GetOrCreateSingletonProperty(typeof(Controller), () => new Controller(view, Documents));
         public void TextViewCreated(IWpfTextView textView) => Get(textView);
 
+        internal static void Refresh(IWpfTextView view)
+        {
+            if (view.Properties.TryGetProperty(typeof(Controller), out Controller controller)) controller.Render();
+        }
+
         private sealed class Controller
         {
             /// <summary>Space between the end of the line's text and the caption.</summary>
@@ -164,7 +169,7 @@ namespace Pomp.VisualStudio.Editor
                 });
             }
             private void Clear() { targets = new Dictionary<int, EditorCaptionTarget>(); targetSnapshot = null; layer.RemoveAllAdornments(); }
-            private void Render()
+            internal void Render()
             {
                 if (closed || view.InLayout) return;
                 layer.RemoveAllAdornments();
@@ -181,7 +186,7 @@ namespace Pomp.VisualStudio.Editor
                     summary.IsEnabled = inference == null && PompServices.Current != null;
                     summary.Click += (_, __) => Describe(target);
                     panel.Children.Add(summary);
-                    var left = line.TextRight + Gap;
+                    var left = LiveEditFeature.GetLineControlsRight(view, line) + Gap;
                     if (summaries.TryGetValue(target.Start, out var text))
                         panel.Children.Add(new TextBlock { Text = text, Foreground = foreground, Opacity = .65, FontSize = 10, FontStyle = FontStyles.Italic, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0),
                             MaxWidth = Math.Max(160, view.ViewportRight - left - 70), TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = text });

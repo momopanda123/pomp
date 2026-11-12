@@ -28,6 +28,8 @@ interface SetupPanelProps {
   /** A permission request or question is open above this panel: keep focus and clicks out of it. */
   inert: boolean;
   /** The account tab is a page, never a closable modal. */
+  /** Opens the Remote tab (another PC's models): offered on the first-run page, where a PC without internet starts. */
+  onOpenRemote?: () => void;
 }
 
 /**
@@ -39,7 +41,7 @@ interface SetupPanelProps {
  * carries them; they are cleared as soon as that is posted and are never put into reducer state, storage, a log message or an
  * error text.
  */
-export function SetupPanel({ setup, replies, sessionModel, required, connected, locale, inert }: SetupPanelProps) {
+export function SetupPanel({ setup, replies, sessionModel, required, connected, locale, inert, onOpenRemote }: SetupPanelProps) {
   const t = useT();
   const id = useId();
   const panelRef = useRef<HTMLElement>(null);
@@ -119,6 +121,14 @@ export function SetupPanel({ setup, replies, sessionModel, required, connected, 
                 <Icon name="restart" size={12} />
                 {t('setup.restart')}
               </button>
+            </div>
+          )}
+
+          {required && onOpenRemote && (
+            <div className="setup-notice" role="note" data-testid="setup-remote-hint">
+              <Icon name="remote" size={13} />
+              <span className="setup-notice-text">{t('setup.remoteHint')}</span>
+              <button type="button" className="btn subtle" data-testid="setup-remote-open" disabled={inert} onClick={onOpenRemote}>{t('setup.remoteOpen')}</button>
             </div>
           )}
 

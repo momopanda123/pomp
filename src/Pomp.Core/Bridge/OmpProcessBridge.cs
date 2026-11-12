@@ -623,7 +623,9 @@ namespace Pomp.Bridge
                     if (ConnectionEnd.MentionsMissingModel(connection.StderrTail) || ConnectionEnd.MentionsMissingModel(new[] { ex.Message }))
                     {
                         return AttemptOutcome.Unrecoverable(
-                            PompLanguage.Pick("연결된 모델 공급자가 없어요. 계정 탭에서 로그인하거나 API 키를 추가하세요. (", "No model provider is connected. Sign in or add an API key in Accounts. (") + text + ")",
+                            PompLanguage.Pick(
+                                "연결된 모델 공급자가 없어요. 계정 탭에서 로그인하거나 API 키를 추가하거나, 원격 탭에서 다른 PC의 모델에 연결하세요. (",
+                                "No model provider is connected. Sign in or add an API key in Accounts, or connect to another PC's models in Remote. (") + text + ")",
                             BridgeFailureReasons.SetupRequired);
                     }
 

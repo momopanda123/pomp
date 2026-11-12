@@ -23,6 +23,7 @@ namespace Pomp.Features
         /// <summary>The servers travel to omp in one environment variable (Windows allows 32,767 characters).</summary>
         internal const int MaxLocalLaunchChars = 30000;
         private static readonly Regex LocalServerId = new Regex("^local-[a-z0-9-]{1,40}$", RegexOptions.CultureInvariant);
+        private static readonly Regex CertificatePem = new Regex("\\A-----BEGIN CERTIFICATE-----\\r?\\n([A-Za-z0-9+/=\\r\\n]+?)\\r?\\n?-----END CERTIFICATE-----\\r?\\n?\\z", RegexOptions.CultureInvariant);
 
         private string LocalFile => Path.Combine(Path.GetDirectoryName(_file)!, "local-models.json");
 
@@ -60,7 +61,7 @@ namespace Pomp.Features
                     if (key != null)
                     {
                         var bytes = Encoding.UTF8.GetBytes(key);
-                        try { entry["key"] = Convert.ToBase64String(Dpapi.Transform(bytes, false)); }
+                        try { entry["key"] = Convert.ToBase64String(Dpapi.Transform(bytes, false, KeyPurpose)); }
                         finally { Array.Clear(bytes, 0, bytes.Length); }
                     }
 
@@ -74,6 +75,51 @@ namespace Pomp.Features
                 {
                     // Never retain an exception whose text could contain credential material.
                     throw new ProviderSetupException(SetupText.Get("로컬 서버를 저장하지 못했습니다.", "The local server could not be saved."));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Saves the server another PC shares (docs: model sharing): the server whose address is <paramref name="address"/> gets the new key
+        /// and pinned certificate, else a new one named after the sharing PC (made unique) is added. Returns the server's name.
+        /// </summary>
+        public string SaveSharedServer(string? sharingName, string address, string key, string certificatePem)
+        {
+            ValidateAddress(address);
+            ValidateKey(key);
+            if (!ValidCertificatePem(certificatePem))
+                throw new ProviderSetupException(SetupText.Get("공유 PC의 인증서가 올바르지 않습니다.", "The sharing PC's certificate is invalid."));
+            // The sharing PC's own name, shown only after sanitizing (one line, at most 40 characters).
+            var baseName = SetupSanitize.Line(sharingName, 40) ?? SetupText.Get("다른 PC", "Shared PC");
+            lock (_lock)
+            {
+                try
+                {
+                    var servers = ReadLocalServers();
+                    var entry = servers.OfType<JObject>().FirstOrDefault(server => string.Equals((string?)server["address"], address, StringComparison.OrdinalIgnoreCase));
+                    if (entry == null)
+                    {
+                        var name = UniqueServerName(baseName, servers);
+                        entry = new JObject { ["id"] = NewServerId(name, servers), ["name"] = name, ["address"] = address };
+                        servers.Add(entry);
+                    }
+
+                    entry["savedUtc"] = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+                    entry["certificate"] = certificatePem;
+                    var bytes = Encoding.UTF8.GetBytes(key);
+                    try { entry["key"] = Convert.ToBase64String(Dpapi.Transform(bytes, false, KeyPurpose)); }
+                    finally { Array.Clear(bytes, 0, bytes.Length); }
+
+                    if (LaunchValue(servers).Length > MaxLocalLaunchChars)
+                        throw new ProviderSetupException(SetupText.Get("로컬 서버 목록이 너무 커서 더 저장할 수 없습니다.", "The local server list is too large to save more."));
+                    WriteLocalServers(servers);
+                    return (string)entry["name"]!;
+                }
+                catch (ProviderSetupException) { throw; }
+                catch (Exception)
+                {
+                    // Never retain an exception whose text could contain credential material.
+                    throw new ProviderSetupException(SetupText.Get("공유 모델 서버를 저장하지 못했습니다.", "The shared model server could not be saved."));
                 }
             }
         }
@@ -103,11 +149,48 @@ namespace Pomp.Features
         {
             lock (_lock)
             {
-                return new JArray(ReadLocalServers().OfType<JObject>().Select(server => new JObject
+                return new JArray(ReadLocalServers().OfType<JObject>().Select(server =>
                 {
-                    ["id"] = server["id"]!.DeepClone(), ["name"] = server["name"]!.DeepClone(), ["address"] = server["address"]!.DeepClone(),
-                    ["hasKey"] = server["key"] != null, ["savedUtc"] = server["savedUtc"]!.DeepClone(),
+                    var row = new JObject
+                    {
+                        ["id"] = server["id"]!.DeepClone(), ["name"] = server["name"]!.DeepClone(), ["address"] = server["address"]!.DeepClone(),
+                        ["hasKey"] = server["key"] != null, ["savedUtc"] = server["savedUtc"]!.DeepClone(),
+                    };
+                    // Saved from another PC's model sharing (a pinned certificate): the page marks it.
+                    if (server["certificate"] != null) row["shared"] = true;
+                    return row;
                 }));
+            }
+        }
+
+        /// <summary>The certificates pinned for shared servers, concatenated as one PEM bundle (null when no server has one).</summary>
+        public string? LocalServersCertificateBundle()
+        {
+            lock (_lock)
+            {
+                var pems = ReadLocalServers().OfType<JObject>().Select(server => (string?)server["certificate"]).Where(pem => pem != null)
+                    .Select(pem => pem!.Replace("\r\n", "\n").TrimEnd('\n') + "\n").Distinct(StringComparer.Ordinal).ToList();
+                return pems.Count == 0 ? null : string.Concat(pems);
+            }
+        }
+
+        /// <summary>
+        /// For an omp launch: writes the pinned certificates to <c>credentials\local-models-ca.pem</c> and points <c>NODE_EXTRA_CA_CERTS</c>
+        /// at it, so only the omp processes POMP starts trust the shared servers. Without pinned certificates nothing is set (never throws).
+        /// </summary>
+        public void ApplyLocalServersCertificates(System.Collections.Generic.IDictionary<string, string> environment)
+        {
+            var bundle = LocalServersCertificateBundle();
+            if (bundle == null) return;
+            var file = Path.Combine(Path.GetDirectoryName(_file)!, "local-models-ca.pem");
+            try
+            {
+                lock (_lock) AtomicFile.WriteAllText(file, bundle);
+                environment["NODE_EXTRA_CA_CERTS"] = file;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn("The shared model server certificates could not be written for the omp launch: " + ex.GetType().Name);
             }
         }
 
@@ -135,7 +218,7 @@ namespace Pomp.Features
                 {
                     try
                     {
-                        var bytes = Dpapi.Transform(Convert.FromBase64String((string)encrypted!), true);
+                        var bytes = Dpapi.Transform(Convert.FromBase64String((string)encrypted!), true, KeyPurpose);
                         try
                         {
                             var key = new UTF8Encoding(false, true).GetString(bytes);
@@ -163,6 +246,34 @@ namespace Pomp.Features
             var id = "local-" + slug;
             for (var n = 2; taken.Contains(id); n++) id = "local-" + slug + "-" + n.ToString(CultureInfo.InvariantCulture);
             return id;
+        }
+
+        /// <summary><paramref name="name"/>, or with <c>-2</c>, <c>-3</c>... when a server already has it (at most 40 characters).</summary>
+        private static string UniqueServerName(string name, JArray servers)
+        {
+            var taken = new System.Collections.Generic.HashSet<string>(servers.OfType<JObject>().Select(server => (string?)server["name"] ?? string.Empty), StringComparer.OrdinalIgnoreCase);
+            var candidate = name;
+            for (var n = 2; taken.Contains(candidate); n++)
+            {
+                var suffix = "-" + n.ToString(CultureInfo.InvariantCulture);
+                candidate = (name.Length + suffix.Length > 40 ? name.Substring(0, 40 - suffix.Length).TrimEnd() : name) + suffix;
+            }
+
+            return candidate;
+        }
+
+        /// <summary>Exactly one PEM <c>CERTIFICATE</c> block of at most 8 KB whose body is a DER sequence.</summary>
+        internal static bool ValidCertificatePem(string? pem)
+        {
+            if (pem == null || pem.Length > 8192) return false;
+            var match = CertificatePem.Match(pem);
+            if (!match.Success) return false;
+            try
+            {
+                var der = Convert.FromBase64String(Regex.Replace(match.Groups[1].Value, "\\s+", string.Empty));
+                return der.Length > 0 && der[0] == 0x30;
+            }
+            catch (FormatException) { return false; }
         }
 
         private static void ValidateServerName(string? name)
@@ -197,7 +308,8 @@ namespace Pomp.Features
                 {
                     if (!(token is JObject server) || server["id"]?.Type != JTokenType.String || !LocalServerId.IsMatch((string)server["id"]!) || !ids.Add((string)server["id"]!)
                         || server["name"]?.Type != JTokenType.String || server["address"]?.Type != JTokenType.String || server["savedUtc"]?.Type != JTokenType.String
-                        || (server["key"] != null && (server["key"]!.Type != JTokenType.String || ((string)server["key"]!).Length > 32768)))
+                        || (server["key"] != null && (server["key"]!.Type != JTokenType.String || ((string)server["key"]!).Length > 32768))
+                        || (server["certificate"] != null && (server["certificate"]!.Type != JTokenType.String || !ValidCertificatePem((string)server["certificate"]!))))
                         throw new InvalidDataException();
                     ValidateServerName((string)server["name"]!);
                     ValidateAddress((string)server["address"]!);

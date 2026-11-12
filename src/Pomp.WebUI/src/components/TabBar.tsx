@@ -6,10 +6,14 @@ import { Icon, type IconName } from './Icon';
 import { plainControls } from './RevealControls';
 import type { TabBadges } from '../tabBadges';
 
-export type ShellTab = 'chat' | 'work' | 'agents' | 'tools' | 'accounts';
+export type ShellTab = 'chat' | 'work' | 'agents' | 'tools' | 'remote' | 'accounts';
 const tabs: { id: ShellTab; icon: IconName }[] = [
-  { id: 'chat', icon: 'chat' }, { id: 'work', icon: 'work' }, { id: 'agents', icon: 'users' }, { id: 'tools', icon: 'tool' }, { id: 'accounts', icon: 'user' },
+  { id: 'chat', icon: 'chat' }, { id: 'work', icon: 'work' }, { id: 'agents', icon: 'users' }, { id: 'tools', icon: 'tool' }, { id: 'remote', icon: 'remote' },
+  { id: 'accounts', icon: 'user' },
 ];
+
+/** While omp has no model (first run), Accounts and Remote stay usable: a PC without internet gets its models through Remote. */
+export const availableWhileRequired = (tab: ShellTab): boolean => tab === 'accounts' || tab === 'remote';
 
 /**
  * `badges`: the red counts of what is new on Chat and Work (zero for the tab on screen); `accountAttention`: a red dot while an account
@@ -17,7 +21,7 @@ const tabs: { id: ShellTab; icon: IconName }[] = [
  * (docs/screen-guide.md "탭 막대").
  */
 export function TabBar({ active, onChange, bridge, required, badges, accountAttention, inert, engine = null }: {
-  active: ShellTab; onChange: (tab: ShellTab) => void; bridge: BridgeStatePayload; required: boolean;
+  active: ShellTab; onChange: (tab: ShellTab, byKeys?: boolean) => void; bridge: BridgeStatePayload; required: boolean;
   badges: TabBadges; accountAttention: boolean; inert: boolean; engine?: EngineInfo | null;
 }) {
   const t = useT();
@@ -37,10 +41,10 @@ export function TabBar({ active, onChange, bridge, required, badges, accountAtte
     const target = event.target as HTMLElement;
     if (target.getAttribute('role') !== 'tab' || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    const enabled = tabs.filter(tab => !required || tab.id === 'accounts');
+    const enabled = tabs.filter(tab => !required || availableWhileRequired(tab.id));
     const index = enabled.findIndex(tab => tab.id === target.dataset.tab);
     const next = event.key === 'Home' ? enabled[0]! : event.key === 'End' ? enabled.at(-1)! : enabled[(index + (event.key === 'ArrowRight' ? 1 : -1) + enabled.length) % enabled.length]!;
-    onChange(next.id); root.current?.querySelector<HTMLButtonElement>(`[data-tab="${next.id}"]`)?.focus();
+    onChange(next.id, true); root.current?.querySelector<HTMLButtonElement>(`[data-tab="${next.id}"]`)?.focus();
   };
   const engineLine = engine ? engineSummary(t, engine) : null;
   const status = required ? t('bridge.setupRequired') : bridge.state === 'failed' && bridge.reason === WORKSPACE_TRUST_REQUIRED ? t('bridge.trustRequired') : t(`bridge.${bridge.state}`);
@@ -48,7 +52,7 @@ export function TabBar({ active, onChange, bridge, required, badges, accountAtte
     <div className="shell-tabs" role="tablist" aria-label="POMP" onKeyDown={keys}>
       {tabs.map(tab => {
         const label = t(`tab.${tab.id}`);
-        const disabled = required && tab.id !== 'accounts';
+        const disabled = required && !availableWhileRequired(tab.id);
         const count = tab.id === 'chat' ? badges.chat : tab.id === 'work' ? badges.work : 0;
         const dot = active !== tab.id && tab.id === 'accounts' && accountAttention;
         const shown = count > 99 ? '99+' : String(count);

@@ -783,6 +783,29 @@ button.acct-toggle > .acct-who {
   overflow-wrap: anywhere;
 }
 
+/* Model sharing: the address and one-time code to enter on the other PC, the connected PCs, and the connect form on that PC. */
+.share-block { gap: 8px; }
+.share-block + .share-block, .share-block + .share-clients, .share-clients + .share-block { border-top: 1px solid var(--pomp-border); }
+.share-block .hint { overflow-wrap: anywhere; }
+.share-starting { display: inline-flex; align-items: center; gap: 6px; }
+.share-info-title { font-weight: 600; }
+.share-info-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.share-info-label { flex: 0 0 auto; min-width: 6em; color: var(--pomp-muted-fg); font-size: .92em; }
+.share-info-value { flex: 1 1 10em; min-width: 0; overflow-wrap: anywhere; user-select: all; }
+.share-code { font-size: 1.08em; font-weight: 600; letter-spacing: .04em; }
+.share-code-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
+.share-code-foot > .hint { flex: 1 1 12em; min-width: 0; }
+.share-code-foot > .btn { margin-left: auto; }
+/* The switch's state is a pill already: no count frame around it, and it follows the title (the switch stays at the right). */
+.share-section .view-section-status { padding: 0; border: 0; }
+.share-section .view-section-heading { flex: 0 1 auto; }
+/* Saved: a green check left of Save, no sentence (its name is for screen readers). */
+.share-saved { display: inline-flex; align-items: center; color: var(--pomp-success); }
+.share-clients { display: flex; flex-direction: column; min-width: 0; }
+.share-clients-empty { gap: 4px; }
+.share-confirm { margin: 0 10px 10px; }
+.share-client-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Narrow pane: the panel is the whole pane (no margin, no frame), with tighter padding. */
 @media (max-width: 360px) {
   .setup-panel {

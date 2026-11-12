@@ -109,7 +109,8 @@ namespace Pomp.Hosting
         /// or "Ctrl+Enter".
         /// </summary>
         public static UiShortcutsPayload NormalizePayload(string? send, string? sendTargetPicker, string? permissionMode, string? allow, string? deny, string? permissionsView, string? toggleFocus = null,
-            string? previousTarget = null, string? nextTarget = null, string? contextBasket = null, string? editorContext = null, string? liveFollow = null, string? liveBookmarks = null)
+            string? previousTarget = null, string? nextTarget = null, string? contextBasket = null, string? editorContext = null, string? liveFollow = null, string? liveBookmarks = null,
+            string? previousChatTab = null, string? nextChatTab = null)
         {
             var defaults = new UiShortcutsPayload();
             return new UiShortcutsPayload
@@ -118,6 +119,8 @@ namespace Pomp.Hosting
                 SendTargetPicker = Chord(sendTargetPicker, defaults.SendTargetPicker),
                 PreviousTarget = previousTarget == null ? defaults.PreviousTarget : Chord(previousTarget, defaults.PreviousTarget),
                 NextTarget = nextTarget == null ? defaults.NextTarget : Chord(nextTarget, defaults.NextTarget),
+                PreviousChatTab = previousChatTab == null ? defaults.PreviousChatTab : Chord(previousChatTab, defaults.PreviousChatTab),
+                NextChatTab = nextChatTab == null ? defaults.NextChatTab : Chord(nextChatTab, defaults.NextChatTab),
                 ContextBasket = contextBasket == null ? defaults.ContextBasket : Chord(contextBasket, defaults.ContextBasket),
                 EditorContext = editorContext == null ? defaults.EditorContext : Chord(editorContext, defaults.EditorContext),
                 LiveFollow = liveFollow == null ? defaults.LiveFollow : Chord(liveFollow, defaults.LiveFollow),

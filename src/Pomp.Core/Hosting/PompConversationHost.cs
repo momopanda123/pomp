@@ -9,6 +9,7 @@ using Pomp.Adapters;
 using Pomp.Bridge;
 using Pomp.Diagnostics;
 using Pomp.Features;
+using Pomp.Features.ModelShare;
 using Pomp.Internal;
 using Pomp.Tools;
 using Pomp.Ui;
@@ -36,10 +37,17 @@ namespace Pomp.Hosting
         private bool _disposed;
         private CancellationTokenSource _workspaceEpoch = new CancellationTokenSource();
         private CancellationTokenSource? _workspaceDebounce;
+        // Every tab's engine starts from the same saved accounts and model servers: one change makes all of them stale.
+        private readonly CredentialEpoch _credentialEpoch = new CredentialEpoch();
 
         public PompConversationHost(IPompSettings settings, IPompHostEnvironment environment, IVsAdapterFactory adapters,
             IPompLogger logger, Func<ICustomToolRegistry> registry, IOmpProcessLauncher? launcher = null)
-            : this(settings, environment, adapters, logger, registry, launcher, null) { }
+            : this(settings, environment, adapters, logger, registry, launcher, (PompSessionOptions?)null) { }
+
+        /// <summary>Like the main constructor, with this PC's model sharing for the Accounts tab (owned and disposed by the caller).</summary>
+        public PompConversationHost(IPompSettings settings, IPompHostEnvironment environment, IVsAdapterFactory adapters,
+            IPompLogger logger, Func<ICustomToolRegistry> registry, IOmpProcessLauncher? launcher, ModelShareService? modelShare)
+            : this(settings, environment, adapters, logger, registry, launcher, modelShare == null ? null : new PompSessionOptions { ModelShare = modelShare }) { }
 
         internal PompConversationHost(IPompSettings settings, IPompHostEnvironment environment, IVsAdapterFactory adapters,
             IPompLogger logger, Func<ICustomToolRegistry> registry, IOmpProcessLauncher? launcher, PompSessionOptions? options)
@@ -53,6 +61,8 @@ namespace Pomp.Hosting
             _options = options;
             _tabs = new ConversationTabStore(environment.DataDirectory, _logger);
             _tabCommands = new SerialQueue(_logger);
+            _credentialEpoch.Advanced += OnCredentialsAdvanced;
+            _credentialEpoch.ModelListsChanged += OnModelListsChanged;
             _active = CreateChild();
             try { _adapters.Solution.SolutionChanged += OnSolutionChanged; }
             catch (Exception ex) { _logger.Warn("Could not subscribe to workspace changes: " + ex.Message); }
@@ -69,7 +79,7 @@ namespace Pomp.Hosting
 
         private PompSession CreateChild()
         {
-            var session = new PompSession(_settings, _environment, _adapters, _registry(), _logger, _launcher, _options, managedWorkspace: true);
+            var session = new PompSession(_settings, _environment, _adapters, _registry(), _logger, _launcher, _options, managedWorkspace: true, credentialEpoch: _credentialEpoch);
             session.KnowledgeChanged += OnKnowledgeChanged;
             session.ConversationStateChanged += OnConversationStateChanged;
             _channels.Add(session, new Channel(this, session));
@@ -77,7 +87,38 @@ namespace Pomp.Hosting
         }
 
         private void OnKnowledgeChanged(object? sender, EventArgs e) => KnowledgeChanged?.Invoke(this, e);
-        private void OnConversationStateChanged(object? sender, EventArgs e) => PublishTabs();
+        private void OnConversationStateChanged(object? sender, EventArgs e)
+        {
+            PublishTabs();
+            // A background tab whose run just ended may still have the old accounts and model servers.
+            if (sender is PompSession session && !ReferenceEquals(session, ActiveSession)) session.RestartIfCredentialsStale();
+        }
+
+        /// <summary>
+        /// Saved keys, model servers or sign-ins changed in the selected tab: every tab shows whether its own engine needs a restart, and
+        /// the other tabs' idle engines restart right away (a busy one when its run ends), so each tab's model list has the change.
+        /// </summary>
+        private void OnCredentialsAdvanced(object? sender, EventArgs e)
+        {
+            PompSession[] sessions; PompSession active;
+            lock (_gate) { if (_disposed) return; sessions = _channels.Keys.ToArray(); active = _active; }
+            Task.Run(() =>
+            {
+                foreach (var session in sessions)
+                {
+                    session.PublishSetupState();
+                    if (!ReferenceEquals(session, active)) session.RestartIfCredentialsStale();
+                }
+            }).Forget(_logger, "apply the changed accounts to the other tabs");
+        }
+
+        /// <summary>A sign-in in one tab is live for every engine (they read the same omp profile): the other tabs ask theirs for the list again.</summary>
+        private void OnModelListsChanged(object? sender, EventArgs e)
+        {
+            PompSession[] sessions;
+            lock (_gate) { if (_disposed) return; sessions = _channels.Keys.ToArray(); }
+            Task.Run(() => { foreach (var session in sessions) session.ForgetModelList(sender); }).Forget(_logger, "refresh the other tabs' model lists");
+        }
 
         public void AttachUi(IUiChannel channel)
         {
@@ -431,6 +472,8 @@ namespace Pomp.Hosting
             }
             KnowledgeChanged?.Invoke(this, EventArgs.Empty);
             PublishTabs();
+            // The tab left behind may still run with accounts or model servers from before a change.
+            previous.RestartIfCredentialsStale();
         }
 
         private void RemoveChild(PompSession child)
@@ -487,6 +530,8 @@ namespace Pomp.Hosting
                 _page = null;
                 children = _channels.Keys.ToArray();
             }
+            _credentialEpoch.Advanced -= OnCredentialsAdvanced;
+            _credentialEpoch.ModelListsChanged -= OnModelListsChanged;
             try { _adapters.Solution.SolutionChanged -= OnSolutionChanged; }
             catch (Exception ex) { _logger.Warn("Could not unsubscribe from workspace changes: " + ex.Message); }
             _workspaceDebounce?.Dispose();

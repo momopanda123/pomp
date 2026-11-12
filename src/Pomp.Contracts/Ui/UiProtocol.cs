@@ -304,6 +304,12 @@ namespace Pomp.Ui
         /// <summary>Makes the next agent or team of the send-target list the composer's target (after the last, back to the chat's partner).</summary>
         public string NextTarget { get; set; } = "Alt+.";
 
+        /// <summary>Activates the previous chat tab (from the first, the last), also while typing in the message input.</summary>
+        public string PreviousChatTab { get; set; } = "Ctrl+PageUp";
+
+        /// <summary>Activates the next chat tab (after the last, the first), also while typing in the message input.</summary>
+        public string NextChatTab { get; set; } = "Ctrl+PageDown";
+
         /// <summary>Opens or closes the composer's context basket on its first file (arrow keys move between the files, Space checks one).</summary>
         public string ContextBasket { get; set; } = "Alt+;";
 

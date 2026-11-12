@@ -26,8 +26,8 @@ namespace Pomp.Bridge
 
         private const int MaxDescribedStderrChars = 800;
 
-        /// <summary>omp's start-up error when no model/provider is configured.</summary>
-        private const string NoModelsMarker = "No models available";
+        /// <summary>omp's start-up errors when no model/provider is configured: the older wording and 18.12's.</summary>
+        private static readonly string[] NoModelsMarkers = { "No models available", "No default model selected" };
 
         public ConnectionEnd(int? exitCode, IReadOnlyList<string> stderrTail, string? killReason = null)
         {
@@ -73,7 +73,9 @@ namespace Pomp.Bridge
 
             if (MentionsMissingModel(StderrTail))
             {
-                text.Append(PompLanguage.Pick(". 연결된 모델 공급자가 없어요. 계정 탭에서 로그인하거나 API 키를 추가한 뒤 다시 시작하세요.", ". No model provider is connected. Sign in or add an API key in Accounts, then restart."));
+                text.Append(PompLanguage.Pick(
+                    ". 연결된 모델 공급자가 없어요. 계정 탭에서 로그인하거나 API 키를 추가하거나, 원격 탭에서 다른 PC의 모델에 연결한 뒤 다시 시작하세요.",
+                    ". No model provider is connected. Sign in or add an API key in Accounts, or connect to another PC's models in Remote, then restart."));
             }
 
             return text.ToString();
@@ -96,7 +98,7 @@ namespace Pomp.Bridge
         }
 
         internal static bool MentionsMissingModel(IReadOnlyList<string> lines) =>
-            lines.Any(line => line != null && line.IndexOf(NoModelsMarker, StringComparison.OrdinalIgnoreCase) >= 0);
+            lines.Any(line => line != null && NoModelsMarkers.Any(marker => line.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0));
 
         /// <summary>omp's start-up refusal of an unknown <c>--model</c>: <c>Model "provider/id" not found</c>.</summary>
         internal static bool MentionsUnknownModel(IReadOnlyList<string> lines) =>
@@ -452,7 +454,9 @@ namespace Pomp.Bridge
             }
 
             return PompLanguage.Pick(" (오류: ", " (stderr: ") + summary + ")"
-                + (ConnectionEnd.MentionsMissingModel(tail) ? PompLanguage.Pick(". 연결된 모델 공급자가 없어요. 계정 탭에서 로그인하거나 API 키를 추가하세요.", ". No model provider is connected. Sign in or add an API key in Accounts.") : string.Empty);
+                + (ConnectionEnd.MentionsMissingModel(tail) ? PompLanguage.Pick(
+                    ". 연결된 모델 공급자가 없어요. 계정 탭에서 로그인하거나 API 키를 추가하거나, 원격 탭에서 다른 PC의 모델에 연결하세요.",
+                    ". No model provider is connected. Sign in or add an API key in Accounts, or connect to another PC's models in Remote.") : string.Empty);
         }
 
         private string EnsureId(JObject command)

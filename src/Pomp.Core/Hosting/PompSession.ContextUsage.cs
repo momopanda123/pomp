@@ -63,7 +63,8 @@ namespace Pomp.Hosting
                 {
                     case "system prompt": result.SystemPrompt = tokens; break;
                     case "system tools": result.SystemTools = tokens; break;
-                    case "system context": result.SystemContext = tokens; break;
+                    case "system context":
+                    case "instruction files": result.SystemContext += tokens; break;
                     case "skills": result.Skills = tokens; break;
                     case "messages": result.Messages = tokens; messagesRow = true; break;
                     case "auto-compact buf":

@@ -1,7 +1,7 @@
 import { addAttachments, dismissMention, emptyComposer, fileFromAttachment, fileIdentity, receiveFiles, selectMention, updateMention, withoutMentions, type ComposerState } from './composerState';
 import { localeFromHost, makeTranslate, type Locale } from './i18n';
 import { dialogTitle, permissionTitle } from './requestTitle';
-import type { AgentHistoryState, CommandReply, QueueState, TabsState } from './conversationProtocol';
+import type { AgentHistoryState, CommandReply, ConversationPartner, QueueState, TabsState } from './conversationProtocol';
 import { normalizeSetup, recordReply, type SetupReply, type SetupState } from './setup';
 import type {
   AdvisorNote,
@@ -192,6 +192,10 @@ export interface AppState {
   session: SessionInfoPayload | null;
   items: TranscriptItem[];
   composer: ComposerState;
+  /** The chat tab `composer` belongs to (`tabKey`): every tab keeps its own input text and context basket. */
+  composerTab: string;
+  /** The drafts of the other chat tabs by `tabKey` (this page's memory only). */
+  drafts: Record<string, ComposerState>;
   /** Locally handed-off sends not yet matched to turnStarted; survives transcript replay independently of phase. */
   pendingSends: UserItem[];
   /** Deliberate busy sends stay outside the transcript until the host starts them. */
@@ -215,6 +219,8 @@ export interface AppState {
    * reports "completed" (omp may refuse or an extension may cancel); Send and New session stay disabled meanwhile.
    */
   pendingNewSession: string | undefined;
+  /** The pending request when it starts a new conversation (session/new: /new, New conversation), not a tab or saved-conversation switch. */
+  newConversationRequest: string | undefined;
   permissions: PendingPermission[];
   dialogs: PendingDialog[];
   /** Requests answered since the queue was last empty: drives the "2 / 3" counter of queued dialogs. */
@@ -268,6 +274,8 @@ export const initialState: AppState = {
   session: null,
   items: [],
   composer: emptyComposer,
+  composerTab: 'main',
+  drafts: {},
   pendingSends: [],
   pendingQueued: [],
   replaying: false,
@@ -277,6 +285,7 @@ export const initialState: AppState = {
   phase: 'idle',
   activePromptId: undefined,
   pendingNewSession: undefined,
+  newConversationRequest: undefined,
   permissions: [],
   dialogs: [],
   permissionDone: 0,
@@ -326,8 +335,8 @@ export type Action =
   | { type: 'attachmentReorder'; fullPath: string; beforePath?: string }
   | { type: 'attachmentRemove'; fullPath: string }
   | { type: 'dialogDraft'; requestId: string; text: string }
-  /** `session/new` was posted: wait for the host's `session/newResult` before touching the transcript. */
-  | { type: 'newSessionRequested'; requestId: string }
+  /** session/new (`fresh`), a tab switch or a saved conversation was posted: wait for the host's `session/newResult` before touching the transcript. */
+  | { type: 'newSessionRequested'; requestId: string; fresh?: boolean }
   /** A notice created by the page itself (nothing reached the host). */
   | { type: 'localNotice'; level: Level; message: string }
   | { type: 'permissionAnswered'; requestId: string; outcome: RequestOutcome; at: number }
@@ -447,13 +456,34 @@ function withItem(state: AppState, build: (key: string) => TranscriptItem, items
   return { ...state, items: [...items, build(`n:${state.seq}`)], seq: state.seq + 1 };
 }
 
+/** A chat tab's key: the Default (POMP) tab, or the agent/team tab of `partner`. */
+function tabKey(partner: ConversationPartner | undefined): string {
+  return partner && partner.kind !== 'main' ? `${partner.kind}:${partner.id ?? ''}` : 'main';
+}
+
+/** The input of chat tab `key`: the draft on screen stays with its own tab, `key`'s comes back (empty the first time). */
+function draftFor(state: AppState, key: string): AppState {
+  if (key === state.composerTab) return state;
+  const drafts = { ...state.drafts };
+  const leaving: ComposerState = { ...state.composer, mention: null, pickerRequestId: undefined, composing: false };
+  if (leaving.text || leaving.attachments.length > 0) drafts[state.composerTab] = leaving;
+  else delete drafts[state.composerTab];
+  const composer = drafts[key] ?? emptyComposer;
+  delete drafts[key];
+  return { ...state, composer, composerTab: key, drafts };
+}
+
 /**
- * What a completed new session clears: the transcript, the turn in progress and every question that waits for an answer.
+ * What a completed session change clears: the transcript, the turn in progress and every question that waits for an answer; for a
+ * `fresh` (new) conversation also the context basket.
  * Keep the latest session/info: the host may have already published the new session before its correlated result.
  */
-function clearedForNewSession(state: AppState): AppState {
+function clearedForNewSession(state: AppState, fresh: boolean): AppState {
   return {
     ...state,
+    // A new conversation starts without the previous one's context basket (text being typed stays). A tab switch keeps it: the tab's
+    // own input goes with the tab (conversation/tabsState, which follows the result).
+    composer: fresh ? { ...state.composer, attachments: [], fileError: undefined } : state.composer,
     items: [],
     pendingSends: [],
     pendingQueued: [],
@@ -483,7 +513,16 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
       return { ...state, activeRules: payload.rules.filter(rule => rule && typeof rule.name === 'string' && typeof rule.file === 'string')
         .map(rule => ({ name: rule.name, file: rule.file, always: rule.always === true, globs: Array.isArray(rule.globs) ? rule.globs.filter(glob => typeof glob === 'string') : [] })) };
     }
-    case 'conversation/tabsState': return { ...state, tabs: msg.payload };
+    case 'conversation/tabsState': {
+      const next = draftFor({ ...state, tabs: msg.payload }, tabKey(msg.payload.partner));
+      // A closed tab's input goes with it.
+      const open = new Set(['main', ...(msg.payload.tabs ?? []).map(tab => tabKey(tab.partner))]);
+      const closed = Object.keys(next.drafts).filter(key => !open.has(key));
+      if (closed.length === 0) return next;
+      const drafts = { ...next.drafts };
+      for (const key of closed) delete drafts[key];
+      return { ...next, drafts };
+    }
     case 'chat/queueState': return { ...state, queue: msg.payload };
     case 'agents/historyState': return { ...state, agentHistory: msg.payload };
     case 'conversation/tabReply':
@@ -535,7 +574,10 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
     case 'composer/prefill': {
       // A target (the editor menu's "to agent or team") becomes the one-message send target; App shows the main conversation for it.
       const payload = boundedPrefill(msg.payload);
-      return { ...state, prefill: { payload, seq: (state.prefill?.seq ?? 0) + 1 }, selectedTarget: payload.target ?? state.selectedTarget };
+      // A request for the main conversation (sent, aimed at an agent or team, or picking one) belongs to the Default (POMP) tab, which App
+      // shows for it: its files and text go into that tab's draft, not into the tab on screen.
+      const base = payload.send || payload.target || payload.pickTarget ? draftFor(state, 'main') : state;
+      return { ...base, prefill: { payload, seq: (state.prefill?.seq ?? 0) + 1 }, selectedTarget: payload.target ?? state.selectedTarget };
     }
     case 'knowledge/draft': {
       const payload = boundedKnowledgeDraft(msg.payload);
@@ -974,7 +1016,10 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
       if (requestId != null && requestId !== state.pendingNewSession) return state;
       const pendingNewSession = requestId != null ? undefined : state.pendingNewSession;
       // The matched request (or a host command with no id) replaced the session: the old transcript is no longer context.
-      if (status === 'completed') return { ...clearedForNewSession(state), pendingNewSession };
+      if (status === 'completed') {
+        const fresh = requestId == null || requestId === state.newConversationRequest;
+        return { ...clearedForNewSession(state, fresh), pendingNewSession, newConversationRequest: requestId != null ? undefined : state.newConversationRequest };
+      }
       // Failed / cancelled: nothing changed on the omp side, so the conversation stays as it is; tell the user why.
       const t = makeTranslate(state.locale);
       const cancelled = status === 'cancelled';
@@ -1170,7 +1215,8 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'newSessionRequested':
       // One request at a time (the button is disabled meanwhile, and the handler checks before posting).
-      return state.pendingNewSession === undefined ? { ...state, pendingNewSession: action.requestId } : state;
+      return state.pendingNewSession === undefined
+        ? { ...state, pendingNewSession: action.requestId, newConversationRequest: action.fresh ? action.requestId : undefined } : state;
 
     case 'localNotice':
       return withItem(state, (key) => ({ kind: 'notice', key, level: action.level, message: action.message }));

@@ -447,7 +447,9 @@ function ModelPickersView({ session, setup, replies, connected, locale, variant,
     setQuery('');
     setOpen(kind);
     if (kind === 'model') {
-      if (!models || setup?.modelsError) requestModels();
+      // Saved model servers (another PC's share among them) can change while the list is shown: they are read again on every open,
+      // the last list staying in view meanwhile.
+      if (!models || setup?.modelsError || (setup?.localServers.length ?? 0) > 0) requestModels();
       // The header shows the usage of the current model's provider; ask for it when it is missing (at most once a minute).
       if (claimUsageRequest(setup?.usage, setup?.usageLoading === true, Date.now())) {
         post('usage', (requestId) => ({ requestId, action: 'listUsage' }), undefined, USAGE_REPLY_TIMEOUT_MS);

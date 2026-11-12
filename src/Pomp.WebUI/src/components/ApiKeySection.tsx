@@ -7,7 +7,7 @@ import { Icon } from './Icon';
 import { Note } from './Note';
 import { revealControls } from './RevealControls';
 import { AccountKindBadge } from './AccountsSection';
-import { ViewSection } from './ViewSection';
+import { SectionRefresh, ViewSection } from './ViewSection';
 import { Actions, Badge, Cell, DataTable, Field, FormActions, IconButton, Pager, Row, SearchBox, Toolbar, matches, refocus, usePaged } from './ui';
 
 interface ApiKeySectionProps {
@@ -127,13 +127,20 @@ export function ApiKeySection({ setup, cmd, locale, inert, defaultOpen }: ApiKey
   const shownRows = useMemo(() => savedRows.filter((row) => row.kind === 'key' ? matches(query, row.name, row.saved.envVar) : matches(query, row.server.name, row.server.address)), [savedRows, query]);
   const paged = usePaged(shownRows, query, SAVED_PAGE);
   const saved = cmd.feedback('saveKey').done || cmd.feedback('saveLocalServer').done;
+  // Reads the saved servers' model lists again (another PC that stopped sharing a provider, a server that loaded a model) and the
+  // saved keys; the other chat tabs read theirs when their model list is next shown.
+  const refreshing = cmd.feedback('models').pending;
 
   return (
     <ViewSection sectionKey="setup-key" className="setup-section key-section" title={t('setup.key.title')} headingId={titleId} aria-labelledby={titleId} data-testid="setup-key"
       status={savedCount} bodyClassName="ui-flush"
-      actions={<button type="button" className="btn small" data-testid="key-toggle" aria-expanded={open} disabled={inert || open} onClick={openForm}>
-        <Icon name="plus" size={12} />{ko ? '키 추가' : 'Add key'}
-      </button>}>
+      actions={<>
+        <SectionRefresh testId="key-refresh" label={t('setup.key.refresh')} disabled={inert || refreshing}
+          onClick={() => cmd.post('models', (requestId) => ({ requestId, action: 'refreshModels' }))} />
+        <button type="button" className="btn small" data-testid="key-toggle" aria-expanded={open} disabled={inert || open} onClick={openForm}>
+          <Icon name="plus" size={12} />{ko ? '키 추가' : 'Add key'}
+        </button>
+      </>}>
 
       {open && (keyProvider || local) && (
         <form className="ui-form key-form" autoComplete="off" noValidate onSubmit={saveKey} data-testid="key-form"
@@ -215,13 +222,16 @@ export function ApiKeySection({ setup, cmd, locale, inert, defaultOpen }: ApiKey
 
   /** A saved local model server: name, address, edit and delete. */
   function localRow(server: SetupLocalServer) {
-    const date = formatSavedDate(server.savedUtc, locale);
+    // Another PC's server is its address alone (the Remote tab shows no dates either); a server the user runs keeps its saved date.
+    const date = server.shared ? '' : formatSavedDate(server.savedUtc, locale);
     const removal = cmd.sent.removeLocalServer?.tag === server.id ? cmd.feedback('removeLocalServer') : undefined;
     return (
       <Row key={server.id} testId={`saved-local-${server.id}`}>
         <Cell className="key-provider-cell">
           <span className="key-provider-text">
-            <span className="key-provider-name"><strong>{revealControls(server.name)}</strong><Badge>{t('setup.local.badge')}</Badge>{server.hasKey && <AccountKindBadge kind="apiKey" />}</span>
+            <span className="key-provider-name"><strong>{revealControls(server.name)}</strong>{server.shared
+              ? <Badge tone="info" icon="screen" testId={`shared-badge-${server.id}`}>{t('setup.local.sharedBadge')}</Badge>
+              : <Badge>{t('setup.local.badge')}</Badge>}{server.hasKey && !server.shared && <AccountKindBadge kind="apiKey" />}</span>
             <span className="ui-sub ui-mono" title={server.address}>{revealControls([server.address, date].filter(Boolean).join(' · '))}</span>
             {removal?.error && <span className="ui-sub ui-err" role="alert">{revealControls(removal.error)}</span>}
           </span>

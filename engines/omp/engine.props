@@ -3,15 +3,14 @@
     Every POMP VSIX ships this locally patched omp build. The version, size and hash are verified at build time and at startup;
     the official upstream executable cannot be substituted. The upstream tag/commit and patch are pinned in build/build-omp.ps1.
     To update omp, rebuild from the new pinned source and patch, verify behavior, then update the size, hash and provenance together.
-    The official release URL is used only for the separately hashed THIRD-PARTY-NOTICES.txt.
+    PompOmpNoticesSha256 pins the notices build/build-omp.ps1 composes from the tag (the text of omp's license option).
   -->
   <PropertyGroup>
-    <PompOmpVersion>18.12.6</PompOmpVersion>
-    <PompOmpReleaseUrl>https://github.com/can1357/oh-my-pi/releases/download/v18.12.6/</PompOmpReleaseUrl>
+    <PompOmpVersion>18.18.9</PompOmpVersion>
     <PompOmpAsset>omp.exe</PompOmpAsset>
-    <PompOmpSource>oh-my-pi@45c35e40c46166dc726ccc52f5d27f40f2449f99 + engines/omp/pomp-v18.12.6.patch</PompOmpSource>
-    <PompOmpSha256>ad4651ef95cb3c99f3629e2c4b935fc3e511e666754cf9e1df6a2704427a0461</PompOmpSha256>
-    <PompOmpSize>243010048</PompOmpSize>
-    <PompOmpNoticesSha256>768612d40a4d1788813b997b011290d0f08c426add452de6560bf227cd1fc29d</PompOmpNoticesSha256>
+    <PompOmpSource>oh-my-pi@50da2d357039404a81d7c64622740ce13e4c54b4 + engines/omp/pomp-v18.18.9.patch</PompOmpSource>
+    <PompOmpSha256>126065f5b0d685e7105331e9a7dc9a03bf29b3cedaf8b56810395a28f99fe933</PompOmpSha256>
+    <PompOmpSize>249927168</PompOmpSize>
+    <PompOmpNoticesSha256>79f72708ec1358dfad73591c51e2305494a7f9fd3798325da658317dd0cae315</PompOmpNoticesSha256>
   </PropertyGroup>
 </Project>

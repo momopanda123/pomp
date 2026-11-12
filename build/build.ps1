@@ -14,7 +14,7 @@
        (<version> = the <Version> of Directory.Build.props, the same number the manifests carry).
 
     Every VSIX ships the locally patched omp engine pinned in engines\omp\engine.props (version, size, SHA-256).
-    If the cache is missing or mismatched, this script builds the pinned upstream source plus engines\omp\pomp-v18.12.6.patch
+    If the cache is missing or mismatched, this script builds the pinned upstream source plus engines\omp\pomp-v18.18.9.patch
     with build\build-omp.ps1. Git, Bun, Rust/Cargo and Visual Studio C++ build tools are required for a clean build.
 
     Works in Windows PowerShell 5.1 and PowerShell 7.

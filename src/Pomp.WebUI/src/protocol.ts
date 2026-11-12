@@ -73,6 +73,9 @@ export interface PageShortcuts {
   /** The previous / next agent or team of that list becomes the target (past either end: the chat's partner again). */
   previousTarget: string;
   nextTarget: string;
+  /** Activates the previous / next chat tab (wrapping around), also while typing in the message input. */
+  previousChatTab: string;
+  nextChatTab: string;
   /** Opens or closes the composer's context basket (arrow keys move between its files, Space checks one). */
   contextBasket: string;
   /** Turns "include editor context" on or off. */
@@ -91,7 +94,7 @@ export interface PageShortcuts {
   /** Moves the focus back to the editor; the page sends `ui/toggleFocus` itself (keys inside the WebView never reach Visual Studio). */
   toggleFocus: string;
 }
-export const DEFAULT_SHORTCUTS: PageShortcuts = { send: 'Enter', sendTargetPicker: 'Ctrl+Alt+T', previousTarget: 'Alt+,', nextTarget: 'Alt+.', contextBasket: 'Alt+;', editorContext: "Alt+'", liveFollow: 'Alt+L', liveBookmarks: 'Alt+K', permissionMode: 'Alt+Q', allow: 'Alt+A', deny: 'Alt+D', permissionsView: 'Ctrl+Alt+P', toggleFocus: 'Alt+J' };
+export const DEFAULT_SHORTCUTS: PageShortcuts = { send: 'Enter', sendTargetPicker: 'Ctrl+Alt+T', previousTarget: 'Alt+,', nextTarget: 'Alt+.', previousChatTab: 'Ctrl+PageUp', nextChatTab: 'Ctrl+PageDown', contextBasket: 'Alt+;', editorContext: "Alt+'", liveFollow: 'Alt+L', liveBookmarks: 'Alt+K', permissionMode: 'Alt+Q', allow: 'Alt+A', deny: 'Alt+D', permissionsView: 'Ctrl+Alt+P', toggleFocus: 'Alt+J' };
 
 /** `bridge/state.reason` of a failed bridge whose cause is a missing model provider: the page shows the engine setup panel. */
 export const SETUP_REQUIRED = 'setupRequired';
@@ -158,6 +161,40 @@ export interface SetupLocalServer {
   /** A key is saved for it (the key itself never leaves the host). */
   hasKey: boolean;
   savedUtc: string;
+  /** Connected from another PC's shared models (`connectSharedModels`); it carries that PC's pinned certificate. */
+  shared?: boolean;
+}
+
+export type ModelShareStateName = 'off' | 'starting' | 'on' | 'failed';
+
+/** An up IPv4 address of this PC the shared models can be offered on. */
+export interface ModelShareAddress {
+  address: string;
+  name: string;
+}
+
+/** The one active connection code (never a token): grouped text `ABCD-EFGH-…` and when it stops working. */
+export interface ModelShareCodeInfo {
+  code: string;
+  expiresUtc: string;
+}
+
+/** A PC connected to this PC's shared models. */
+export interface ModelShareClient {
+  name: string;
+  createdUtc: string;
+}
+
+/** This PC's model sharing ("share my models with another PC"); absent when the host does not offer it. */
+export interface SetupModelShare {
+  state: ModelShareStateName;
+  error: string | null;
+  address: string | null;
+  port: number;
+  addresses: ModelShareAddress[];
+  models: number | null;
+  code: ModelShareCodeInfo | null;
+  clients: ModelShareClient[];
 }
 
 export interface SetupModel {
@@ -240,6 +277,8 @@ export interface SetupStatePayload {
   usageLoading?: boolean;
   /** Credentials changed while omp was running: it must restart to use them. */
   restartRecommended?: boolean;
+  /** Model sharing of this PC; absent when the host does not offer it. */
+  modelShare?: SetupModelShare;
 }
 
 /**
@@ -247,7 +286,7 @@ export interface SetupStatePayload {
  * only in the input that produced them and never stored or logged by the page.
  */
 export type SetupCommand = { requestId: string } & (
-  | { action: 'refresh' | 'listProviders' | 'cancelLogin' | 'listModels' | 'listThinking' | 'listUsage' | 'resolveEditorModel' }
+  | { action: 'refresh' | 'listProviders' | 'cancelLogin' | 'listModels' | 'refreshModels' | 'listThinking' | 'listUsage' | 'resolveEditorModel' }
   | { action: 'login'; provider: string }
   | { action: 'loginConsole'; provider?: string }
   | { action: 'answerPrompt'; promptId: string; value?: string }
@@ -256,6 +295,16 @@ export type SetupCommand = { requestId: string } & (
   /** Adds a local model server, or replaces the one with `id`; an empty `key` keeps its saved key. */
   | { action: 'saveLocalServer'; id?: string; name: string; address: string; key?: string }
   | { action: 'removeLocalServer'; id: string }
+  /** Turns sharing this PC's models on or off. */
+  | { action: 'shareEnable'; enabled: boolean }
+  /** The address and port the shared models are offered on (restarts sharing when on). */
+  | { action: 'shareConfigure'; address: string; port: number }
+  /** Replaces the connection code with a new one. */
+  | { action: 'shareNewCode' }
+  /** Disconnects a connected PC. */
+  | { action: 'shareRevoke'; name: string }
+  /** Connects to another PC's shared models: `address` is `host[:port]`, `code` the normalized one-time code (a secret). */
+  | { action: 'connectSharedModels'; address: string; code: string }
   /** Signs out of every login omp stored for the provider (omp has no per-account logout over RPC); POMP-saved API keys stay. */
   | { action: 'logout'; provider: string }
   | { action: 'setModel'; provider: string; modelId: string }
