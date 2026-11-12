@@ -7,8 +7,8 @@ runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+)
 
 | Component | Version | What it does |
 |---|---|---|
-| POMP | 0.5.10 | The Visual Studio extension: chat UI, Visual Studio tools, approval cards, agents and teams |
-| omp | 18.12.6 | The bundled conversation and agent engine, [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT) |
+| POMP | 0.6.0 | The Visual Studio extension: chat UI, Visual Studio tools, approval cards, agents and teams |
+| omp | 18.18.9 | The bundled conversation and agent engine, [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT) |
 
 ![POMP intro](docs/media/pomp-intro.gif)
 
@@ -102,6 +102,7 @@ runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+)
 | Agents · teams · advisors | Hand work to role agents and teams; advisors watch the work and comment. |
 | Work and Tools tabs | Plan, change history and code check; permissions, skills, MCP, rules, workflows and knowledge. |
 | Accounts · models | Subscription sign-in, API keys or your own model server; pick a model per chat and agent and see usage. |
+| Remote tab | A PC without internet borrows the models of a signed-in PC on the same network, with a connection code; editing and builds stay in its own Visual Studio. |
 | draw.io diagrams | Draw diagrams from the code, and apply edits made in the diagram back to the code. |
 | `.pomp` folder | Project agents, rules, skills and policies travel with the repository; conversations stay in `.pomp\local\` (not committed). |
 
@@ -144,7 +145,8 @@ Steps
 
 1. **Connect a provider.** The Accounts tab opens the first time. Sign in with a subscription (pick a provider tile under **Add an account** —
    OpenAI, Anthropic, Muse Code and Google Antigravity come first, search for the rest; a browser opens), enter an API key, which is stored
-   encrypted for your Windows user, or add a local model server. Once a provider is connected, the dot at the top right turns green.
+   encrypted for your Windows user, or add a local model server. A PC without internet connects to another PC's models in the Remote tab.
+   Once a provider is connected, the dot at the top right turns green.
 2. **Ask about code.** Select a method and press `Shift+Alt+E` (or right-click > **POMP > Explain This Code**). The answer appears
    in the Chat tab; the chip under your prompt shows the file and lines that were sent.
 3. **Chat.** `Enter` sends, `Shift+Enter` adds a line, `@` mentions files/folders/symbols, `/` lists commands
@@ -209,11 +211,12 @@ The detailed docs are in Korean.
 **`momopanda123`** under the **PolyForm Noncommercial License 1.0.0**: free for personal and noncommercial use, no
 commercial use. See [`LICENSE.txt`](LICENSE.txt). Marketplace publisher ID: **`momopanda123`**.
 
-POMP's conversation and agent engine **omp** is the official release binary of
-[oh-my-pi](https://github.com/can1357/oh-my-pi) (**MIT licensed**), and POMP's PolyForm license does not
-apply to it. The VSIX's `omp/THIRD-PARTY-NOTICES.txt` carries the licenses of omp itself and its bundled open-source
-components (MIT and others). Other bundled open-source components keep their own licenses as well (see the bundled
-components' `LICENSE.txt` and `THIRD-PARTY-NOTICES.txt` in the package).
+POMP's conversation and agent engine **omp** is built from the **MIT-licensed** source of
+[oh-my-pi](https://github.com/can1357/oh-my-pi) with POMP's [local patch](engines/omp/pomp-v18.18.9.patch). POMP's PolyForm
+license does not change the upstream MIT rights; the patch POMP wrote follows this repository's license. The VSIX's
+`omp/THIRD-PARTY-NOTICES.txt` carries the licenses of omp itself and its bundled open-source components (MIT and others).
+Other bundled open-source components keep their own licenses as well (see the bundled components' `LICENSE.txt` and
+`THIRD-PARTY-NOTICES.txt` in the package).
 
 Other companies' product and service names in these documents and in the product are trademarks of their owners. POMP is not
 affiliated with them and uses the names only to refer to what it works with.

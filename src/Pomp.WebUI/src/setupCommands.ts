@@ -10,6 +10,12 @@ export const REPLY_TIMEOUT_MS = 30_000;
 /** A sign-out is `omp auth-broker logout` (up to 20 s) plus a new helper reading the provider list: its answer may come late. */
 export const LOGOUT_REPLY_TIMEOUT_MS = 60_000;
 
+/**
+ * Switching sharing or saving its address may wait for the running share to stop; connecting to a sharing PC waits until its gateway
+ * admits the new token (up to 15 s, at most 30 s in all): their answers may come late.
+ */
+export const SHARE_REPLY_TIMEOUT_MS = 60_000;
+
 /** What a command was for: its answer's error is shown next to the control that caused it. */
 export type Slot =
   | 'refresh'
@@ -21,6 +27,11 @@ export type Slot =
   | 'removeKey'
   | 'saveLocalServer'
   | 'removeLocalServer'
+  | 'shareEnable'
+  | 'shareConfigure'
+  | 'shareNewCode'
+  | 'shareRevoke'
+  | 'connectSharedModels'
   | 'logout'
   | 'models'
   | 'setModel'

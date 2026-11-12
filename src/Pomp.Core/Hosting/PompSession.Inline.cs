@@ -136,7 +136,7 @@ namespace Pomp.Hosting
 
         private bool HandleInlineNotification(string? message, OmpConnection? origin)
         {
-            if (HandleTokenCountNotification(message, origin)) return true;
+            if (HandleTokenCountNotification(message, origin) || HandleLocalModelsNotification(message, origin)) return true;
             if (message == null || !message.StartsWith(InlineResultPrefix, StringComparison.Ordinal)) return false;
             // Also consume late results: they must not leak code into the chat transcript.
             if (message.Length > 200000) return true;

@@ -86,7 +86,7 @@ export function EditorModelSection({ setup, replies, sessionModel, connected, in
       if (!connected) return;
       setQuery('');
       setOpen(true);
-      if ((!models || setup.modelsError) && !modelsAnswer.pending) requestModels();
+      if ((!models || setup.modelsError || setup.localServers.length > 0) && !modelsAnswer.pending) requestModels();
       return;
     }
     setOpen(false);
@@ -136,7 +136,7 @@ export function EditorModelSection({ setup, replies, sessionModel, connected, in
             aria-checked={choice === item} tabIndex={(choice === 'model' && !connected ? 'auto' : choice) === item ? 0 : -1}
             title={plainControls(choice === item && shown ? `${labels[item]} · ${shownProvider} · ${name(shown)}` : labels[item])}
             aria-expanded={item === 'model' ? open : undefined} aria-controls={item === 'model' && open ? `${id}-models` : undefined}
-            onClick={() => choose(item)}>
+            onClick={() => { if (item === 'model' && open) setOpen(false); else choose(item); }}>
             <span className="editor-model-radio" aria-hidden="true" />
             <span className="editor-model-label">{revealControls(labels[item])}</span>
             {choice === item && (resolving && !shown

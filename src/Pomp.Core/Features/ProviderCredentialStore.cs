@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -17,6 +16,8 @@ namespace Pomp.Features
     internal sealed partial class ProviderCredentialStore
     {
         private static readonly ConcurrentDictionary<string, object> FileLocks = new ConcurrentDictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        /// <summary>The DPAPI purpose of the saved API keys and local server keys (changing it would orphan every saved key).</summary>
+        private const string KeyPurpose = "POMP provider key v1";
         private static readonly Provider[] Providers =
         {
             new Provider("anthropic", "Anthropic (Claude)", "ANTHROPIC_API_KEY"),
@@ -27,6 +28,8 @@ namespace Pomp.Features
             new Provider("mistral", "Mistral", "MISTRAL_API_KEY"),
             new Provider("groq", "Groq", "GROQ_API_KEY"),
             new Provider("zai", "z.ai (GLM)", "ZAI_API_KEY"),
+            // Muse Spark on pay-as-you-go terms: a Muse Code subscription only serves the Muse Code client (403 client_attestation_denied).
+            new Provider("meta", "Meta Model API (Muse Spark)", "META_API_KEY"),
         };
         private readonly string _file;
         private readonly object _lock;
@@ -51,7 +54,7 @@ namespace Pomp.Features
                 {
                     var bytes = Encoding.UTF8.GetBytes(key!);
                     byte[] encrypted;
-                    try { encrypted = Dpapi.Transform(bytes, false); }
+                    try { encrypted = Dpapi.Transform(bytes, false, KeyPurpose); }
                     finally { Array.Clear(bytes, 0, bytes.Length); }
                     var keys = ReadKeys();
                     keys[provider!] = new JObject { ["data"] = Convert.ToBase64String(encrypted), ["savedUtc"] = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture) };
@@ -106,7 +109,7 @@ namespace Pomp.Features
                     if (!(keys[provider.Id] is JObject entry)) continue;
                     try
                     {
-                        var bytes = Dpapi.Transform(Convert.FromBase64String((string)entry["data"]!), true);
+                        var bytes = Dpapi.Transform(Convert.FromBase64String((string)entry["data"]!), true, KeyPurpose);
                         try
                         {
                             var key = new UTF8Encoding(false, true).GetString(bytes);
@@ -173,64 +176,6 @@ namespace Pomp.Features
             public string Id { get; }
             public string Label { get; }
             public string EnvVar { get; }
-        }
-
-        private static class Dpapi
-        {
-            private const uint UiForbidden = 1;
-            private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("POMP provider key v1");
-
-            public static byte[] Transform(byte[] input, bool decrypt)
-            {
-                var source = new DataBlob();
-                var entropy = new DataBlob();
-                var output = new DataBlob();
-                try
-                {
-                    source = Allocate(input);
-                    entropy = Allocate(Entropy);
-                    var success = decrypt
-                        ? CryptUnprotectData(ref source, IntPtr.Zero, ref entropy, IntPtr.Zero, IntPtr.Zero, UiForbidden, out output)
-                        : CryptProtectData(ref source, null, ref entropy, IntPtr.Zero, IntPtr.Zero, UiForbidden, out output);
-                    if (!success) throw new InvalidOperationException("Windows credential encryption failed.");
-                    if (output.Size <= 0 || output.Size > 32768) throw new InvalidOperationException("Windows credential encryption returned an invalid blob.");
-                    var result = new byte[output.Size];
-                    Marshal.Copy(output.Data, result, 0, result.Length);
-                    return result;
-                }
-                finally
-                {
-                    Clear(source); if (source.Data != IntPtr.Zero) Marshal.FreeHGlobal(source.Data);
-                    if (entropy.Data != IntPtr.Zero) Marshal.FreeHGlobal(entropy.Data);
-                    Clear(output); if (output.Data != IntPtr.Zero) LocalFree(output.Data);
-                }
-            }
-
-            private static DataBlob Allocate(byte[] bytes)
-            {
-                var blob = new DataBlob { Size = bytes.Length, Data = Marshal.AllocHGlobal(bytes.Length) };
-                Marshal.Copy(bytes, 0, blob.Data, bytes.Length);
-                return blob;
-            }
-
-            private static void Clear(DataBlob blob)
-            {
-                for (var i = 0; i < blob.Size && blob.Data != IntPtr.Zero; i++) Marshal.WriteByte(blob.Data, i, 0);
-            }
-
-            [StructLayout(LayoutKind.Sequential)]
-            private struct DataBlob { public int Size; public IntPtr Data; }
-
-            [DllImport("crypt32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            private static extern bool CryptProtectData(ref DataBlob input, string? description, ref DataBlob entropy, IntPtr reserved, IntPtr prompt, uint flags, out DataBlob output);
-
-            [DllImport("crypt32.dll", SetLastError = true)]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            private static extern bool CryptUnprotectData(ref DataBlob input, IntPtr description, ref DataBlob entropy, IntPtr reserved, IntPtr prompt, uint flags, out DataBlob output);
-
-            [DllImport("kernel32.dll")]
-            private static extern IntPtr LocalFree(IntPtr memory);
         }
     }
 

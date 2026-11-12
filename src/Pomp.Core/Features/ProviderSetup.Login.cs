@@ -173,6 +173,9 @@ namespace Pomp.Features
                 _modelsError = null;
             }
 
+            // The credential is in the omp profile every tab's engine reads: the other tabs' cached model lists are out of date too.
+            _credentialEpoch.NotifyModelListsChanged(this);
+
             if (_bridgeState() != BridgeState.Running) return true;
             JArray? models = null;
             try { models = await FetchModelsAsync().ConfigureAwait(false); }
@@ -182,14 +185,17 @@ namespace Pomp.Features
             if (models == null && _bridgeState() != BridgeState.Running) return true;
             // A sign-in method that stores as another provider unlocks that provider's models (StoredUnder).
             var unlocked = StoredUnder.TryGetValue(provider, out var storedAs) ? storedAs : provider;
+            bool listed;
             lock (_lock)
             {
-                var listed = models != null && models.Any(model =>
+                listed = models != null && models.Any(model =>
                     string.Equals((string?)model["provider"], provider, StringComparison.OrdinalIgnoreCase)
                     || string.Equals((string?)model["provider"], unlocked, StringComparison.OrdinalIgnoreCase));
                 if (models != null) _models = models;
-                _restartRecommended = _restartRecommended || !listed;
             }
+
+            // Not live in this engine: no engine of the window started before the sign-in has it (this one shows the restart notice).
+            if (!listed) _credentialEpoch.Advance();
 
             return false;
         }

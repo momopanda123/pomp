@@ -1,6 +1,6 @@
 import { roleTitle } from '../bundledDescriptions';
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { AgentsStatePayload, UiToHost } from '../protocol';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import type { AgentsStatePayload, PageShortcuts, UiToHost } from '../protocol';
 import type { CommandReply, ConversationPartner, ConversationTab, TabsState } from '../conversationProtocol';
 import { useConversationCommands } from '../conversationCommands';
 import { useT } from '../i18n';
@@ -11,6 +11,7 @@ import { Icon } from './Icon';
 import { ConfirmPopover } from './ConfirmPopover';
 import { plainControls, revealControls } from './RevealControls';
 import { useStatusReport } from '../statusBar';
+import { matchesShortcut } from '../shortcuts';
 
 const MAIN = 'main';
 const partnerKey = (partner: ConversationPartner) => `${partner.kind}:${partner.id ?? ''}`;
@@ -18,12 +19,16 @@ const partnerKey = (partner: ConversationPartner) => `${partner.kind}:${partner.
 export type TabSwitch = Omit<UiToHost['conversation/tab'], 'requestId'>;
 
 /** Chat tabs have independent engines. An in-flight open takes time to initialize, but never waits for the current run to finish. */
-export function PartnerPicker({ tabs, agents, replies, sessionId, disabled, lockedTitle, busy, request, onSwitch, onRefreshRoster }: {
+export function PartnerPicker({ tabs, agents, replies, sessionId, disabled, lockedTitle, busy, request, shortcuts, input, onSwitch, onRefreshRoster }: {
   tabs: TabsState | null; agents: AgentsStatePayload | null; replies: CommandReply[]; sessionId?: string; disabled: boolean; busy: boolean;
   /** Why a switch is temporarily unavailable, for the tooltip. */
   lockedTitle?: string;
   /** Open (or switch to) an agent or team tab from elsewhere: the Agents tab or `/agent name`. */
   request?: { partner: ConversationPartner; seq: number };
+  /** Tools > Options > Pomp > Shortcuts: the previous / next chat tab from anywhere in the chat. */
+  shortcuts: Pick<PageShortcuts, 'previousChatTab' | 'nextChatTab'>;
+  /** The message input: a chat-tab shortcut pressed while typing gives the focus back to it. */
+  input: RefObject<HTMLTextAreaElement | null>;
   /** Sends a conversation-changing tab command (the page waits for its `session/newResult`); false when it cannot go now. */
   onSwitch: (command: TabSwitch) => boolean;
   /** Asks the host to rescan agents and teams, so a role or team file created outside POMP shows up in the add list. */
@@ -36,8 +41,10 @@ export function PartnerPicker({ tabs, agents, replies, sessionId, disabled, lock
   const root = useRef<HTMLDivElement>(null); const add = useRef<HTMLButtonElement>(null);
   const row = useRef<HTMLDivElement>(null);
   const tabButtons = useRef(new Map<string, HTMLButtonElement>());
-  // A switch locks the strip until the host answers: keep the intent to focus the active tab, not the disabled DOM node.
-  const focusActive = useRef(false);
+  // A switch locks the strip until the host answers. Then the focus goes to the active tab (a switch made on the strip) or to the
+  // message input (a chat-tab shortcut pressed outside the strip), unless the user put it somewhere else meanwhile: typing in the
+  // input while a tab opens must stay there, not land on the strip, where Home/End and the arrows move between tabs.
+  const focusAfter = useRef<'tab' | 'input' | undefined>(undefined);
   const { post, pending: closing, error } = useConversationCommands(replies, sessionId);
   const scoped = tabs && sessionId && tabs.sessionId === sessionId ? tabs : null;
   const partner = scoped?.partner ?? { kind: 'main' as const };
@@ -71,12 +78,12 @@ export function PartnerPicker({ tabs, agents, replies, sessionId, disabled, lock
     document.addEventListener('pointerdown', outside, true); return () => document.removeEventListener('pointerdown', outside, true);
   }, [open]);
 
-  const switchTo = (command: TabSwitch) => {
+  const switchTo = (command: TabSwitch, focus: 'tab' | 'input' = 'tab') => {
     const accepted = onSwitch(command);
-    if (accepted) focusActive.current = true;
+    if (accepted) focusAfter.current = focus;
     return accepted;
   };
-  const activate = (key: string) => key === activeKey || switchTo(key === MAIN ? { action: 'activate' } : { action: 'activate', sessionId: key });
+  const activate = (key: string, focus: 'tab' | 'input' = 'tab') => key === activeKey || switchTo(key === MAIN ? { action: 'activate' } : { action: 'activate', sessionId: key }, focus);
   /** An agent or team: its open tab, else a new conversation with it (the host decides, so a tab is never opened twice). */
   const openPartner = (target: ConversationPartner) => partnerKey(target) === partnerKey(partner) || switchTo({ action: 'open', partner: target });
   const scrollTab = (key: string) => {
@@ -89,9 +96,13 @@ export function PartnerPicker({ tabs, agents, replies, sessionId, disabled, lock
     else if (inner.right > right) strip.scrollLeft += inner.right - right;
   };
   useLayoutEffect(() => {
-    if (locked || !focusActive.current) return;
-    focusActive.current = false;
-    tabButtons.current.get(activeKey)?.focus({ preventScroll: true });
+    const target = focusAfter.current;
+    if (locked || !target) return;
+    focusAfter.current = undefined;
+    const focused = document.activeElement;
+    if (focused && focused !== document.body && !root.current?.contains(focused)) return;
+    if (target === 'input') input.current?.focus({ preventScroll: true });
+    else tabButtons.current.get(activeKey)?.focus({ preventScroll: true });
     scrollTab(activeKey);
   });
   useLayoutEffect(() => { scrollTab(activeKey); }, [activeKey, keys.join('\n')]);
@@ -134,6 +145,21 @@ export function PartnerPicker({ tabs, agents, replies, sessionId, disabled, lock
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
     event.preventDefault(); buttons[next]?.focus(); scrollTab(keys[next]!);
   };
+  // The previous / next chat tab from anywhere in the chat, also while typing; it wraps around. Not while another field (a search, a
+  // rename, the terminal) has the keyboard, in a dialog, or while the chat page is not shown.
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      const step = matchesShortcut(event, shortcuts.previousChatTab) ? -1 : matchesShortcut(event, shortcuts.nextChatTab) ? 1 : 0;
+      if (step === 0 || event.defaultPrevented || root.current?.closest('[hidden], [inert]') || document.querySelector('.overlay .dialog')) return;
+      const target = event.target;
+      if (target instanceof Element && target !== input.current && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], .xterm')) return;
+      event.preventDefault();
+      if (locked || keys.length < 2) return;
+      activate(keys[(keys.indexOf(activeKey) + step + keys.length) % keys.length]!, root.current?.contains(document.activeElement) ? 'tab' : 'input');
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
 
   // Notices of the tab strip (a failed close, the team's restarted members) go to the VS status bar, not as text inside the tab row.
   useStatusReport(error);

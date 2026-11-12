@@ -247,7 +247,7 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
 `--no-extensions` 검증 기록:
 
 - omp 18.4.3·18.8.6·18.10.3: 작업 폴더 프로브 확장은 로드되지 않고, 옵션을 켜면 로드된다.
-- omp 18.10.4·18.12.1·18.12.6: pomp 패키지의 명령과 `vs-project`가 로드된다.
+- omp 18.10.4·18.12.1·18.12.6·18.15.0·18.18.9: pomp 패키지의 명령과 `vs-project`가 로드된다(18.18.9: `pomp-*` 23개, `extension_error` 없음).
 
 ### 프로세스 작업 폴더
 
@@ -262,7 +262,7 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
   - 모든 공급자 형식의 MCP 서버 목록
   - 도구 코드(`.omp/tools` 등)
   - 컨텍스트 파일의 `@경로` 포함
-- omp 18.12.6에도 프로젝트 신뢰 확인이 없다.
+- omp 18.18.9에도 프로젝트 신뢰 확인이 없다.
 - POMP는 이런 구성이 있는 작업 영역에서, 사용자가 그 내용을 신뢰하기 전에는 omp를 시작하지 않는다. 자세한 내용은 아래 "작업 영역 신뢰".
 
 ### 실행 파일 해석
@@ -349,11 +349,11 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
 | 연속 3회 실패 | **`failed`** 상태. 사용자가 고른다(재시작/로그 보기). |
 | 60초 이상 정상 실행 | 실패 횟수 초기화 |
 | 치명적 오류(실행 파일을 찾지 못함 등) | 즉시 `failed` |
-| 모델 없이 종료(`No models available`) | 재시도 없이 바로 `failed`(`reason: "setupRequired"`). 채팅 창은 오류 대신 엔진 설정 패널을 보여 준다(아래 "엔진 설정"). |
+| 모델 없이 종료(`No models available`, omp 18.12의 `No default model selected`) | 재시도 없이 바로 `failed`(`reason: "setupRequired"`). 채팅 창은 오류 대신 엔진 설정 패널을 보여 준다(아래 "엔진 설정"). 이때도 원격 탭은 열린다. |
 
 ### 작업 영역 신뢰
 
-omp(18.4.3부터 현재 18.12.6까지)는 프로젝트 신뢰를 확인하지 않는다(`isProjectTrusted: () => true`).
+omp(18.4.3부터 현재 18.18.9까지)는 프로젝트 신뢰를 확인하지 않는다(`isProjectTrusted: () => true`).
 작업 폴더에서 읽는 다음 구성은 시작과 동시에 코드를 실행하거나, 승인을 바꾸거나, 바깥 파일을 대화에 넣는다.
 MCP stdio 서버는 엔진 환경을 그대로 받는다. POMP가 넣은 API 키도 포함된다.
 
@@ -423,9 +423,9 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
 
 #### 버전 정의
 
-- `engines/omp/engine.props`가 버전, 패치 빌드 출처, 자산 이름, 크기, SHA-256과 공식 릴리스의 고지 파일 SHA-256을 고정한다.
-- 현재 상위 omp **18.12.6**(커밋 `45c35e40c46166dc726ccc52f5d27f40f2449f99`)에 `engines/omp/pomp-v18.12.6.patch`를
-  적용한 빌드다. 크기 **243,028,992바이트**, SHA-256 `ba640f8485748d6777387a12335a851a2b5fd4b05494fbe26889183f66e1f6d3`.
+- `engines/omp/engine.props`가 버전, 패치 빌드 출처, 자산 이름, 크기, SHA-256과 고지 파일 SHA-256을 고정한다.
+- 현재 상위 omp **18.18.9**(커밋 `50da2d357039404a81d7c64622740ce13e4c54b4`)에 `engines/omp/pomp-v18.18.9.patch`를
+  적용한 빌드다. 크기 **249,927,168바이트**, SHA-256 `126065f5b0d685e7105331e9a7dc9a03bf29b3cedaf8b56810395a28f99fe933`.
 - 라이선스는 MIT(`engines/omp/LICENSE.upstream`).
 
 #### 빌드 (`build/build-omp.ps1`, `Pomp.Vsix.Common.targets`의 `PompPrepareOmpEngine`)
@@ -433,7 +433,8 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
 - `build/build.ps1`은 캐시에 해당 해시의 실행 파일이 없으면 `build/build-omp.ps1`로 고정된 상위 소스와 패치를 빌드한다.
   Git·Bun·Rust/Cargo(MSVC x64)·Visual Studio C++ 빌드 도구가 필요하다. MSBuild만 직접 실행할 때는 패치 빌드를 미리 준비해야 한다(POMP1013).
 - VSIX는 매번 해시를 검증한다. 공식 릴리스 실행 파일이나 다른 빌드는 패키지에 넣을 수 없다(POMP1011).
-  공식 릴리스에서는 `THIRD-PARTY-NOTICES.txt`만 내려받아 별도 해시로 검증한다(POMP1012).
+  고지 파일 `THIRD-PARTY-NOTICES.txt`는 `build/build-omp.ps1`이 태그의 OMP 라이선스와 CLI·네이티브 애드온 고지를 `omp --license`와
+  같은 형식으로 묶어 엔진 옆에 만들고, 별도 해시로 검증한다(POMP1012, 없으면 POMP1014). 18.13부터 릴리스에 고지 파일이 따로 없다.
 - `-p:PompOmpExe=<절대 경로>`(build.ps1 `-OmpExe`)는 동일한 패치 빌드의 로컬 사본에만 쓴다.
 - `-p:PompBundleOmp=false`는 엔진 없는 개발 패키지를 만든다.
 - 모든 VSIX에 들어가는 파일:
@@ -535,7 +536,7 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
 ### 에이전트·팀과 컴퓨터 사용
 
 구현 계약은 §8 "에이전트·팀 구현 계약"에 있고, 사용 안내는 `docs/agent-teams.md`에 있다.
-엔진의 Win32 `takeover` 클릭과 Codex 하위 에이전트 메시지에 소스 패치가 필요하다(`engines/omp/pomp-v18.12.6.patch`).
+엔진의 Win32 `takeover` 클릭과 창 활성화에 소스 패치가 필요하다(`engines/omp/pomp-v18.18.9.patch`).
 열린 대화 탭마다 별도 omp 프로세스를 실행한다. 다른 탭의 응답·승인·대기열은 유지되며 전환을 기다리지 않는다.
 같은 탭의 새 대화·기록 전환은 해당 엔진이 바쁠 때 보류하고, 컴퓨터 입력 제어는 탭 전체에서 한 곳만 허용한다.
 기록 목록에서 지난 대화를 열 때도 그 대화 상대의 탭을 선택한 뒤 해당 엔진만 전환한다. 다른 탭에서 열린 대화는 먼저 탭을 닫아야 삭제할 수 있다.
@@ -561,7 +562,7 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
   - 그래도 띄우려 하면 omp가 "Cannot spawn another agent at task depth 1; maximum depth is 1." 오류를 모델에 돌려준다.
   - 메인 대화의 `task` 승인은 그대로 승인 모드 규칙을 따른다.
 - POMP는 하위 에이전트에게 화면·브라우저 제어를 주지 않는다.
-- 확장(`extensions/computer-guard.ts`)은 엔진의 `SettingsManager.create(ctx.cwd)`와 `rawValue`로 **호출 세션의 실제 computer/browser 활성 설정**을 읽는다.
+- 확장(`extensions/computer-guard.ts`)은 엔진의 라이브 `settings`와 타입 지정 설정 API(`cfgComputerEnabled.get`, `cfgBrowserEnabled.get`)로 **현재 computer/browser 활성 설정**을 읽는다.
 
 | 호출 | 차단 조건 |
 |---|---|
@@ -587,9 +588,12 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
 - 응답 중의 켜기 요청은 보류하고, 메인 턴이 끝나면 현재 엔진 상태를 재확인해 처리한다. 보류된 켜기는 끄기 요청이나 대화 변경으로 취소된다.
 - 켜기 전에 같은 세션의 상태 파일을 먼저 쓴다. 끄기는 omp가 확인한 뒤에 파일을 바꾼다.
 - 엔진 재시작이면 꺼진다. 다른 대화로 바뀌면 엔진 쪽은 꺼진다(아래 "한 PC 한 대화").
-- 켜져 있는 동안 확장(`extensions/computer-guard.ts`)이 메인 대화의 시스템 프롬프트 끝에 영어 안내 한 절(`## Screen & input control (pomp)`)을 붙인다.
-  - 내용: 이 대화에서 화면·입력 제어가 켜져 있다, Eval 도구의 `computer` prelude를 쓰고 처음 쓰기 전에 `xd://eval/computer`를 읽는다, GUI 제어에 Orca 같은 외부 프로그램·CLI를 실행하거나 쓰지 않는다.
-  - 매 턴 `before_agent_start`에서 `computer-state.json`을 다시 읽는다. 같은 `sessionId`에 `desktop: true`일 때만 붙이고, 꺼지면 다음 턴부터 없다.
+- 확장(`extensions/computer-guard.ts`)은 **꺼진 상태에서도** 매 턴 시스템 프롬프트 끝에 화면 제어 정책 한 절(`## Screen & input control (pomp)`)을 붙인다.
+  - 같은 `sessionId`에 `desktop: true`인 메인 에이전트만 켜짐 안내를 받는다. Eval 도구의 `computer` prelude를 쓰고 처음 쓰기 전에 `xd://eval/computer`를 읽는다.
+  - 미사용·끄기·다른 대화·상태 파일 오류·하위 에이전트는 꺼짐 안내를 받는다. 데스크톱 캡처·포인터·클릭·창 입력을 하지 않으며, 필요하면 사용자에게 입력창 버튼을 켜 달라고 요청하고 기다린다. 일반 파일·코드·CLI 작업은 유지한다.
+  - 켜짐/꺼짐 모두 Orca 같은 외부 프로그램·CLI·스크립트·OS 자동화 API·MCP를 통한 데스크톱 제어, 모델의 자체 설정 변경, 하위 에이전트에 화면 제어 위임을 금지한다. 작업 요청·스킬·이전 대화·도구 승인은 버튼 허용을 대신하지 않는다.
+  - 매 턴 `before_agent_start`에서 `computer-state.json`을 다시 읽고 이전 정책 절을 교체한다. 끄기 후에도 금지 지침이 사라지지 않는다.
+  - 외부 GUI 자동화 금지는 모델 지침이다. 네이티브 prelude의 실행 차단과 달리 범용 shell/Eval 코드에 대한 OS 샌드박스를 제공하지는 않는다.
 - 엔진 쪽 반영: `/computer on`은 세션 설정만 바꾸고 Eval 도구 설명은 바꾸지 않는다(시작 때 목록 유지).
   - 대신 다음 턴에 omp가 숨은 알림(`<system-notice id="prelude-extension">`)으로 `computer` prelude가 생겼음과 `xd://eval/computer` 링크, omp의 컴퓨터 사용 지침을 넣는다.
   - `xd://eval/computer` 문서는 켜진 즉시 읽을 수 있다.
@@ -658,10 +662,11 @@ omp는 `computer` prelude 호출 승인을 도구 UI로 묻는다. 이 UI는 `--
 omp RPC는 모델을 쓸 수 있어야 시작한다. 그래서 터미널 없이 로그인하려고 호스트가 별도의 짧은 omp를 소유한다.
 
 ```
-omp --mode rpc --no-session --no-extensions --no-skills --no-rules --model openai/gpt --api-key pomp-setup-placeholder
+omp --mode rpc --no-session --no-extensions --no-skills --no-rules --model openai/gpt-5.5 --api-key pomp-setup-placeholder
 ```
 
 - 자리표시자 키는 명령줄에만 둔다.
+- 모델은 정확한 id여야 한다. omp 18.14부터 공급자를 붙인 `--model`이 정확한 id가 아니면 시작이 멈춘다(`Model "…" not found`).
 - 환경 `OPENAI_BASE_URL=http://127.0.0.1:9/v1`(닫힌 루프백 포트)이라 키는 어디에도 전달되지 않는다. 도우미는 모델을 호출하지 않는다.
 - 작업 폴더는 POMP 자체의 빈 폴더 `<DataDirectory>\workspace`이다.
 - 환경은 호스트 환경 + 저장된 API 키다. 키는 `ProviderCredentialStore`의 고정 변수 이름만 쓴다. `POMP_*` 변수는 주지 않는다.
@@ -698,6 +703,7 @@ omp --mode rpc --no-session --no-extensions --no-skills --no-rules --model opena
 다른 공급자에 자격 증명을 저장하는 로그인 방식:
 
 - omp 18.8의 `storeCredentialsAs`: `openai-codex-device`→`openai-codex`, `zai-coding-plan`→`zai`.
+- omp 18.17에 추가된 `devin-cli`·`devin-windsurf`는 모두 `devin`에 저장한다.
 - 목록에는 남기되 `authenticated`는 항상 false로 보낸다.
 - omp가 그 항목을 저장 대상 공급자의 자격 증명으로 판단하면서 대상 이름은 알려 주지 않는다. 그대로 두면 같은 로그인이 계정으로 두 번 나온다.
 - 대응표는 `ProviderSetup.StoredUnder`이다. 이 방식으로 로그인한 뒤의 모델 확인도 저장 대상 공급자를 기준으로 한다.
@@ -753,14 +759,18 @@ omp --mode rpc --no-session --no-extensions --no-skills --no-rules --model opena
 - 고정된 제공자별 환경 변수만 다음 omp 시작(엔진·도우미)에 전달한다.
 - 키 원문은 UI·로그에 내보내지 않는다.
 
-#### 재시작 규칙
+#### 재시작 규칙 (자격 증명 변경과 엔진 재시작)
+
+채팅 탭마다 엔진이 따로 돌지만, 모두 같은 저장 키·로컬/공유 모델 서버·omp 로그인으로 시작한다. 그래서 변경은 창 전체의 변경
+횟수(`CredentialEpoch`)로 센다. 엔진은 시작할 때의 횟수를 기억하고, 그 뒤에 바뀌었으면 그 엔진은 낡은 것이다.
 
 | 상황 | 처리 |
 |---|---|
 | 로그인 성공·키 저장, 엔진 중지 상태 | 호스트가 스스로 다시 시작한다. 로그인은 도우미를 먼저 끝낸 뒤 시작한다. |
-| 로그인 성공, 엔진 실행 중 | `get_available_models`를 다시 읽는다. 새 공급자의 모델이 보이면 그대로 쓰고, 보이지 않을 때만 `restartRecommended`를 켠다. |
-| 실행 중 키 저장·삭제 | 키는 다음 시작의 환경 변수이므로 항상 재시작을 권한다. |
-| `Running`이 됨 | 권고를 끈다. |
+| 로그인 성공, 엔진 실행 중 | `get_available_models`를 다시 읽는다. 새 공급자의 모델이 보이면 그대로 쓰고, 보이지 않을 때만 변경으로 센다. |
+| 실행 중 키 저장·삭제, 로컬 서버 저장·삭제, 다른 PC 연결, 로그아웃 | 다음 시작의 환경이 바뀌므로 항상 변경으로 센다. |
+| 선택된 탭의 엔진이 낡음 | `restartRecommended`로 다시 시작을 권한다. 그 탭이 다시 시작하면 꺼진다. |
+| 다른 탭의 엔진이 낡음 | 할 일이 없으면 바로 혼자 다시 시작한다(대화는 복원). 응답 중이거나 질문·승인을 기다리면 그 일이 끝난 뒤, 또는 다른 탭으로 옮겨 간 뒤 다시 시작한다. 그 탭을 다시 열었을 때 아직 낡았으면 그 탭에서 다시 시작을 권한다. |
 
 #### 생각 수준
 
@@ -817,6 +827,56 @@ omp --mode rpc --no-session --no-extensions --no-skills --no-rules --model opena
 1. 이메일(`metadata.email`·`email`)
 2. `account`·`metadata.account/username/accountId`·`accountId`
 3. 한도의 `scope.accountId`
+
+### 모델 공유
+
+인터넷과 AI 계정이 있는 PC(공유 PC)가 omp 로그인을 LAN의 다른 PC(프로젝트 PC)에 모델 서버로 연다.
+프로젝트 PC는 인터넷·로그인·API 키 없이 기존 로컬 모델 서버 기능으로 쓴다. 메시지는 `docs/ui-protocol.md`의 "Model sharing"과 `connectSharedModels`에 있다.
+
+```mermaid
+flowchart LR
+  E[프로젝트 PC omp<br/>local-models.ts] -- "HTTPS · 클라이언트 토큰" --> F[ModelShareTlsFront<br/>선택한 IPv4:포트]
+  F -- "그대로 전달" --> G[omp auth-gateway serve --clients<br/>127.0.0.1]
+  G --> B[omp auth-broker serve<br/>127.0.0.1]
+  G -- 인터넷 --> P[AI 공급자]
+```
+
+공유 PC (`Features/ModelShare/ModelShareService`, VS 프로세스당 하나):
+
+- 켜면 번들 omp로 `auth-broker token --json`, `auth-gateway token --json`을 숨겨 실행해 두 토큰을 읽고(로그 금지), `auth-broker serve`와
+  `auth-gateway serve --clients=<file>`을 `127.0.0.1`의 빈 포트에 띄운다. 엔진과 같은 작업 폴더·네이티브 설정·Job Object를 쓴다.
+- 준비는 broker `/v1/healthz`(30초), gateway `/v1/models`(120초: gateway는 첫 카탈로그를 온라인으로 받은 뒤에 열린다)로 판정하고, 모델 수를 상태에 낸다.
+- TLS 접점은 선택한 주소에만 연다(TLS 1.2, 연결 64개, 핸드셰이크와 요청 머리 30초). `POST /pomp/v1/register`만 직접 답하고, 나머지는
+  요청을 해석하지 않고 바이트 그대로 loopback gateway로 넘긴다. CONNECT나 다른 목적지는 없다.
+- 인증서는 자체 서명 RSA-2048(CA, 10년)이다. SAN은 고른 주소, 이 PC의 IPv4 주소, PC 이름이다. PFX를 DPAPI로 보호해
+  `model-share\identity.pfx.dpapi`에 둔다. 고른 주소를 덮지 않거나 30일 안에 만료되면 새로 만든다. 만드는 코드는 VS 계층(`VsModelShareCertificateFactory`)에 있다.
+- 연결 코드: 비밀 5바이트 + 인증서 DER의 SHA-256 앞 10바이트 → base32 24자(`XXXX-` 6묶음). 10분, 1회, 틀린 비밀 5번이면 끝난다. 비교는 고정 시간이다.
+- 등록이 맞으면 클라이언트 토큰을 만들고 그 SHA-256만 `model-share\settings.json`과 gateway의 clients 파일에 쓴다. gateway는 그 파일을
+  10초마다 다시 읽으므로, 등록 응답은 gateway가 새 토큰을 받아들일 때까지(최대 15초) 기다린다. 끊기도 다음 재읽기 때 반영된다.
+- 프로세스가 예기치 않게 끝나면 상태가 `failed`가 되고 이유(토큰을 지운 출력 끝부분)를 보인다. 켜 둔 공유는 다음 VS 시작 때 다시 시작한다.
+
+프로젝트 PC (`SharedModelConnector`, `ProviderSetup`). 화면은 WebUI의 원격 탭(`RemotePanel`)이고, 모델이 없는 첫 실행에도 열린다:
+
+- 주소에 TLS로 붙어 인증서 지문을 코드의 지문과 비교한 뒤에만 비밀을 보낸다. 받은 토큰은 API 키처럼 DPAPI로 암호화해
+  `credentials\local-models.json`에 `https://<주소>/v1` 서버로 저장하고, 인증서 PEM을 함께 둔다.
+- omp를 시작할 때(엔진, 보조 실행) 고정한 인증서들을 `credentials\local-models-ca.pem`에 쓰고 `NODE_EXTRA_CA_CERTS`로 넘긴다. Windows 인증서
+  저장소와 방화벽은 건드리지 않는다.
+- `local-models.ts`는 서버의 `/v1/models`에서 `display_name`, `input_modalities`(image), `context_length`, `max_output_tokens`를 읽어
+  모델을 등록하고 `openai-completions`로 부른다. `provider/id` 목록에서는 omp가 그 공급자의 기본으로 정한 모델을 맨 앞에 둔다. 모델을 고르지 않은
+  엔진이 목록 첫 모델(공급자가 더는 제공하지 않을 수 있다)로 시작하지 않게 하기 위해서다.
+- 상위 gateway의 목록은 생각(추론) 여부를 알리지 않는다. POMP 엔진 패치는 각 행에 그 모델의 노력 단계(`reasoning_efforts`, 고를 단계가 없으면
+  빈 목록)를 넣는다. 공유 PC가 실행 중에 찾은 모델(예: GPT-6.1 Terra)은 이 PC의 omp 카탈로그에 없기 때문이다. `local-models.ts`는 이 목록을
+  그대로 쓰고, 목록이 없는 행(다른 gateway)만 omp 자체 카탈로그(`getBundledModel`)의 같은 모델처럼 생각한다. 요청에는 단계 이름만
+  `reasoning_effort`로 실리고, 공급자별 방식(적응형 생각, 예산, 단계별 모델 id)은 gateway가 적용한다.
+- 목록은 엔진이 시작할 때 읽고, 호스트가 모델 목록을 읽기 전마다 확장의 `/pomp-local-models`로 다시 읽어 바꾼다(omp 모델 캐시는 쓰지 않는다).
+  공유 PC가 공급자에서 로그아웃하면 그 gateway는 10초 안에 목록에서 빼고, 이 PC는 모델 목록을 다음에 열 때(또는 계정 탭 **API 키로 연결**의
+  새로고침) 그 모델을 뺀다. 답하지 않는 서버는 목록을 그대로 둔다.
+
+경계:
+
+- 프로젝트 PC에 가는 것은 그 PC 전용 gateway 클라이언트 토큰과 공유 PC 인증서뿐이다. broker 토큰, gateway 자체 토큰, OAuth 토큰, 공급자 키는 가지 않는다.
+- 클라이언트 토큰은 gateway의 모델 경로만 쓸 수 있다. 사용량·자격 점검 경로는 gateway가 클라이언트에게 거절한다.
+- omp 로그인 계정만 공유된다. POMP에 저장한 API 키는 broker가 모르므로 공유되지 않는다.
 
 ## 5. 호스트 툴 (CustomToolRegistry)
 
@@ -1107,7 +1167,8 @@ WebView2 안의 키:
 - VS는 디버깅을 마치며(설계 모드 복귀) 코드 편집기를 활성화한다. 실행한 프로그램 창도 그동안 앞에 온다. 채팅에서 F5를 누른 사용자가 이어서 치면 코드에 오타가 들어갔다.
 - 세션 시작: 설계 모드에서 첫 `OnBuildBegin`·`OnEnterRunMode`, 또는 `Debug.Start`·`Debug.StartWithoutDebugging` 명령 실행 직전(`CommandEvents.BeforeExecute`). 프로젝트가 최신이면 빌드 이벤트가 없고 `Ctrl+F5`는 디버거 이벤트도 없어서, 명령 이벤트가 없으면 세션이 시작되지 않았다. 이때 채팅에 포커스가 있었는지 기억한다. 채팅에서 넘긴 VS 키(F5, Ctrl+F5, Ctrl+Shift+B) 10초 안에 시작했으면 채팅에서 시작한 것으로 본다. VS가 빌드 시작 전에 출력 창을 띄워 포커스를 가져가기 때문이다.
 - 세션 끝: `OnEnterDesignMode`(실행 뒤), 또는 `OnBuildDone`이나 시작 명령 실행 1.5초 뒤 빌드 중이 아니고 실행 모드에도 들어가지 않은 경우(빌드만, `Ctrl+F5`).
-- 복원: VS가 다시 활성 앱이고 모달 대화 상자가 없는 상태가 0.3초 이어지고, 그동안 VS가 다른 창을 활성화하지 않았으면 채팅 프레임을 `Show`하고 사용자가 마지막으로 포커스를 둔 요소(`data-pomp-last-focus`, `focusMemory.ts`)에 포커스를 준다. 없으면 `document.activeElement`, 그것도 없으면 입력창이다. 표시는 글 입력칸이 받은 포커스, 사용자가 방금 누른 요소가 받은 포커스, Tab·방향키 1초 안에 받은 포커스에만 붙인다. VS가 창을 옮기는 동안 WebView2는 포커스를 여러 번 얻고 잃으며, Chromium이 포커스를 첫 요소(채팅 탭)로 옮기기 때문이다. 그 뒤 3초 동안 VS가 다른 창을 또 활성화하면 한 번 더 되돌린다. 30분이 지나면 포기한다.
+- 복원: VS가 다시 활성 앱이고 모달 대화 상자가 없는 상태가 0.3초 이어지고, 그동안 VS가 다른 창을 활성화하지 않았으면 채팅 프레임을 `Show`하고 사용자가 마지막으로 포커스를 둔 요소(`data-pomp-last-focus`, `focusMemory.ts`)에 포커스를 준다. 없으면 `document.activeElement`, 그것도 없으면 입력창이다. WPF의 focus-within 값이 남아 있어도 첫 복원과 VS의 창 재활성화 때는 DOM 입력칸까지 명시적으로 복원한다. 표시는 글 입력칸이 받은 포커스, 사용자가 방금 누른 요소가 받은 포커스, Tab·방향키 1초 안에 받은 포커스에만 붙인다. VS가 창을 옮기는 동안 WebView2는 포커스를 여러 번 얻고 잃으며, Chromium이 포커스를 첫 요소(채팅 탭)로 옮기기 때문이다.
+  - 안정된 뒤 3초가 지나면 타이머만 멈추며 복원 대상은 지우지 않는다. 사용자가 다른 편집 위치를 선택하지 않은 동안에는 `Application.Activated`와 `WindowActivated`가 복원 처리를 다시 깨운다. 늦게 창을 띄우는 `Ctrl+F5` 프로그램이나 실행 중 VS로 잠시 돌아왔다가 다시 프로그램을 종료하는 경우에도 원래 채팅 입력칸을 유지한다. 실행 시간이 길다는 이유만으로 복원을 포기하지 않는다.
 - 사용자가 직접 옮긴 경우는 되돌리지 않는다.
   - VS 창 위에서 마우스 단추를 누른 채 다른 창이 활성화됨(클릭). 앞에 뜬 대화 상자("빌드하시겠습니까?", "마지막으로 성공한 빌드를 실행하시겠습니까?")의 단추 클릭은 넣지 않는다. 그 뒤 VS가 출력·오류 목록 창을 스스로 활성화하기 때문이다.
   - 모드 전환 뒤 2초 밖에서 Ctrl을 누른 채(Ctrl+Tab) 또는 채팅에서 넘긴 VS 키 1초 안에 다른 창이 활성화됨(F7 코드 보기)
@@ -1249,6 +1310,7 @@ WebView2 안의 키:
 - 대상의 줄·시작·길이는 선언 첫 토큰(특성·어노테이션·데코레이터 제외)부터 본문 끝까지다. 이름공간, 본문 없는 C++ 형식 선언(`class Foo;`), 본문이 닫히지 않는 선언은 대상이 아니다. 키워드 없이 선언하는 언어(Java, Dart, Objective-C의 C 함수)는 함수 안에서 선언을 찾지 않는다. 호출과 구별할 수 없기 때문이다.
 - 질문 범위(`CodeScopeSelection`)도 Roslyn 문서가 없으면 같은 순서(어휘 스캐너, 그다음 편집기 블록 구조)로 가장 안쪽 멤버를 고른다.
 - 캡션은 선언 첫 줄(C#·VB는 특성 아래의 시그니처 줄) 끝에 붙는다. 줄을 따로 차지하지 않으므로 코드 줄 간격이 바뀌지 않는다. 받은 요약은 단추 뒤에 붙고, 화면 오른쪽 끝에서 잘리며 전체 문장은 도구 설명으로 보인다.
+- 같은 시각적 줄에 Live `+`/`−` 단추나 충돌 문구가 있으면, 캡션은 그 장식의 실제 측정된 오른쪽 끝에서 16 DIP 뒤에 놓는다. Live 표시·위치·충돌 상태가 바뀌면 텍스트 편집이 없어도 캡션 배치를 갱신한다. 왼쪽 여백에 둔 Live 표시는 줄 끝 공간을 차지하지 않는다.
 - 캡션·네이티브 CodeLens·인라인 완성/편집은 `PompServices.ActiveSession`을 요청 시작 시 잡아 사용한다. `Session`은 대화 호스트이므로 `IInlineAssistant`로 캐스팅하거나 기능 지원 여부를 검사하지 않는다. 한 편집의 추론과 검토 등록도 같은 세션을 사용한다.
 - 편집 중에도 캡션은 그대로 둔다. 버퍼가 바뀌면(`ChangedHighPriority`, 편집기 레이아웃보다 먼저) 대상을 새 텍스트로 옮긴다. 선언 줄의 텍스트가 바뀐 대상은 받은 요약을 버리고 `AI 설명` 버튼으로 돌아간다. 본문이 지워진 대상은 없앤다. 요약을 기다리는 동안 다른 곳을 편집해도 요청은 취소되지 않고, 도착한 요약은 옮겨진 같은 선언에 붙는다. 350ms 뒤 다시 찾은 대상은 질의한 줄 범위만 바꾼다. 버퍼와 맞지 않는 결과(Roslyn이 편집을 아직 반영하지 않음)는 적용하지 않고 다시 묻는다.
 - 질의 범위는 3000줄 이하 파일이면 파일 전체, 더 길면 보이는 화면과 그 위아래 한 화면씩이다. 스크롤로 화면에 들어오는 선언에도 캡션이 이미 있다.

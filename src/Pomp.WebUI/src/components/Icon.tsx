@@ -72,6 +72,25 @@ const PATHS = {
       <line x1="12" y1="17" x2="12" y2="21" />
     </>
   ),
+  /** Two PCs joined by a line: the Remote tab. */
+  remote: (
+    <>
+      <rect x="2" y="3" width="10" height="7" rx="1.5" />
+      <path d="M5 13h4M7 10v3" />
+      <rect x="12" y="11" width="10" height="7" rx="1.5" />
+      <path d="M15 21h4M17 18v3" />
+      <path d="M12 6.5h3a2 2 0 0 1 2 2V11" />
+    </>
+  ),
+  /** A chain link pulled apart: disconnect. */
+  unlink: (
+    <>
+      <path d="M9 17H7A5 5 0 0 1 7 7h2" />
+      <path d="M15 7h2a5 5 0 0 1 0 10h-2" />
+      <line x1="12" y1="3" x2="12" y2="7" />
+      <line x1="12" y1="17" x2="12" y2="21" />
+    </>
+  ),
   terminal: (
     <>
       <polyline points="4 17 10 11 4 5" />

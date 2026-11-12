@@ -340,6 +340,8 @@ VS 명령의 키는 VS 키보드 바인딩에도 그대로 들어간다. 도구 
 | 보낼 대상 고르기 (`Pick send target`) | `Ctrl+Alt+T` | 메시지 하나를 보낼 동료나 에이전트를 고르는 창을 연다. |
 | 이전 보낼 대상 (`Previous send target`) | `Alt+,` | 보낼 대상 목록의 이전 항목을 대상으로 정한다. |
 | 다음 보낼 대상 (`Next send target`) | `Alt+.` | 보낼 대상 목록의 다음 항목을 대상으로 정한다. |
+| 이전 채팅 탭 (`Previous chat tab`) | `Ctrl+PageUp` | 이전 채팅 탭으로 바꾼다. 첫 탭에서는 마지막 탭으로 간다. 입력창에서 쓰는 중에도 된다. |
+| 다음 채팅 탭 (`Next chat tab`) | `Ctrl+PageDown` | 다음 채팅 탭으로 바꾼다. 마지막 탭에서는 첫 탭으로 간다. 입력창에서 쓰는 중에도 된다. |
 | 컨텍스트 바구니 (`Context basket`) | `Alt+;` | 입력창 위 컨텍스트 바구니를 열고 첫 파일에 커서를 둔다. |
 | 편집기 컨텍스트 포함 (`Include editor context`) | `Alt+'` | 입력창 위 편집기 컨텍스트 포함을 켜거나 끈다. |
 | 권한 모드 (`Permission mode`) | `Alt+Q` | 입력창의 권한 모드 선택을 연다. |

@@ -26,7 +26,6 @@ button.view-section-toggle { display: flex; align-items: center; gap: 6px; width
   white-space: normal; overflow-wrap: anywhere; font: inherit; }
 .view-section-toggle > svg { flex: none; }
 .view-section-toggle > span { min-width: 0; }
-.view-section-toggle:hover { background: var(--pomp-hover-bg); }
 .work-page-status, .view-section-status { flex: 0 1 auto; min-width: 0; max-width: 45%; padding: 2px 5px;
   border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius-sm); color: var(--pomp-muted-fg);
   font-size: .85em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

@@ -77,6 +77,9 @@ namespace Pomp.Hosting
 
         /// <summary>User teams directory (tests); defaults to %APPDATA%\Pomp\teams.</summary>
         public string? UserTeamsDirectory { get; set; }
+
+        /// <summary>This PC's model sharing (one per Visual Studio process); null when the host offers none.</summary>
+        public Features.ModelShare.ModelShareService? ModelShare { get; set; }
     }
 
     /// <summary>
@@ -125,6 +128,40 @@ namespace Pomp.Hosting
         private readonly bool _ownsMetrics;
         // A conversation host assigns each engine a private guard/VS state and config overlay.
         private readonly string _engineKey = Guid.NewGuid().ToString("N");
+        // The window's credential changes (shared by every tab of a conversation host) and the count this engine was launched with.
+        private readonly CredentialEpoch _credentialEpoch;
+        private int _engineCredentialEpoch;
+        private int _credentialRestart;
+        /// <summary>True while the engine runs with credentials from before the window's latest change (it lacks new keys or model servers).</summary>
+        internal bool EngineCredentialsStale => Volatile.Read(ref _engineCredentialEpoch) != _credentialEpoch.Current;
+
+        /// <summary>
+        /// A background tab's engine that runs with credentials older than the window's latest change restarts once nothing is in flight
+        /// (its conversation is restored); a busy one is asked again when its run ends. The selected tab is not restarted here: it shows
+        /// the restart notice instead.
+        /// </summary>
+        internal void RestartIfCredentialsStale()
+        {
+            if (Volatile.Read(ref _disposed) == 1 || !EngineCredentialsStale || _bridge.State != BridgeState.Running || SessionChangeBusy()) return;
+            if (Interlocked.CompareExchange(ref _credentialRestart, 1, 0) != 0) return;
+            _logger.Info("A background conversation's engine restarts with the changed accounts and model servers.");
+            Task.Run(async () =>
+            {
+                try { await RestartAsync(_disposeCts.Token).ConfigureAwait(false); }
+                catch (ObjectDisposedException) { }
+                finally { Volatile.Write(ref _credentialRestart, 0); }
+            }).Forget(_logger, "restart with the changed credentials");
+        }
+        /// <summary>Publishes this tab's setup state again (its restart notice follows its own engine; a background tab's state is cached for its next visit).</summary>
+        internal void PublishSetupState()
+        {
+            if (Volatile.Read(ref _disposed) == 0) _providerSetup.Publish();
+        }
+        /// <summary>A sign-in made by <paramref name="origin"/> (another tab's setup) is live for this engine too: its model list is read again.</summary>
+        internal void ForgetModelList(object? origin)
+        {
+            if (Volatile.Read(ref _disposed) == 0 && !ReferenceEquals(origin, _providerSetup)) _providerSetup.ForgetModels();
+        }
         internal event EventHandler? ConversationStateChanged;
         internal string? ConversationId { get { lock (_stateLock) return _info.SessionId; } }
         internal string? ConversationFile { get { lock (_stateLock) return _sessionFile; } }
@@ -200,7 +237,8 @@ namespace Pomp.Hosting
             IPompLogger logger,
             IOmpProcessLauncher? launcher,
             PompSessionOptions? options,
-            bool managedWorkspace = false)
+            bool managedWorkspace = false,
+            CredentialEpoch? credentialEpoch = null)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _environment = environment ?? throw new ArgumentNullException(nameof(environment));
@@ -210,6 +248,8 @@ namespace Pomp.Hosting
             _options = options ?? new PompSessionOptions();
             _resolver = _options.Resolver ?? new OmpExecutableResolver();
             _hostProcessId = _options.HostProcessId ?? CurrentProcessId();
+            _credentialEpoch = credentialEpoch ?? new CredentialEpoch();
+            _engineCredentialEpoch = _credentialEpoch.Current;
 
             _ownsMetrics = _options.Metrics == null;
             _metrics = _options.Metrics ?? new UsageMetrics(MetricsPath(environment), _logger);
@@ -263,7 +303,8 @@ namespace Pomp.Hosting
             _providerCredentials = new ProviderCredentialStore(environment.DataDirectory, _logger);
             _providerSetup = new ProviderSetup(_providerCredentials, settings, environment, _resolver, processLauncher, _options, _ui,
                 () => _bridge.State, (command, token) => _bridge.SendCommandAsync(command, TimeSpan.FromSeconds(15), token),
-                CurrentSetupModel, CurrentSetupThinking, RequestInfoRefresh, () => RestartAsync(_disposeCts.Token), _logger, _disposeCts.Token)
+                CurrentSetupModel, CurrentSetupThinking, RequestInfoRefresh, () => RestartAsync(_disposeCts.Token), _credentialEpoch,
+                () => EngineCredentialsStale, RefreshLocalModelsAsync, _logger, _disposeCts.Token)
             {
                 ResolveEditorModel = ResolveEditorModelAsync,
             };
@@ -589,6 +630,8 @@ namespace Pomp.Hosting
                 launch.Arguments.Add(argument);
             }
 
+            // Counted before the credentials are read: a change while this launch is built leaves the engine stale, never missed.
+            Volatile.Write(ref _engineCredentialEpoch, _credentialEpoch.Current);
             // The store emits only allowlisted API-key names; host-owned POMP_* values are assigned afterwards.
             foreach (var pair in _providerCredentials.GetLaunchEnvironment())
             {
@@ -596,8 +639,13 @@ namespace Pomp.Hosting
             }
 
             // The model servers the user saved in the account tab; the POMP extension registers them (extensions/local-models.ts).
+            // Servers shared by another PC are reached over TLS with a pinned certificate that only this omp trusts (NODE_EXTRA_CA_CERTS).
             var localServers = _providerCredentials.LocalServersLaunchValue();
-            if (localServers != null) launch.Environment["POMP_LOCAL_MODELS"] = localServers;
+            if (localServers != null)
+            {
+                launch.Environment["POMP_LOCAL_MODELS"] = localServers;
+                _providerCredentials.ApplyLocalServersCertificates(launch.Environment);
+            }
             launch.Environment["POMP_HOST"] = "1";
             launch.Environment["POMP_HOST_VERSION"] = _environment.HostVersion ?? string.Empty;
             launch.Environment["POMP_VS_VERSION"] = _environment.VsVersion ?? string.Empty;

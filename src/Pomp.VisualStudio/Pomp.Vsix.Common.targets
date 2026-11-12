@@ -191,7 +191,8 @@
     <MakeDir Directories="$(PompOmpCacheDir)" />
     <Error Code="POMP1013" Condition="!Exists('$(_PompOmpEngine)')"
            Text="Patched omp engine '$(_PompOmpEngine)' is missing. Run build\build-omp.ps1 first (or build\build.ps1, which builds it when needed); the unpatched upstream release is not a substitute." />
-    <DownloadFile Condition="!Exists('$(_PompOmpNotices)')" SourceUrl="$(PompOmpReleaseUrl)THIRD-PARTY-NOTICES.txt" DestinationFolder="$(PompOmpCacheDir)" DestinationFileName="THIRD-PARTY-NOTICES.txt" Retries="2" />
+    <Error Code="POMP1014" Condition="!Exists('$(_PompOmpNotices)')"
+           Text="omp's THIRD-PARTY-NOTICES.txt '$(_PompOmpNotices)' is missing. build\build-omp.ps1 writes it beside the engine it builds (releases since 18.13 publish no notices file)." />
     <GetFileHash Files="$(_PompOmpEngine)" Algorithm="SHA256" HashEncoding="hex">
       <Output TaskParameter="Hash" PropertyName="_PompOmpActualSha256" />
     </GetFileHash>

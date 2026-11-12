@@ -341,6 +341,8 @@ shows that the answer was cut.
 | `sendTargetPicker` | `Ctrl+Alt+T` |
 | `previousTarget` | `Alt+,` |
 | `nextTarget` | `Alt+.` |
+| `previousChatTab` | `Ctrl+PageUp`: the previous chat tab (wraps around), also from the message input |
+| `nextChatTab` | `Ctrl+PageDown`: the next chat tab (wraps around), also from the message input |
 | `contextBasket` | `Alt+;` |
 | `editorContext` | `Alt+'` |
 | `liveFollow` | `Alt+L` |
@@ -404,6 +406,8 @@ It feeds the composer: the context meter, the model / effort chips and the fast 
 Values are tokens.
 
 - The figures are the engine's own `/context` figures.
+- `systemContext` combines the engine's `System context` and, since omp 18.18.9, `Instruction files` rows.
+  Both remain in the existing context-files segment and are excluded from the message estimate.
 - `messagesEstimated`: the engine printed no Messages row for this model.
   Then `messages` is the host's estimate: the usage total minus the printed rows. It is shown with ≈.
 - `hostTools` and `mcpTools` are the host's estimates of the VS and MCP shares inside `systemTools`.
@@ -2275,9 +2279,9 @@ The full list is in docs/architecture.md "작업 영역 신뢰".
 
 ## Engine setup (accounts / login / model / usage)
 
-- A fresh install has no model provider: omp exits at start-up with "No models available".
+- A fresh install has no model provider: omp exits at start-up with "No models available" (omp 18.12: "No default model selected").
 - The host does not retry that case: `bridge/state` goes straight to `failed` with `reason: "setupRequired"`.
-- The page then shows the setup panel in place of the failure banner.
+- The page then shows the setup panel in place of the failure banner. The Remote tab stays usable (another PC's models).
 - The same panel ("계정 · 모델") opens from the status bar at any time.
 - The model and the thinking level are also switched from the composer.
 
@@ -2287,10 +2291,11 @@ omp can only start its RPC mode once a model is usable.
 So sign-in, first run included, runs in a separate, short-lived **auth helper** omp process that the host owns:
 
 ```
-omp --mode rpc --no-session --no-extensions --no-skills --no-rules --model openai/gpt --api-key pomp-setup-placeholder
+omp --mode rpc --no-session --no-extensions --no-skills --no-rules --model openai/gpt-5.5 --api-key pomp-setup-placeholder
 ```
 
 - The placeholder key is passed on the command line only.
+- The model must be an exact id: since omp 18.14 a provider-qualified `--model` that is not one stops the start.
 - `OPENAI_BASE_URL` points at a closed loopback port, so nothing can reach OpenAI with it.
 - The helper never prompts a model.
 - It shares the user's omp profile, so a credential it stores is the one the chat engine uses.
@@ -2308,7 +2313,8 @@ Helper RPC calls:
 **`get_login_providers`**
 
 - Some sign-in methods store their credential under another provider (omp 18.8 `storeCredentialsAs`).
-  Examples: `openai-codex-device` → `openai-codex`, `zai-coding-plan` → `zai`.
+  Examples: `openai-codex-device` → `openai-codex`, `zai-coding-plan` → `zai`,
+  and `devin-cli` / `devin-windsurf` → `devin` (added in omp 18.17).
 - Such a method stays in `providers`, but the host always sends it as `authenticated: false`.
 - Reason: omp answers it from the other provider's stored credential and names no target.
   It would otherwise read as a second account of the same sign-in.
@@ -2350,8 +2356,15 @@ While it runs, omp sends `extension_ui_request`s:
                  model?: { provider, id },
                  effective?: { provider, id, name? },
                  resolving?: true, error? },
-  localServers: [{ id, name, address, hasKey, savedUtc }],
+  localServers: [{ id, name, address, hasKey, savedUtc, shared? }],
+  modelShare?: ModelShare,
   restartRecommended? }
+
+ModelShare = { state: "off"|"starting"|"on"|"failed", error, address, port,
+  addresses: [{ address, name }],   // up IPv4 addresses of this PC; 127.0.0.1 ("This PC only") last
+  models,                           // models the gateway serves while "on", else null
+  code: { code, expiresUtc } | null, // the one-time connection code while it is valid
+  clients: [{ name, createdUtc }] }  // connected PCs (never their tokens)
 
 UsageReport = { provider, account?, plan?,
   limits: [{ label, window?, resetsAt?,
@@ -2372,8 +2385,9 @@ UsageReport = { provider, account?, plan?,
 | `keys` | Saved keys; the key itself never leaves the host. |
 | `thinkingLevels` | `get_available_thinking_levels` for the current model. |
 | `currentThinking` | The session's thinking level. |
-| `localServers` | Saved model servers, never the key. |
-| `restartRecommended` | Credentials changed and the running engine does not offer them yet. |
+| `localServers` | Saved model servers, never the key. `shared`: saved by connecting to another PC's model sharing (a pinned certificate). |
+| `modelShare` | This PC's model sharing; absent when the host does not offer it. |
+| `restartRecommended` | Credentials changed (in any chat tab) after the selected tab's running engine started, so it does not offer them yet. |
 
 - Model lists show a provider `id` of a local server by its `name`.
 
@@ -2414,8 +2428,14 @@ UsageReport = { provider, account?, plan?,
 | `removeKey` | `provider` | Deletes the saved key. |
 | `saveLocalServer` | `id?`, `name`, `address`, `key?` | Saves or replaces a user-run model server. |
 | `removeLocalServer` | `id` | Deletes the saved server. |
+| `shareEnable` | `enabled` | Turns model sharing on or off. |
+| `shareConfigure` | `address`, `port` | Saves the address and port sharing listens on. |
+| `shareNewCode` | | Replaces the connection code. |
+| `shareRevoke` | `name` | Disconnects a connected PC. |
+| `connectSharedModels` | `address`, `code` | Connects to another PC's model sharing and saves it as a model server. |
 | `logout` | `provider` | Signs out of every sign-in omp stored for the provider. |
-| `listModels` | | `get_available_models` → `models` / `modelsError`. |
+| `listModels` | | Saved model servers read again (see below), then `get_available_models` → `models` / `modelsError`. |
+| `refreshModels` | | `listModels`, and every other chat tab drops its list so it is read again when shown (the account tab's refresh). |
 | `setModel` | `provider`, `modelId` | `set_model` for the current session. |
 | `listThinking` | | `get_available_thinking_levels` → `thinkingLevels`. |
 | `setThinking` | `level` | `set_thinking_level`; one of `thinkingLevels`. |
@@ -2461,7 +2481,38 @@ UsageReport = { provider, account?, plan?,
 - `POMP_LOCAL_MODELS` is limited to 30,000 characters; saving more is refused.
 - The POMP extension `local-models.ts` registers each server as provider `id`.
 - Its models come from `<address>/models`, or `<address>/v1/models`, with `api: openai-completions`.
+- Before every `listModels` the host has the engine read the servers again (`/pomp-local-models <request id>`, answered by a
+  `pomp-local-models-result:` notification that never reaches the chat): an answering server's list replaces the old one, a silent
+  one keeps it. Skipped while a reply runs. omp's own model cache is not used.
+- The page asks for `listModels` on every open of a model picker while servers are saved, keeping the last list in view meanwhile.
+- A shared row thinks with the efforts the sharing PC lists for it (`reasoning_efforts`, POMP's engine patch; empty: no thinking);
+  a `provider/id` row without that list thinks like the model in omp's catalog. The efforts go as plain `reasoning_effort` values.
 - `restartRecommended` is set as for key changes.
+
+**Model sharing** (`shareEnable`, `shareConfigure`, `shareNewCode`, `shareRevoke`)
+
+- The PC with internet and sign-ins offers its omp sign-ins to PCs on the LAN. Design: `docs/architecture.md` "모델 공유".
+- `shareEnable` saves the switch. On: `state` becomes `"starting"` at once and `"on"` or `"failed"` (with `error`) later, each
+  change posted as a new `setup/state`.
+- `shareConfigure`: `address` is an IPv4 address of this PC, `port` 1024..65535. Restarts sharing when it is on. Connected PCs
+  saved the old address, so they connect again with a new code; a certificate that does not cover the new address is replaced.
+- `code` is created when sharing starts with no connected PC and by `shareNewCode` (only while `"on"`). It works once, for 10
+  minutes; five wrong attempts end it.
+- `shareRevoke`: the PC's token is refused within 10 s (the gateway re-reads its clients every 10 s).
+- Not queued behind the other setup commands; the sharing service serializes them itself.
+
+**`connectSharedModels`**
+
+- `address`: `host[:port]`, an IPv4 address or a DNS name; port 47611 when omitted.
+- `code`: the 24 letters and digits of the sharing PC's code (case and `-` ignored). It is a secret: never logged or posted back.
+- The host connects over TLS, checks that the certificate matches the code's fingerprint before sending anything, and registers.
+  It answers once the sharing PC admits the new token (≤ 30 s).
+- Success saves a model server `https://<address>/v1` with the issued token (encrypted like the keys) and the certificate; the
+  engine restart follows `saveLocalServer` (at once when no engine runs, else `restartRecommended`). The same address again replaces
+  that server's token and certificate.
+- Every omp start gets the certificates of shared servers through `NODE_EXTRA_CA_CERTS`
+  (`credentials\local-models-ca.pem`); nothing is added to the Windows certificate store.
+- Errors (wrong or used code, another certificate, nothing listening, timeout) come back as `error`.
 
 **`logout`**
 
@@ -2507,6 +2558,9 @@ UsageReport = { provider, account?, plan?,
 - While the engine runs, the host re-reads `get_available_models`.
 - When the new provider's models are listed, the change is live; no restart.
 - Otherwise the state carries `restartRecommended: true` and the page offers *Restart* (`bridge/restart`).
+- Every chat tab runs its own engine from the same credentials. A change made in one tab also reaches the others: an idle one
+  restarts at once by itself (its conversation is restored), a busy one after its run ends or once another tab is selected. A tab
+  still running an older engine when selected carries `restartRecommended: true` in its own state.
 
 **Account screen labels**
 

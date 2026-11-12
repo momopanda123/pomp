@@ -489,6 +489,16 @@ namespace Pomp.VisualStudio.Options
         public string ShortcutNextTarget { get; set; } = "Alt+.";
 
         [PompCategory("단축키", "Shortcuts")]
+        [PompDisplayName("이전 채팅 탭", "Previous chat tab")]
+        [Description("")]
+        public string ShortcutPreviousChatTab { get; set; } = "Ctrl+PageUp";
+
+        [PompCategory("단축키", "Shortcuts")]
+        [PompDisplayName("다음 채팅 탭", "Next chat tab")]
+        [Description("")]
+        public string ShortcutNextChatTab { get; set; } = "Ctrl+PageDown";
+
+        [PompCategory("단축키", "Shortcuts")]
         [PompDisplayName("컨텍스트 바구니", "Context basket")]
         [Description("")]
         public string ShortcutContextBasket { get; set; } = "Alt+;";
@@ -593,7 +603,8 @@ namespace Pomp.VisualStudio.Options
             {
                 var values = Applied;
                 return UiShortcutChords.NormalizePayload(values.ShortcutSend, values.ShortcutSendTargetPicker, values.ShortcutPermissionMode, values.ShortcutAllow, values.ShortcutDeny, values.ShortcutPermissionsView, values.ShortcutToggleFocus,
-                    values.ShortcutPreviousTarget, values.ShortcutNextTarget, values.ShortcutContextBasket, values.ShortcutEditorContext, values.ShortcutLiveFollow, values.ShortcutLiveBookmarks);
+                    values.ShortcutPreviousTarget, values.ShortcutNextTarget, values.ShortcutContextBasket, values.ShortcutEditorContext, values.ShortcutLiveFollow, values.ShortcutLiveBookmarks,
+                    values.ShortcutPreviousChatTab, values.ShortcutNextChatTab);
             }
         }
 
@@ -1052,6 +1063,8 @@ namespace Pomp.VisualStudio.Options
                 ShortcutSendTargetPicker = page.ShortcutSendTargetPicker;
                 ShortcutPreviousTarget = page.ShortcutPreviousTarget;
                 ShortcutNextTarget = page.ShortcutNextTarget;
+                ShortcutPreviousChatTab = page.ShortcutPreviousChatTab;
+                ShortcutNextChatTab = page.ShortcutNextChatTab;
                 ShortcutContextBasket = page.ShortcutContextBasket;
                 ShortcutEditorContext = page.ShortcutEditorContext;
                 ShortcutLiveFollow = page.ShortcutLiveFollow;
@@ -1119,6 +1132,8 @@ namespace Pomp.VisualStudio.Options
                 ShortcutSendTargetPicker = source.ShortcutSendTargetPicker;
                 ShortcutPreviousTarget = source.ShortcutPreviousTarget;
                 ShortcutNextTarget = source.ShortcutNextTarget;
+                ShortcutPreviousChatTab = source.ShortcutPreviousChatTab;
+                ShortcutNextChatTab = source.ShortcutNextChatTab;
                 ShortcutContextBasket = source.ShortcutContextBasket;
                 ShortcutEditorContext = source.ShortcutEditorContext;
                 ShortcutLiveFollow = source.ShortcutLiveFollow;
@@ -1186,6 +1201,8 @@ namespace Pomp.VisualStudio.Options
             public string? ShortcutSendTargetPicker { get; }
             public string? ShortcutPreviousTarget { get; }
             public string? ShortcutNextTarget { get; }
+            public string? ShortcutPreviousChatTab { get; }
+            public string? ShortcutNextChatTab { get; }
             public string? ShortcutContextBasket { get; }
             public string? ShortcutEditorContext { get; }
             public string? ShortcutLiveFollow { get; }

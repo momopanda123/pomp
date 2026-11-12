@@ -3,8 +3,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Threading;
+using Pomp.Bridge;
 using Pomp.Diagnostics;
 using Pomp.Features;
+using Pomp.Features.ModelShare;
 using Pomp.Hosting;
 using Pomp.Protocol;
 using Pomp.Tools;
@@ -54,6 +56,8 @@ namespace Pomp.VisualStudio.Composition
             Adapters = adapters;
             Commands = new PompCommandActions(package, this);
             EditorFollow = new EditorFollowService(this);
+            // One share per Visual Studio process, started through the same kind of launcher the engine uses (kill-on-close job object).
+            ModelShare = new ModelShareService(environment, settings, new SystemOmpProcessLauncher(logger), new VsModelShareCertificateFactory(), logger);
         }
 
         public PompPackage Package { get; }
@@ -75,6 +79,9 @@ namespace Pomp.VisualStudio.Composition
 
         /// <summary>Host-only edit traces, navigation and owned bookmarks; never invokes the model.</summary>
         public EditorFollowService EditorFollow { get; }
+
+        /// <summary>This PC's model sharing (Accounts tab); started when it was left on, stopped with the services.</summary>
+        public ModelShareService ModelShare { get; }
 
         /// <summary>Reads the host's current epoch, not a potentially delayed WebView projection.</summary>
         public void RefreshEditorSession()
@@ -135,6 +142,7 @@ namespace Pomp.VisualStudio.Composition
 
             var services = new PompServices(package, logger, settings, environment, adapters);
             services.SubscribeLifecycleEvents();
+            services.ModelShare.StartIfEnabled();
             Volatile.Write(ref currentServices, services);
 
             logger.Info($"Pomp {environment.HostVersion} loaded in Visual Studio {environment.VsVersion} ({(System.Environment.Is64BitProcess ? "x64" : "x86")}). Extension folder: {environment.ExtensionDirectory}");
@@ -229,6 +237,16 @@ namespace Pomp.VisualStudio.Composition
                 Logger.Warn("Disposing the agent session failed.", ex);
             }
 
+            try
+            {
+                // Stops the TLS listener and the omp share servers before the logger closes.
+                ModelShare.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Stopping model sharing failed.", ex);
+            }
+
             Adapters.Dispose();
             Logger.Info("Pomp services disposed.");
             Logger.Dispose();
@@ -244,7 +262,7 @@ namespace Pomp.VisualStudio.Composition
                     registry.Register(tool);
                 return registry;
             }
-            return new PompConversationHost(Settings, Environment, Adapters, Logger, CreateRegistry);
+            return new PompConversationHost(Settings, Environment, Adapters, Logger, CreateRegistry, null, ModelShare);
         }
 
         private void SubscribeLifecycleEvents()

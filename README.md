@@ -7,8 +7,8 @@ Visual Studio 2017(15.9) · 2019(16.10+) · 2022 · 2026을 지원하고, 화면
 
 | 구성 요소 | 버전 | 맡는 일 |
 |---|---|---|
-| POMP | 0.5.10 | Visual Studio 확장: 채팅 화면, VS 도구, 승인 카드, 에이전트·팀 관리 |
-| omp | 18.12.6 | 함께 들어 있는 대화·에이전트 엔진 [oh-my-pi](https://github.com/can1357/oh-my-pi)(MIT) |
+| POMP | 0.6.0 | Visual Studio 확장: 채팅 화면, VS 도구, 승인 카드, 에이전트·팀 관리 |
+| omp | 18.18.9 | 함께 들어 있는 대화·에이전트 엔진 [oh-my-pi](https://github.com/can1357/oh-my-pi)(MIT) |
 
 ![POMP 소개](docs/media/pomp-intro.gif)
 
@@ -104,6 +104,7 @@ Visual Studio 2017(15.9) · 2019(16.10+) · 2022 · 2026을 지원하고, 화면
 | 에이전트 · 팀 · 조언자 | 역할 에이전트와 팀에게 일을 맡기고, 조언자가 작업을 지켜보며 의견을 낸다. |
 | 작업 탭 · 도구 탭 | 계획·변경 기록·코드 점검, 그리고 권한·스킬·MCP·규칙·워크플로·지식 관리. |
 | 계정 · 모델 | 구독 로그인, API 키, 직접 띄운 모델 서버. 채팅·에이전트마다 모델을 고르고 사용량을 본다. |
+| 원격 탭 | 인터넷 없는 PC가 같은 네트워크에서 로그인한 PC의 모델을 연결 코드로 빌려 쓴다. 편집·빌드는 그 PC의 VS에서 그대로 한다. |
 | draw.io 다이어그램 | 코드에서 다이어그램을 그리고, 다이어그램에서 고친 내용을 코드에 반영한다. |
 | `.pomp` 폴더 | 프로젝트용 에이전트·규칙·스킬·정책은 저장소와 함께, 대화 기록은 `.pomp\local\`(커밋 제외)에 둔다. |
 
@@ -141,7 +142,7 @@ VS 2017·2019는 32비트, 2022·2026은 64비트 프로그램이어서 패키�
 2. **VSIX 파일**: VS 버전에 맞는 VSIX를 고르고(위 표), Visual Studio를 모두 닫은 뒤 더블클릭해 설치한다.
    직접 빌드하려면 [개발 문서](docs/development.md#빌드)를 따른다(`build\build.ps1` → `artifacts\`).
 3. VS를 다시 열고 **보기 > 다른 창 > POMP**(또는 `Shift+Alt+Q`)로 연다. 처음에는 계정 탭이 열린다 — 로그인하거나 API 키를 넣으면
-   바로 시작한다.
+   바로 시작한다. 인터넷이 없는 PC는 원격 탭에서 같은 네트워크의 다른 PC 모델에 연결한다.
 
 처음 쓰는 순서는 [빠른 시작](docs/quick-start.md)에 단계별로 정리했다.
 
@@ -194,7 +195,7 @@ VS 2017·2019는 32비트, 2022·2026은 64비트 프로그램이어서 패키�
 전체 조건은 [`LICENSE.txt`](LICENSE.txt). Marketplace Publisher ID는 **momopanda123**이다.
 
 POMP의 대화·에이전트 엔진 **omp**는 [oh-my-pi](https://github.com/can1357/oh-my-pi)의 **MIT 라이선스** 소스에
-POMP의 [로컬 패치](engines/omp/pomp-v18.12.6.patch)를 적용해 빌드한다. 상위 코드의 MIT 권리는 POMP의 PolyForm
+POMP의 [로컬 패치](engines/omp/pomp-v18.18.9.patch)를 적용해 빌드한다. 상위 코드의 MIT 권리는 POMP의 PolyForm
 라이선스로 바뀌지 않으며, POMP가 작성한 패치는 이 저장소의 라이선스를 따른다. VSIX의
 `omp/THIRD-PARTY-NOTICES.txt`에 포함된 오픈 소스 구성 요소의 고지가 들어 있다. 그 밖의 포함된 구성 요소도
 각자의 라이선스를 유지한다(포함된 구성 요소의 `LICENSE.txt`·`THIRD-PARTY-NOTICES.txt` 참조).

@@ -63,6 +63,8 @@ namespace Pomp.Features
                         ["pickSendTarget"] = Key(chat.SendTargetPicker),
                         ["previousSendTarget"] = Key(chat.PreviousTarget),
                         ["nextSendTarget"] = Key(chat.NextTarget),
+                        ["previousChatTab"] = Key(chat.PreviousChatTab) + " (also while typing; wraps around)",
+                        ["nextChatTab"] = Key(chat.NextChatTab) + " (also while typing; wraps around)",
                         ["contextBasket"] = Key(chat.ContextBasket) + " (arrow keys move between its files, Space checks one)",
                         ["includeEditorContext"] = Key(chat.EditorContext),
                         ["liveFollow"] = Key(chat.LiveFollow) + " (host-only; no model call)",

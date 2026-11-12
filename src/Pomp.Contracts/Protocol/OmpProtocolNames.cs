@@ -111,7 +111,7 @@ namespace Pomp.Protocol
     /// <summary>
     /// Shape of omp's tool-approval select: "Allow tool: &lt;name&gt;" and a final "Deny".
     /// Before 18.12.6 it offers "Approve" (possibly followed by a session grant);
-    /// cached approvals in 18.12.6 offer scoped grants first and "Approve Once" before the optional session grant.
+    /// cached approvals since 18.12.6 (unchanged through 18.18.9) offer scoped grants first and "Approve Once" before the optional session grant.
     /// The host must only choose the approval for this call, never an engine-owned grant.
     /// </summary>
     public static class OmpApprovalPrompt

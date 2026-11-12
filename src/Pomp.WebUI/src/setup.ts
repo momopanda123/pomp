@@ -7,11 +7,13 @@ import type { MessageKey, Translate } from './i18n';
 import {
   SETUP_REQUIRED,
   type BridgeStatePayload,
+  type ModelShareStateName,
   type SetupEditorModel,
   type SetupLogin,
   type SetupLoginStateName,
   type SetupModel,
   type SetupProvider,
+  type SetupModelShare,
   type SetupStatePayload,
   type UsageLimit,
   type UsageReport,
@@ -173,6 +175,67 @@ function normalizeEditorModel(value: unknown): SetupEditorModel {
   return editor;
 }
 
+const SHARE_STATES: readonly ModelShareStateName[] = ['off', 'starting', 'on', 'failed'];
+const MAX_SHARE_ADDRESSES = 64;
+const MAX_SHARE_CLIENTS = 200;
+
+/** The sharing state as the panel renders it; undefined (the host does not offer sharing) for anything that is not an object. */
+function normalizeModelShare(value: unknown): SetupModelShare | undefined {
+  if (!isRecord(value) || Array.isArray(value)) return undefined;
+  const short = (field: unknown, max: number): string | undefined => {
+    const found = text(field);
+    return found && found.length <= max && !/[\u0000-\u001f\u007f]/u.test(found) ? found : undefined;
+  };
+  const port = finite(value.port);
+  const models = finite(value.models);
+  const rawCode = isRecord(value.code) ? value.code : undefined;
+  const code = rawCode ? short(rawCode.code, 64) : undefined;
+  const seen = new Set<string>();
+  return {
+    state: SHARE_STATES.find((state) => state === value.state) ?? 'off',
+    error: text(value.error)?.slice(0, 4000) || null,
+    address: short(value.address, 255) ?? null,
+    port: port !== undefined && Number.isInteger(port) && port >= 1 && port <= 65535 ? port : DEFAULT_SHARE_PORT,
+    addresses: rows(value.addresses, (row) => {
+      const address = short(row.address, 255);
+      if (!address || seen.has(address)) return null;
+      seen.add(address);
+      return { address, name: short(row.name, 256) ?? '' };
+    }, MAX_SHARE_ADDRESSES),
+    models: models !== undefined && Number.isInteger(models) && models >= 0 ? models : null,
+    code: rawCode && code ? { code, expiresUtc: text(rawCode.expiresUtc) ?? '' } : null,
+    clients: rows(value.clients, (row) => {
+      const name = short(row.name, 128);
+      return name ? { name, createdUtc: text(row.createdUtc) ?? '' } : null;
+    }, MAX_SHARE_CLIENTS),
+  };
+}
+
+/** The port the host shares models on when none is configured, and the one `connectSharedModels` assumes when omitted. */
+export const DEFAULT_SHARE_PORT = 47611;
+
+/** A connection code as the host takes it: uppercase, without '-' and white space (the grouped text is tolerated as typed). */
+export const normalizeShareCode = (code: string): string => code.replace(/[\s-]+/gu, '').toUpperCase();
+
+/** Whether a normalized connection code has the shape of one (24 RFC 4648 base32 characters). */
+export const shareCodeValid = (normalized: string): boolean => /^[A-Z2-7]{24}$/.test(normalized);
+
+/** The sharing PC's address as typed (`host` or `host:port`, host = IPv4 or DNS name), or null when the host would refuse it. */
+export function parseShareAddress(input: string): { host: string; port: number } | null {
+  const value = input.trim();
+  const match = /^([A-Za-z0-9.-]{1,253})(?::(\d{1,5}))?$/.exec(value);
+  if (!match) return null;
+  const host = match[1];
+  const port = match[2] === undefined ? DEFAULT_SHARE_PORT : Number(match[2]);
+  if (port < 1 || port > 65535) return null;
+  if (/^[\d.]+$/.test(host)) {
+    const parts = host.split('.');
+    return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255) ? { host, port } : null;
+  }
+  const labels = host.split('.');
+  return labels.every((label) => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label)) ? { host, port } : null;
+}
+
 /**
  * A defensive copy of a `setup/state` payload. Only the documented fields are copied (so a field the host should not have sent
  * is dropped, never kept), missing lists become empty, an unknown login state reads as idle. Absent optional fields stay absent:
@@ -192,7 +255,7 @@ export function normalizeSetup(payload: SetupStatePayload): SetupState {
     ),
     localServers: rows(source.localServers, (row) =>
       typeof row.id === 'string' && /^local-[a-z0-9-]{1,40}$/.test(row.id) && typeof row.name === 'string' && typeof row.address === 'string'
-        ? { id: row.id, name: row.name, address: row.address, hasKey: row.hasKey === true, savedUtc: text(row.savedUtc) ?? '' } : null,
+        ? { id: row.id, name: row.name, address: row.address, hasKey: row.hasKey === true, savedUtc: text(row.savedUtc) ?? '', ...(row.shared === true ? { shared: true } : {}) } : null,
     ),
   };
   localServerNames.clear();
@@ -245,6 +308,8 @@ export function normalizeSetup(payload: SetupStatePayload): SetupState {
   if (usage) next.usage = usage;
   if (source.usageLoading === true) next.usageLoading = true;
   if (source.restartRecommended === true) next.restartRecommended = true;
+  const modelShare = normalizeModelShare(source.modelShare);
+  if (modelShare) next.modelShare = modelShare;
   return next;
 }
 

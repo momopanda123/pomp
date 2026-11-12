@@ -1,18 +1,20 @@
 <#
 .SYNOPSIS
-    Build POMP's patched Windows x64 omp engine from the upstream v18.12.6 tag.
+    Build POMP's patched Windows x64 omp engine from the upstream v18.18.9 tag.
 .DESCRIPTION
-    Requires Git, Bun >= 1.4, Rust/Cargo (MSVC x64), and Visual Studio C++ tools
+    Requires Git, Bun >= 1.4.4, Rust/Cargo (MSVC x64), and Visual Studio C++ tools
     (including the CMake/Ninja components used by upstream's native build).
     Clones the exact pinned commit into a fresh ignored work directory, applies
-    engines/omp/pomp-v18.12.6.patch, installs the pinned Bun lockfile, builds
+    engines/omp/pomp-v18.18.9.patch, installs the pinned Bun lockfile, builds
     the Windows native addon and the release-style Windows x64 executable.
     Only after a successful build copies the executable and the tag's verified
-    THIRD-PARTY-NOTICES.txt to artifacts/engines/omp/18.12.6/ by default.
+    notices (the text `omp --license` prints: the OMP license, then the CLI's
+    and the native addon's THIRD-PARTY-NOTICES.txt) as THIRD-PARTY-NOTICES.txt
+    to artifacts/engines/omp/18.18.9/ by default.
     Prints the SHA-256 and size to pin in engines/omp/engine.props before VSIX
     packaging. No binary hash is assumed before the first successful build.
 .PARAMETER OutputPath
-    Destination for omp.exe; defaults to artifacts/engines/omp/18.12.6/omp.exe.
+    Destination for omp.exe; defaults to artifacts/engines/omp/18.18.9/omp.exe.
     Notices always go beside the executable (VSIX packaging expects the default
     directory, even when build/build.ps1 -OmpExe uses another executable path).
 .PARAMETER BunPath
@@ -35,8 +37,8 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$version = '18.12.6'
-$commit = '45c35e40c46166dc726ccc52f5d27f40f2449f99'
+$version = '18.18.9'
+$commit = '50da2d357039404a81d7c64622740ce13e4c54b4'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $engineDir = Join-Path $repo 'engines\omp'
 $patch = Join-Path $engineDir "pomp-v$version.patch"
@@ -103,12 +105,17 @@ try {
     Invoke-Native 'git' @('-C', $work, 'apply', '--check', $patch) $repo
     Invoke-Native 'git' @('-C', $work, 'apply', $patch) $repo
 
-    # The upstream tag contains the release notice payload. Check against the
-    # separately pinned notice digest, not the changed executable's digest.
+    # Since 18.13 the tag has no top-level notices file: the executable embeds the OMP license and the notices of the CLI
+    # and of the native addon, and `omp --license` prints them (packages/coding-agent/src/cli/license.ts). Compose the
+    # same text from the tag and check it against the separately pinned digest, not the changed executable's digest.
     $notices = Join-Path $work 'THIRD-PARTY-NOTICES.txt'
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $sections = @('packages\coding-agent\LICENSE', 'packages\coding-agent\THIRD-PARTY-NOTICES.txt', 'packages\natives\THIRD-PARTY-NOTICES.txt') |
+        ForEach-Object { [IO.File]::ReadAllText((Join-Path $work $_), $utf8).TrimEnd() }
+    [IO.File]::WriteAllText($notices, "OMP License and Third-Party Notices`n`n" + ($sections -join "`n`n") + "`n", $utf8)
     $noticeHash = (Get-FileHash -LiteralPath $notices -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($noticeHash -ne $props.Project.PropertyGroup.PompOmpNoticesSha256.ToLowerInvariant()) {
-        throw "Upstream THIRD-PARTY-NOTICES.txt SHA-256 mismatch: $noticeHash"
+        throw "Composed THIRD-PARTY-NOTICES.txt SHA-256 mismatch: $noticeHash"
     }
 
     Invoke-Native 'bun' @('install', '--frozen-lockfile') $work

@@ -13,8 +13,9 @@ import { PartnerPicker, type TabSwitch } from './components/PartnerPicker';
 import { ChatQueue } from './components/ChatQueue';
 import { LiveAgentProgress } from './components/LiveAgentProgress';
 import { BtwPanel } from './components/BtwPanel';
-import { TabBar, type ShellTab } from './components/TabBar';
+import { availableWhileRequired, TabBar, type ShellTab } from './components/TabBar';
 import { SetupPanel } from './components/SetupPanel';
+import { RemotePanel } from './components/RemotePanel';
 import { AgentsPanel, type AgentsView } from './components/AgentsPanel';
 import { WorkTab, type RequestedWorkView } from './components/work/WorkTab';
 import { ToolsTab } from './components/tools/ToolsTab';
@@ -165,7 +166,7 @@ export function App() {
     const current = latest.current; const tabs = current.tabs;
     return !!tabs && tabs.sessionId === current.session?.sessionId && tabs.partner.kind !== 'main';
   }
-  const activeTab = setupRequired ? 'accounts' : tab;
+  const activeTab = setupRequired && !availableWhileRequired(tab) ? 'accounts' : tab;
   const tabBadges = useTabBadges(activeTab, { sessionId, items: state.items, replaying: state.replaying, replayRevision: state.replayRevision, requests: state.permissions.length + state.dialogs.length });
   const activeTabRef = useRef(activeTab); activeTabRef.current = activeTab;
   const wasRequired = useRef(false);
@@ -174,10 +175,15 @@ export function App() {
     wasRequired.current = setupRequired;
   }, [setupRequired]);
   const focused = useRef(false);
+  /** The tab bar's arrow keys moved to Chat: the focus stays in the tab list (its own navigation) instead of going to the composer. */
+  const chatByTabKeys = useRef(false);
   useEffect(() => {
+    const byKeys = chatByTabKeys.current;
+    chatByTabKeys.current = false;
     if (!connected || activeTab !== 'chat') { focused.current = false; return; }
     if (focused.current) return;
     focused.current = true;
+    if (byKeys) return;
     const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
     return () => { window.cancelAnimationFrame(frame); focused.current = false; };
   }, [connected, activeTab]);
@@ -286,7 +292,7 @@ export function App() {
     if (!canSwitchTab()) return false;
     const requestId = newId();
     if (!send('session/new', { requestId })) { dispatch({ type: 'localNotice', level: 'error', message: makeTranslate(latest.current.locale)('error.hostUnavailable') }); return false; }
-    dispatch({ type: 'newSessionRequested', requestId }); setTab('chat'); setListOpen(false); return true;
+    dispatch({ type: 'newSessionRequested', requestId, fresh: true }); setTab('chat'); setListOpen(false); return true;
   }, [canSwitchTab]);
   const switchSession = useCallback((requestId: string, root: string, id: string): boolean => {
     if (!canSwitchTab() || !send('session/history', { action: 'switch', requestId, root, id })) return false;
@@ -366,8 +372,9 @@ export function App() {
     if (prefillSeq === undefined || focusedPrefill.current === prefillSeq || activeTab !== 'chat' || modal) return;
     focusedPrefill.current = prefillSeq; window.requestAnimationFrame(() => inputRef.current?.focus());
   }, [prefillSeq, activeTab, modal]);
-  const changeTab = (next: ShellTab) => {
-    if (setupRequired && next !== 'accounts') return;
+  const changeTab = (next: ShellTab, byKeys = false) => {
+    if (setupRequired && !availableWhileRequired(next)) return;
+    chatByTabKeys.current = byKeys && next === 'chat';
     if (next === 'work') openWork();
     else { setTab(next); if (next === 'agents' && connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }
   };
@@ -416,7 +423,7 @@ export function App() {
     <TabBar active={activeTab} onChange={changeTab} bridge={state.bridge} required={setupRequired} badges={tabBadges} accountAttention={accountAttention} inert={false} engine={state.engine} />
     <main className="main">
       <section id="page-chat" className="tab-page chat-page" role="tabpanel" aria-labelledby="tab-chat" hidden={activeTab !== 'chat'} inert={activeTab !== 'chat' || undefined}>
-        <SessionHeader session={state.session} history={history} disabled={sessionBlocked} newDisabled={tabBlocked} onNew={newSession} listOpen={listOpen} onToggleList={() => { if (listOpen) closeList(); else openList(); }}><PartnerPicker tabs={state.tabs} agents={state.agents} replies={state.conversationReplies} sessionId={sessionId} disabled={tabBlocked} busy={busy || state.session?.hasPendingAsyncWork === true} lockedTitle={newSessionPending ? translate('partner.locked') : undefined} request={partnerRequest} onSwitch={switchTab} onRefreshRoster={() => { if (connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }} /></SessionHeader>
+        <SessionHeader session={state.session} history={history} disabled={sessionBlocked} newDisabled={tabBlocked} onNew={newSession} listOpen={listOpen} onToggleList={() => { if (listOpen) closeList(); else openList(); }}><PartnerPicker tabs={state.tabs} agents={state.agents} replies={state.conversationReplies} sessionId={sessionId} disabled={tabBlocked} busy={busy || state.session?.hasPendingAsyncWork === true} lockedTitle={newSessionPending ? translate('partner.locked') : undefined} request={partnerRequest} shortcuts={shortcuts} input={inputRef} onSwitch={switchTab} onRefreshRoster={() => { if (connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }} /></SessionHeader>
         <div className="conversation-list-anchor">{listOpen && <div ref={listRef} id="conversation-list" className="conversation-list"><SessionHistory locale={state.locale} sessionId={sessionId} sessionName={state.session?.sessionName} partner={scopedTabs?.partner ?? { kind: 'main' }} history={history} disabled={sessionBlocked} newDisabled={tabBlocked} switchDisabled={tabBlocked} onNew={newSession} onOpened={closeList} onClose={closeList} /></div>}</div>
         <ConnectionBanner bridge={state.bridge} onRestart={() => send('bridge/restart', {})} onOpenLog={() => send('log/open', {})} /><EngineNotice engine={state.engine} /><UndeliveredStatusBanner />
         {(recovering || recoveryFailed) && <div className="composer-error" role="status" data-testid="session-recovery">
@@ -451,8 +458,11 @@ export function App() {
       <section id="page-tools" className="tab-page" role="tabpanel" aria-labelledby="tab-tools" hidden={activeTab !== 'tools'} inert={activeTab !== 'tools' || undefined}>
         <ToolsTab active={activeTab === 'tools'} locale={state.locale} workspaceKey={workspaceKey} sessionId={sessionId} connected={connected} busy={busy} newSessionPending={newSessionPending} inert={activeTab !== 'tools'} requestedView={toolsView} onViewChange={setToolsView} onUseSkill={name => { setTab('chat'); setListOpen(false); setInsertSkill(previous => ({ name, seq: (previous?.seq ?? 0) + 1 })); }} rules={state.activeRules} knowledgeDraft={state.knowledgeDraft} onInsertText={insertIntoChat} />
       </section>
+      <section id="page-remote" className="tab-page" role="tabpanel" aria-labelledby="tab-remote" hidden={activeTab !== 'remote'} inert={activeTab !== 'remote' || undefined}>
+        {activeTab === 'remote' && <RemotePanel setup={state.setup} replies={state.setupReplies} required={setupRequired} connected={connected} />}
+      </section>
       <section id="page-accounts" className="tab-page" role="tabpanel" aria-labelledby="tab-accounts" hidden={activeTab !== 'accounts'} inert={activeTab !== 'accounts' || undefined}>
-        {activeTab === 'accounts' && <SetupPanel setup={state.setup} replies={state.setupReplies} sessionModel={state.session?.model} required={setupRequired} connected={connected} locale={state.locale} inert={false} />}
+        {activeTab === 'accounts' && <SetupPanel setup={state.setup} replies={state.setupReplies} sessionModel={state.session?.model} required={setupRequired} connected={connected} locale={state.locale} inert={false} onOpenRemote={() => changeTab('remote')} />}
       </section>
     </main>
   </div></MainRoleContext></RolesContext></TeamsContext></KnowledgeProvider></I18nContext></LocaleContext>;

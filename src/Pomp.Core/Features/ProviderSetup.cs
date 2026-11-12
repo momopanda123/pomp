@@ -12,6 +12,7 @@ using Newtonsoft.Json.Linq;
 using Pomp.Adapters;
 using Pomp.Bridge;
 using Pomp.Diagnostics;
+using Pomp.Features.ModelShare;
 using Pomp.Hosting;
 using Pomp.Internal;
 using Pomp.Protocol;
@@ -48,6 +49,9 @@ namespace Pomp.Features
         private readonly Func<string?> _currentThinking;
         private readonly Action _refreshInfo;
         private readonly Func<Task> _restart;
+        private readonly CredentialEpoch _credentialEpoch;
+        private readonly Func<bool> _engineCredentialsStale;
+        private readonly Func<CancellationToken, Task> _refreshLocalModels;
         private readonly Func<ProcessStartInfo, IProviderLoginProcess> _startLogin;
         private readonly Action<string> _openUrl;
         private readonly Func<OmpLaunchOptions, CancellationToken, Task<string>> _runUsage;
@@ -56,6 +60,7 @@ namespace Pomp.Features
         private readonly TimeSpan _loginTimeout;
         private readonly IPompLogger _logger;
         private readonly CancellationToken _token;
+        private readonly ModelShareService? _modelShare;
         private IProviderLoginProcess? _login;
         private LoginRun? _run;
         private JObject _loginState = new JObject { ["state"] = "idle" };
@@ -68,17 +73,21 @@ namespace Pomp.Features
         private JObject? _usage;
         private bool _usageLoading;
         private bool _helperStale;
-        private bool _restartRecommended;
         private bool _disposed;
 
+        /// <param name="credentialEpoch">The window's credential changes, shared by every tab's engine.</param>
+        /// <param name="engineCredentialsStale">True while this engine runs with credentials from before the latest change.</param>
+        /// <param name="refreshLocalModels">Has the engine read the saved model servers' lists again (before a model list is read).</param>
         public ProviderSetup(ProviderCredentialStore credentials, IPompSettings settings, IPompHostEnvironment environment,
             OmpExecutableResolver resolver, IOmpProcessLauncher launcher, PompSessionOptions options, UiHub ui, Func<BridgeState> bridgeState,
             Func<JObject, CancellationToken, Task<ResponseFrame>> send, Func<JObject?> currentModel, Func<string?> currentThinking,
-            Action refreshInfo, Func<Task> restart, IPompLogger logger, CancellationToken token)
+            Action refreshInfo, Func<Task> restart, CredentialEpoch credentialEpoch, Func<bool> engineCredentialsStale,
+            Func<CancellationToken, Task> refreshLocalModels, IPompLogger logger, CancellationToken token)
         {
             _credentials = credentials; _settings = settings; _environment = environment; _resolver = resolver; _ui = ui;
             _bridgeState = bridgeState; _send = send; _currentModel = currentModel; _currentThinking = currentThinking; _refreshInfo = refreshInfo;
-            _restart = restart; _logger = logger; _token = token;
+            _restart = restart; _credentialEpoch = credentialEpoch; _engineCredentialsStale = engineCredentialsStale; _refreshLocalModels = refreshLocalModels;
+            _logger = logger; _token = token;
             _startLogin = options.StartProviderLogin ?? SystemProviderLoginProcess.Start;
             _openUrl = options.OpenUrl ?? DefaultOpenUrl;
             _providersTimeout = options.AuthHelperProvidersTimeout;
@@ -88,6 +97,8 @@ namespace Pomp.Features
             _logoutTimeout = options.UsageTimeout < MaxLogoutTime ? options.UsageTimeout : MaxLogoutTime;
             _runLogout = (launch, cancellationToken) => OmpLogoutRunner.RunAsync(launcher, launch, _logoutTimeout, logger, cancellationToken);
             _helper = new OmpAuthHelper(launcher, BuildHelperLaunch, options.Bridge, logger, options.AuthHelperIdleTimeout, options.AuthHelperStartTimeout);
+            _modelShare = options.ModelShare;
+            if (_modelShare != null) _modelShare.Changed += OnModelShareChanged;
         }
 
         /// <summary>
@@ -147,12 +158,33 @@ namespace Pomp.Features
                         _credentials.RemoveLocalServer(Text(request, "id"));
                         restart = CredentialsChanged();
                         break;
+                    case "connectSharedModels":
+                        await ConnectSharedModelsAsync(request).ConfigureAwait(false);
+                        restart = CredentialsChanged();
+                        break;
+                    case "shareEnable":
+                        await RequireModelShare().SetEnabledAsync(request.GetBool("enabled") ?? throw InvalidShareCommand(), _token).ConfigureAwait(false);
+                        break;
+                    case "shareConfigure":
+                        await RequireModelShare().ConfigureAsync(Text(request, "address") ?? throw InvalidShareCommand(), SharePort(request), _token).ConfigureAwait(false);
+                        break;
+                    case "shareNewCode":
+                        RequireModelShare().NewCode();
+                        break;
+                    case "shareRevoke":
+                        RequireModelShare().Revoke(Text(request, "name") ?? throw InvalidShareCommand());
+                        break;
                     case "logout":
                         restart = await LogoutAsync(request).ConfigureAwait(false);
                         await ReloadProvidersAfterLogoutAsync().ConfigureAwait(false);
                         break;
                     case "listModels":
                         await ListModelsAsync().ConfigureAwait(false);
+                        break;
+                    case "refreshModels":
+                        // The account tab's refresh: this tab reads its lists now, the other tabs when their model list is next shown.
+                        await ListModelsAsync().ConfigureAwait(false);
+                        _credentialEpoch.NotifyModelListsChanged(this);
                         break;
                     case "setModel":
                         await SetModelAsync(request).ConfigureAwait(false);
@@ -192,7 +224,12 @@ namespace Pomp.Features
             if (restart) await RestartSafelyAsync().ConfigureAwait(false);
         }
 
-        private static bool RunsUnqueued(string? action) => action == "refresh" || action == "answerPrompt" || action == "cancelLogin" || action == "listUsage";
+        /// <summary>
+        /// Sharing commands only touch <see cref="ModelShareService"/>, which serializes its own work: starting the shared servers may take
+        /// seconds and must not hold up the other setup commands. Connecting to another PC saves a server and is queued like the rest.
+        /// </summary>
+        private static bool RunsUnqueued(string? action) => action == "refresh" || action == "answerPrompt" || action == "cancelLogin" || action == "listUsage"
+            || action == "shareEnable" || action == "shareConfigure" || action == "shareNewCode" || action == "shareRevoke";
 
         public void Publish(string? requestId = null, string? error = null)
         {
@@ -207,7 +244,8 @@ namespace Pomp.Features
                     {
                         ["login"] = _loginState.DeepClone(),
                         ["apiKeyProviders"] = ProviderCredentialStore.ApiKeyProviders(),
-                        ["restartRecommended"] = _restartRecommended,
+                        // The running engine started before the latest credential change (in this tab or another): it needs a restart.
+                        ["restartRecommended"] = _bridgeState() == BridgeState.Running && _engineCredentialsStale(),
                         ["usageLoading"] = _usageLoading,
                     };
                     if (_providers != null) state["providers"] = _providers.DeepClone();
@@ -220,6 +258,8 @@ namespace Pomp.Features
                 }
                 state["keys"] = _credentials.SavedKeys();
                 state["localServers"] = _credentials.LocalServers();
+                var modelShare = ModelShareState();
+                if (modelShare != null) state["modelShare"] = modelShare;
                 var model = _currentModel();
                 if (model != null) state["currentModel"] = model;
                 var thinking = SetupSanitize.Token(_currentThinking());
@@ -234,8 +274,7 @@ namespace Pomp.Features
         {
             lock (_lock)
             {
-                if (state == BridgeState.Running) _restartRecommended = false;
-                else
+                if (state != BridgeState.Running)
                 {
                     // A list belongs to the credentials and the model of one running process.
                     _models = null;
@@ -272,15 +311,35 @@ namespace Pomp.Features
             Publish();
         }
 
+        /// <summary>
+        /// A sign-in in another tab reached this engine without a restart: the cached model list is dropped, so the next model picker asks
+        /// the engine again (the page asks when the state carries no list).
+        /// </summary>
+        public void ForgetModels()
+        {
+            lock (_lock)
+            {
+                _models = null;
+                _modelsError = null;
+            }
+
+            Publish();
+        }
+
+        /// <summary>
+        /// What every engine of the window starts with changed: each one launched before now runs with stale credentials (this tab's
+        /// shows the restart notice, the other tabs' restart once idle). True when this engine is not running and should start now.
+        /// </summary>
         private bool CredentialsChanged()
         {
             lock (_lock)
             {
                 _models = null;
                 _modelsError = null;
-                _restartRecommended = _bridgeState() == BridgeState.Running;
-                return !_restartRecommended;
             }
+
+            _credentialEpoch.Advance();
+            return _bridgeState() != BridgeState.Running;
         }
 
         /// <summary>
@@ -305,6 +364,47 @@ namespace Pomp.Features
             if (_token.IsCancellationRequested) return;
             try { await _restart().ConfigureAwait(false); }
             catch (Exception) { _logger.Warn("The engine could not restart after provider credentials changed."); }
+        }
+
+        // ---- model sharing ----------------------------------------------------------------------------------------------
+
+        private ModelShareService RequireModelShare() =>
+            _modelShare ?? throw new ProviderSetupException(SetupText.Get("이 창에서는 모델 공유를 사용할 수 없습니다.", "Model sharing is not available here."));
+
+        private static ProviderSetupException InvalidShareCommand() =>
+            new ProviderSetupException(SetupText.Get("모델 공유 명령이 올바르지 않습니다.", "The model sharing command is invalid."));
+
+        private static int SharePort(JObject request)
+        {
+            var port = request["port"]?.Type == JTokenType.Integer ? request.GetLong("port") : null;
+            if (port == null || port < 1 || port > 65535)
+                throw new ProviderSetupException(SetupText.Get("포트는 1에서 65535 사이의 숫자여야 합니다.", "The port must be a number from 1 to 65535."));
+            return (int)port.Value;
+        }
+
+        /// <summary>The sharing state for the page, or null without a sharing service (a state that cannot be read is left out).</summary>
+        private JObject? ModelShareState()
+        {
+            if (_modelShare == null) return null;
+            try { return _modelShare.State(); }
+            catch (Exception ex)
+            {
+                _logger.Warn("The model sharing state could not be read: " + ex.GetType().Name);
+                return null;
+            }
+        }
+
+        private void OnModelShareChanged(object? sender, EventArgs e) => Publish();
+
+        /// <summary>
+        /// Registers with another PC's model sharing (address + one-time code) and saves the result as a local model server; the caller
+        /// restarts the engine. The code and the issued token never leave this method except into the encrypted store.
+        /// </summary>
+        private async Task ConnectSharedModelsAsync(JObject request)
+        {
+            var connection = await SharedModelConnector.ConnectAsync(Text(request, "address"), Text(request, "code"), _token).ConfigureAwait(false);
+            var name = _credentials.SaveSharedServer(connection.ServerName, connection.Url, connection.Token, connection.CertificatePem);
+            _logger.Info("Connected to another PC's shared models; saved as local model server \"" + name + "\".");
         }
 
         // ---- provider list (through the auth helper) --------------------------------------------------------------------
@@ -384,16 +484,19 @@ namespace Pomp.Features
 
         /// <summary>
         /// Sign-in methods whose credentials are stored under another provider (omp's <c>storeCredentialsAs</c>, 18.8): the device-code login
-        /// <c>openai-codex-device</c> stores as <c>openai-codex</c>, Z.AI's browser sign-in <c>zai-coding-plan</c> as <c>zai</c>. omp's
+        /// <c>openai-codex-device</c> stores as <c>openai-codex</c>, Z.AI's browser sign-in <c>zai-coding-plan</c> as <c>zai</c>, and
+        /// <c>devin-cli</c> / <c>devin-windsurf</c> as <c>devin</c>. omp's
         /// <c>get_login_providers</c> answers <c>authenticated</c> from the stored credential of the provider an entry stores as, and does not
         /// name that provider, so such an entry reads as signed in whenever the other one is and the page would list a second account for the
         /// same sign-in. The table is explicit because the RPC has no field to derive it from: check it whenever the bundled omp changes (every
-        /// auth rule of the engine with a <c>storeAs</c> belongs here; 18.8.6, 18.10.3, 18.10.4 and 18.12.1 have exactly these two).
+        /// auth rule of the engine with a <c>storeAs</c> belongs here).
         /// </summary>
         private static readonly Dictionary<string, string> StoredUnder = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["openai-codex-device"] = "openai-codex",
             ["zai-coding-plan"] = "zai",
+            ["devin-cli"] = "devin",
+            ["devin-windsurf"] = "devin",
         };
 
         private static JArray? ParseProviders(JToken? data)
@@ -466,6 +569,8 @@ namespace Pomp.Features
                 if (!pair.Key.StartsWith("POMP_", StringComparison.OrdinalIgnoreCase)) launch.Environment[pair.Key] = pair.Value;
             }
 
+            // The pinned certificates of shared model servers, should this omp reach one.
+            _credentials.ApplyLocalServersCertificates(launch.Environment);
             return launch;
         }
 
@@ -503,6 +608,7 @@ namespace Pomp.Features
         {
             try
             {
+                await _refreshLocalModels(_token).ConfigureAwait(false);
                 var models = await FetchModelsAsync().ConfigureAwait(false);
                 lock (_lock) { _models = models; _modelsError = null; }
             }
@@ -699,6 +805,7 @@ namespace Pomp.Features
             catch (Exception) { _logger.Warn("The provider login console could not be stopped during shutdown."); }
             try { console?.Dispose(); }
             catch (Exception) { /* Shutdown is best effort. */ }
+            if (_modelShare != null) _modelShare.Changed -= OnModelShareChanged;
             _helper.Dispose();
         }
     }

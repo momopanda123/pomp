@@ -25,8 +25,8 @@ namespace Pomp.VisualStudio.ToolWindow
     /// ends when design mode returns (after a run) or shortly after <c>OnBuildDone</c> or the start command when no build is running and
     /// no run began (a plain build, or Ctrl+F5, which runs without the debugger). The focus goes back
     /// once Visual Studio is the active application again with no modal dialog open (the program's window, or the "continue with the
-    /// last successful build?" question, may be in front), after Visual Studio has settled its own window activation; for a few seconds
-    /// after that, a window Visual Studio activates itself is undone as well.
+    /// last successful build?" question, may be in front), after Visual Studio has settled its own window activation. The return
+    /// intent remains armed until the user chooses another pane, including a delayed Ctrl+F5 launch and later application returns.
     /// </para>
     /// <para>
     /// Never against the user: the focus stays where it is when the user moved it during the session. That is a window activated by a
@@ -49,11 +49,8 @@ namespace Pomp.VisualStudio.ToolWindow
         /// </summary>
         private static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(300);
 
-        /// <summary>After the focus went back, a later activation of another window by Visual Studio is undone too, for this long.</summary>
+        /// <summary>Poll briefly after restoration; subsequent window/application activations wake the same pending restore.</summary>
         private static readonly TimeSpan Watch = TimeSpan.FromSeconds(3);
-
-        /// <summary>A program still running after this long (Ctrl+F5) is no longer part of the user's flow: the restore is dropped.</summary>
-        private static readonly TimeSpan MaxWait = TimeSpan.FromMinutes(30);
 
         /// <summary>A window activated this soon after a Visual Studio key in the chat was activated by that key's command.</summary>
         private static readonly TimeSpan ChatKeyEffect = TimeSpan.FromSeconds(1);
@@ -65,6 +62,7 @@ namespace Pomp.VisualStudio.ToolWindow
         private readonly PompChatControl chat;
         private readonly VsAdapterContext context;
         private readonly DispatcherTimer timer;
+        private readonly Application? application;
         private readonly Guid chatWindowKind = new Guid(PompGuids.ToolWindowGuidString);
         private DebuggerEvents? debuggerEvents;
         private BuildEvents? buildEvents;
@@ -80,7 +78,6 @@ namespace Pomp.VisualStudio.ToolWindow
         private bool building;
         private int buildGeneration;
         private DateTime graceUntilUtc;
-        private DateTime waitDeadlineUtc;
         private DateTime readySinceUtc;
         private DateTime watchUntilUtc;
         private DateTime foreignActivationUtc;
@@ -97,6 +94,8 @@ namespace Pomp.VisualStudio.ToolWindow
             context = new VsAdapterContext(services.Package, services.JoinableTaskFactory, services.Logger);
             timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(100) };
             timer.Tick += OnTick;
+            application = Application.Current;
+            if (application != null) application.Activated += OnApplicationActivated;
             InputManager.Current.PostProcessInput += OnPostProcessInput;
             try
             {
@@ -238,6 +237,7 @@ namespace Pomp.VisualStudio.ToolWindow
                 {
                     restoreChat = true;
                     userMoved = false;
+                    if (waiting) ResumeWaiting();
                 }
 
                 return;
@@ -250,7 +250,24 @@ namespace Pomp.VisualStudio.ToolWindow
                 if (!userMoved) services.Logger.Debug("Chat focus: the user moved the focus to " + WindowCaption(gotFocus) + (clicked ? " (click)." : " (key)."));
                 userMoved = true;
             }
-            else if (waiting) foreignActivationUtc = now;
+            else if (waiting)
+            {
+                foreignActivationUtc = now;
+                watchUntilUtc = now + Watch;
+                timer.Start();
+            }
+        }
+
+        private void OnApplicationActivated(object? sender, EventArgs args)
+        {
+            if (waiting && !userMoved) ResumeWaiting();
+        }
+
+        private void ResumeWaiting()
+        {
+            readySinceUtc = DateTime.MaxValue;
+            restoredUtc = DateTime.MinValue;
+            timer.Start();
         }
 
         private void OnPostProcessInput(object sender, ProcessInputEventArgs e)
@@ -296,6 +313,7 @@ namespace Pomp.VisualStudio.ToolWindow
             // A key pressed in the chat (F5, Ctrl+Shift+B) started this: Visual Studio may already have shown the Output window and
             // taken the focus by the time the build begins.
             restoreChat = carried || chat.HasKeyboardFocus || DateTime.UtcNow - buildKeyUtc < ChatKeyStart;
+            buildKeyUtc = DateTime.MinValue;
             services.Logger.Debug("Chat focus: a build or run started (chat had the focus: " + restoreChat + ").");
             Grace();
         }
@@ -304,20 +322,17 @@ namespace Pomp.VisualStudio.ToolWindow
         {
             active = false;
             services.Logger.Debug("Chat focus: the build or run ended (restore: " + restoreChat + ", user moved the focus: " + userMoved + ").");
-            if (!restoreChat || userMoved) return;
+            if (!restoreChat || userMoved) { StopWaiting(); return; }
             waiting = true;
-            waitDeadlineUtc = DateTime.UtcNow + MaxWait;
-            readySinceUtc = DateTime.MaxValue;
             foreignActivationUtc = DateTime.MinValue;
-            restoredUtc = DateTime.MinValue;
-            timer.Start();
+            ResumeWaiting();
         }
 
         private void OnTick(object? sender, EventArgs e)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             var now = DateTime.UtcNow;
-            if (disposed || userMoved || !restoreChat || now > waitDeadlineUtc)
+            if (disposed || userMoved || !restoreChat)
             {
                 StopWaiting();
                 return;
@@ -327,6 +342,7 @@ namespace Pomp.VisualStudio.ToolWindow
             if (main == null || !NativeMethods.IsActiveAndModeless(new WindowInteropHelper(main).Handle))
             {
                 readySinceUtc = DateTime.MaxValue;
+                restoredUtc = DateTime.MinValue;
                 return;
             }
 
@@ -342,11 +358,13 @@ namespace Pomp.VisualStudio.ToolWindow
             if (restoredUtc == DateTime.MinValue || restoredUtc < foreignActivationUtc
                 || (!chat.HasKeyboardFocus && now - restoredUtc >= Settle))
             {
-                if (!chat.HasKeyboardFocus) Restore();
+                // WPF can retain focus-within while Chromium/the shell activated a different field or pane.
+                // The first return and every shell activation must restore the remembered DOM input too.
+                Restore();
                 restoredUtc = now;
             }
 
-            if (now > watchUntilUtc) StopWaiting();
+            if (now > watchUntilUtc) timer.Stop();
 
         }
 
@@ -408,6 +426,7 @@ namespace Pomp.VisualStudio.ToolWindow
             StopWaiting();
             timer.Tick -= OnTick;
             InputManager.Current.PostProcessInput -= OnPostProcessInput;
+            if (application != null) application.Activated -= OnApplicationActivated;
             try
             {
                 if (debuggerEvents != null)
