@@ -9,7 +9,9 @@
  * the difference to the file's new text in the editor like a host edit, in any language.
  *
  * Main agent and subagents alike: the notice and the confirm go through the main conversation's UI channel (subagent tool events do
- * not reach the host). Fail-open: a `tool_call` handler that throws or runs out of time blocks the call, so every problem is
+ * not reach the host, and a subagent's own UI does nothing). omp runs this module once per session, so that channel is kept at
+ * module level, which the main session and the subagents on its thread share; subagents on a worker thread are not covered.
+ * Fail-open: a `tool_call` handler that throws or runs out of time blocks the call, so every problem is
  * swallowed and the hold is waited for three seconds at most (omp pauses the handler budget during UI waits); files over 2 MiB,
  * directories and unreadable files are skipped.
  */
@@ -51,10 +53,25 @@ function field(value: unknown, key: string): unknown {
 	return Reflect.get(value, key);
 }
 
+/** The main conversation's UI, shared by every session of this module (a subagent session only has a UI that does nothing). */
+let mainUi: ExtensionUi | undefined;
+
 export default function liveEdits(pi: ExtensionAPI): void {
 	if (!isPompHost()) return;
 	const pending = new Map<string, DiskEditFile[]>();
-	let mainUi: ExtensionUi | undefined;
+	const rememberMainUi = (_event: unknown, ctx: unknown): undefined => {
+		try {
+			if (field(field(ctx, "agent"), "kind") !== "sub") {
+				const ui = field(ctx, "ui");
+				if (ui && typeof ui === "object") mainUi = ui as ExtensionUi;
+			}
+		} catch {
+			// ignore
+		}
+		return undefined;
+	};
+	pi.on("session_start", rememberMainUi);
+	pi.on("session_switch", rememberMainUi);
 
 	pi.on("tool_call", async (event, ctx) => {
 		try {

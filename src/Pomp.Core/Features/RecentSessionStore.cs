@@ -43,7 +43,9 @@ namespace Pomp.Features
                 if (!File.Exists(file)) return;
                 CheckpointStore.CheckDirectPath(file + ".lock");
                 using var lease = new FileStream(file + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-                var rows = Read(); var changed = false;
+                // A store that cannot be used has no reference to move; the next visited conversation writes it anew.
+                if (!TryRead(out var rows)) return;
+                var changed = false;
                 var from = Path.GetFullPath(fromFolder).TrimEnd('\\', '/');
                 foreach (var row in rows.OfType<JObject>())
                 {
@@ -68,7 +70,8 @@ namespace Pomp.Features
                 CheckpointStore.CheckDirectPath(file); Directory.CreateDirectory(Path.GetDirectoryName(file)!);
                 CheckpointStore.CheckDirectPath(file + ".lock");
                 using var lease = new FileStream(file + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-                var rows = Read();
+                // Runs whenever an engine starts or restores a conversation: a damaged store is replaced, never a reason to fail there.
+                TryRead(out var rows);
                 foreach (var prior in rows.OfType<JObject>().Where(r => string.Equals((string?)r["path"], path, Comparison)).ToArray()) prior.Remove();
                 rows.Insert(0, new JObject { ["id"] = ContentHash.Compute(path), ["sessionId"] = sessionId, ["path"] = path, ["name"] = name.Length > 160 ? name.Substring(0,160) : name, ["visitedUtc"] = DateTimeOffset.UtcNow.ToString("O") });
                 var size = Encoding.UTF8.GetByteCount(new JObject { ["version"] = 1, ["root"] = root, ["entries"] = rows }.ToString(Formatting.None));
@@ -122,11 +125,15 @@ namespace Pomp.Features
             return path;
         }
 
-        internal SessionDeletionTarget ResolveForDeletion(string id, string? currentSessionFile, string? currentSessionId, string? currentName)
+        internal SessionDeletionTarget ResolveForDeletion(string expectedRoot, string id, string expectedSessionId, string? currentSessionFile, string? currentSessionId, string? currentName)
         {
             if (string.IsNullOrEmpty(currentSessionFile)) throw new InvalidOperationException(PompLanguage.Pick("대화 폴더를 확인할 수 없어요.", "The conversation folder is unavailable."));
+            if (!string.Equals(expectedRoot, root, Comparison) || string.IsNullOrWhiteSpace(expectedSessionId))
+                throw new InvalidOperationException(PompLanguage.Pick("삭제할 대화가 바뀌었어요. 목록을 새로 고쳐 주세요.", "The conversation to delete changed. Refresh the list."));
             var listed = (List(currentSessionFile, currentSessionId, currentName)["entries"] as JArray)?.OfType<JObject>().FirstOrDefault(entry => (string?)entry["id"] == id);
             if (listed == null) throw new InvalidOperationException(PompLanguage.Pick("이 작업 영역의 대화 목록에 없어요.", "The conversation is not listed in this workspace."));
+            if ((string?)listed["sessionId"] != expectedSessionId)
+                throw new InvalidOperationException(PompLanguage.Pick("선택한 대화와 파일의 세션 ID가 달라요.", "The selected conversation and the file have different session IDs."));
             var path = Resolve(root, id, currentSessionFile);
             var folder = Path.GetDirectoryName(Path.GetFullPath(currentSessionFile))!;
             if (!string.Equals(Path.GetDirectoryName(path), folder, Comparison)) throw new InvalidOperationException(PompLanguage.Pick("대화 파일이 현재 대화 폴더 밖에 있어요.", "The conversation file is outside the active conversation folder."));
@@ -149,7 +156,8 @@ namespace Pomp.Features
                     throw new InvalidOperationException(PompLanguage.Pick("대화가 현재 작업 영역과 일치하지 않아요.", "The conversation does not match the current workspace."));
             }
             var artifacts = path.Substring(0, path.Length - ".jsonl".Length);
-            var target = new SessionDeletionTarget(path, (string)listed["sessionId"]!, artifacts);
+            var target = new SessionDeletionTarget(path, expectedSessionId, artifacts,
+                (int?)listed["messageCount"] == 0 && string.IsNullOrWhiteSpace((string?)listed["name"]));
             target.Validate();
             return target;
         }
@@ -352,6 +360,18 @@ namespace Pomp.Features
             public JObject? Metadata { get; }
         }
 
+        /// <summary>
+        /// The store's rows for the writers that run while an engine starts (<see cref="Remember"/>, <see cref="Relocate"/>): false when
+        /// the file's content cannot be used (damaged, too large, or stamped with another folder). A file that cannot be opened still
+        /// throws: it may be whole, and must not be overwritten.
+        /// </summary>
+        private bool TryRead(out JArray rows)
+        {
+            try { rows = Read(); return true; }
+            catch (InvalidOperationException) { rows = new JArray(); return false; }
+        }
+
+        /// <summary>The remembered rows. Content that cannot be used is always an <see cref="InvalidOperationException"/>; the user's own actions (list, switch, delete) report it.</summary>
         private JArray Read()
         {
             CheckpointStore.CheckDirectPath(file);
@@ -360,12 +380,15 @@ namespace Pomp.Features
             if (stream.Length > MaxStoreBytes) throw new InvalidOperationException("The session-reference store is too large.");
             using var text = new StreamReader(stream, Encoding.UTF8, true);
             using var reader = new JsonTextReader(text) { MaxDepth = 6, DateParseHandling = DateParseHandling.None };
-            var data = JObject.Load(reader);
-            if ((int?)data["version"] != 1 || !string.Equals((string?)data["root"], root, Comparison) || !(data["entries"] is JArray rows)) throw new InvalidOperationException("Malformed session-reference store.");
+            JObject data;
+            try { data = JObject.Load(reader); }
+            catch (JsonException) { throw new InvalidOperationException("Malformed session-reference store."); }
+            if (!JToken.DeepEquals(data["version"], new JValue(1)) || data["root"]?.Type != JTokenType.String || !string.Equals((string?)data["root"], root, Comparison) || !(data["entries"] is JArray rows)) throw new InvalidOperationException("Malformed session-reference store.");
             foreach (var row in rows)
             {
+                if (!(row is JObject) || row["path"]?.Type != JTokenType.String || row["id"]?.Type != JTokenType.String) throw new InvalidOperationException("Malformed session reference.");
                 var path = (string?)row["path"]; var id = (string?)row["id"];
-                if (path == null || path.Length > 4096 || path.Any(char.IsControl) || !Path.IsPathRooted(path) || id != ContentHash.Compute(path) || !string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase) || row["sessionId"]?.Type != JTokenType.String || ((string)row["sessionId"]!).Length > 256 || row["name"]?.Type != JTokenType.String || ((string)row["name"]!).Length > 160) throw new InvalidOperationException("Malformed session reference.");
+                if (path == null || path.Length > 4096 || path.Any(char.IsControl) || path.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || !Path.IsPathRooted(path) || id != ContentHash.Compute(path) || !string.Equals(Path.GetExtension(path), ".jsonl", StringComparison.OrdinalIgnoreCase) || row["sessionId"]?.Type != JTokenType.String || ((string)row["sessionId"]!).Length > 256 || row["name"]?.Type != JTokenType.String || ((string)row["name"]!).Length > 160) throw new InvalidOperationException("Malformed session reference.");
             }
             return rows;
         }

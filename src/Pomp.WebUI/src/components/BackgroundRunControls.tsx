@@ -38,16 +38,17 @@ export function BackgroundRunControls({ state, job, sessionId, disabled }: { sta
     if (!send('workspace/background', { action, requestId, root: state.root, sessionId, ...target })) { request.current = null; setPending(false); setError(t('error.hostUnavailable')); }
   };
   const cancelStop = () => { setConfirming(false); stopButton.current?.focus(); };
+  const failure = error && <span className="ui-note run-control-error" role="alert">{revealControls(error)}</span>;
   if (!controlled) return <>
-    <button ref={stopButton} className="btn subtle small danger" type="button" data-testid={`run-stop-${job.id}`} disabled={blocked} aria-expanded={confirming} onClick={() => setConfirming(true)}>{t('runs.stop')}</button>
+    <button ref={stopButton} className="btn small danger" type="button" data-testid={`run-stop-${job.id}`} disabled={blocked} aria-expanded={confirming} onClick={() => setConfirming(true)}>{t('runs.stop')}</button>
     {confirming && <span className="run-stop-confirm" role="group" aria-label={t('runs.stopConfirm')} data-testid={`run-stop-confirm-${job.id}`} onKeyDown={event => {
       if (event.key === 'Escape' && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); cancelStop(); }
     }}>
       <span>{t('runs.stopQuestion')}</span>
-      <button ref={confirmButton} className="btn small danger" type="button" data-testid={`run-stop-yes-${job.id}`} disabled={blocked} onClick={() => { setConfirming(false); post('stop'); }}>{t('runs.stopConfirm')}</button>
       <button className="btn subtle small" type="button" onClick={cancelStop}>{t('dialog.cancel')}</button>
+      <button ref={confirmButton} className="btn small danger" type="button" data-testid={`run-stop-yes-${job.id}`} disabled={blocked} onClick={() => { setConfirming(false); post('stop'); }}>{t('runs.stopConfirm')}</button>
     </span>}
-    {error && <span role="alert">{revealControls(error)}</span>}
+    {failure}
   </>;
-  return <><button className="btn subtle small" type="button" data-testid={`run-pause-${job.id}`} disabled={blocked || job.control!.state === 'pauseRequested'} onClick={() => post('pause')}>{t('queue.pause')}</button><button className="btn subtle small" type="button" data-testid={`run-resume-${job.id}`} disabled={blocked || job.control!.state !== 'pauseRequested'} onClick={() => post('resume')}>{t('queue.resume')}</button><button className="btn subtle small danger" type="button" data-testid={`run-cancel-${job.id}`} disabled={blocked} onClick={() => post('cancel')}>{t('dialog.cancel')}</button>{error && <span role="alert">{revealControls(error)}</span>}</>;
+  return <><button className="btn subtle small" type="button" data-testid={`run-pause-${job.id}`} disabled={blocked || job.control!.state === 'pauseRequested'} onClick={() => post('pause')}>{t('queue.pause')}</button><button className="btn subtle small" type="button" data-testid={`run-resume-${job.id}`} disabled={blocked || job.control!.state !== 'pauseRequested'} onClick={() => post('resume')}>{t('queue.resume')}</button><button className="btn small danger" type="button" data-testid={`run-cancel-${job.id}`} disabled={blocked} onClick={() => post('cancel')}>{t('dialog.cancel')}</button>{failure}</>;
 }

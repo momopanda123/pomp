@@ -25,6 +25,12 @@ namespace Pomp.Features
         private readonly Func<bool> unfinished;
         private readonly Func<int> activeCalls;
         private readonly Func<bool> foregroundBusy;
+        // Which journal this engine owns: "" is the workspace's journal (the Default tab's engine), anything else names an agent or team
+        // tab, which keeps its own. Every conversation tab has its own engine, and an engine never reads or writes another tab's journal.
+        // The owner must know the answer before the first load (the conversation host gives it when it creates the engine); it must not
+        // be derived from a conversation that is still being set up.
+        private readonly Func<string> journalScope;
+        private string scope = "";
         private readonly object gate = new object();
         private string root = "", session = "", id = "", phase = "empty", task = "", message = "", proposal = "";
         private long revision;
@@ -35,8 +41,8 @@ namespace Pomp.Features
         private readonly HashSet<string> pendingJobs = new HashSet<string>();
         private readonly HashSet<string> executionCalls = new HashSet<string>();
         private readonly Dictionary<string, string> observedCalls = new Dictionary<string, string>();
-        public ComposerWorkflow(IPompHostEnvironment environment, UiHub ui, Func<string> currentSession, Func<bool> unfinished, Func<int>? activeCalls = null, Func<bool>? foregroundBusy = null)
-        { this.environment = environment; this.ui = ui; this.currentSession = currentSession; this.unfinished = unfinished; this.activeCalls = activeCalls ?? (() => 0); this.foregroundBusy = foregroundBusy ?? (() => false); }
+        public ComposerWorkflow(IPompHostEnvironment environment, UiHub ui, Func<string> currentSession, Func<bool> unfinished, Func<int>? activeCalls = null, Func<bool>? foregroundBusy = null, Func<string>? journalScope = null)
+        { this.environment = environment; this.ui = ui; this.currentSession = currentSession; this.unfinished = unfinished; this.activeCalls = activeCalls ?? (() => 0); this.foregroundBusy = foregroundBusy ?? (() => false); this.journalScope = journalScope ?? (() => ""); }
         public HostToolDefinition Definition { get; } = new HostToolDefinition {
             Name = ToolName, Label = "Manage POMP Workflow workflow", LoadMode = "essential",
             Description = "POMP-owned Planning/Discovery/Editing/AwaitingReview/Verification/Done state machine. Start with a task; submit a bounded plan; perform real discovery with the VS tools; enter editing; propose_workspace_edits then WAIT for user validation/application. After application perform read-only review_source, inspect actual evidence, then finish. Every mutation after start requires current id/revision. status is read-only. User pause cannot be resumed by this tool. Done means this source-edit batch was applied and inspected, not runtime tests passed. Multiple batches use another editing transition. Workflow journal stores task/plan and outcome metadata locally, not source bodies.",
@@ -64,7 +70,9 @@ namespace Pomp.Features
             CheckpointStore.CheckDirectPath(runtimeFile); Directory.CreateDirectory(Path.GetDirectoryName(runtimeFile)!);
             AtomicFile.WriteAllText(runtimeFile, new JObject { ["version"] = 1, ["active"] = Active, ["paused"] = paused, ["phase"] = phase, ["root"] = root }.ToString(Formatting.None));
         }
-        private string Journal => ProjectData.File(root, "composer-workflows.json", Path.Combine(environment.DataDirectory, "composer-workflows", ContentHash.Compute(root) + ".json"));
+        private string Journal => scope.Length == 0
+            ? ProjectData.File(root, "composer-workflows.json", Path.Combine(environment.DataDirectory, "composer-workflows", ContentHash.Compute(root) + ".json"))
+            : ProjectData.File(root, "composer-workflows-" + ContentHash.Compute(scope) + ".json");
         private bool SaveLocked()
         {
             if (root.Length == 0 || id.Length == 0) { WriteRuntimeLocked(); return true; }
@@ -81,8 +89,11 @@ namespace Pomp.Features
         }
         private void LoadLocked(string workspace)
         {
-            if (root == workspace) return;
-            root = workspace; id = session = task = proposal = message = ""; phase = "empty"; revision = 0;
+            // The journal follows the tab, not the conversation: a workflow started here stays in this engine's journal whatever
+            // conversation follows. Should the engine be given to another tab, it lets go of this one and reads that tab's journal.
+            var tab = journalScope() ?? "";
+            if (root == workspace && scope == tab) return;
+            root = workspace; scope = tab; id = session = task = proposal = message = ""; phase = "empty"; revision = 0;
             paused = discovery = applied = verified = false; plan = new JArray(); outcomes = new JArray(); observedCalls.Clear(); pendingJobs.Clear(); executionCalls.Clear();
             try
             {
@@ -93,6 +104,8 @@ namespace Pomp.Features
                 if (stream.Length > 128 * 1024) throw new InvalidDataException("Workflow journal exceeds its size limit.");
                 using var reader = new JsonTextReader(new StreamReader(stream)) { MaxDepth = 8 };
                 var data = JObject.Load(reader);
+                // A tab's own journal is not moved along with a moved workspace folder: one written for another folder is not this workspace's.
+                if (scope.Length > 0 && (string?)data["root"] != root) return;
                 if ((int?)data["version"] != 1 || (string?)data["root"] != root || !Guid.TryParseExact((string?)data["id"], "N", out _) ||
                     data["task"]?.Type != JTokenType.String || ((string)data["task"]!).Length > 16000 || !(data["steps"] is JArray steps) || !ValidPlan(steps))
                     throw new InvalidDataException("Malformed workflow journal.");

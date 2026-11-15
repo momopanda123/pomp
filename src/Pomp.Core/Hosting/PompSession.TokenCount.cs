@@ -43,8 +43,10 @@ namespace Pomp.Hosting
                 var root = await _environment.GetWorkspaceRootAsync(request.Token).ConfigureAwait(false);
                 if (!string.Equals(root, (string?)args["root"], StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException(PompLanguage.Pick("작업 영역이 바뀌었어요.", "Workspace changed."));
                 var text = BasketText(draft, paths, root, session!);
+                // Read before the state lock: the hub's lock is never taken inside it (the page's ready handler nests them the other way).
+                var asking = _ui.PendingRequestCount > 0;
                 bool localEstimate;
-                lock (_stateLock) localEstimate = !_settings.LoadOmpExtensions || _info.IsStreaming || _ui.PendingRequestCount > 0 || text.Length > 128000;
+                lock (_stateLock) localEstimate = !_settings.LoadOmpExtensions || _info.IsStreaming || asking || text.Length > 128000;
                 var data = localEstimate ? EstimatedDraft(text, session!, model!, provider!) :
                     await CountWithExtensionAsync(connection, text, session!, model!, provider!, request.Token).ConfigureAwait(false);
                 var method = (string?)data["method"];

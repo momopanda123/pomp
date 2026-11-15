@@ -1,10 +1,9 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { roleTitle } from '../bundledDescriptions';
-import { useT } from '../i18n';
+import { useT, type Translate } from '../i18n';
 import { MAIN_ROLE, MainRoleContext, RolesContext, effectiveRoles } from '../teamsCache';
 import { Avatar } from './AgentsTables';
 import { newId } from '../format';
-import { toolsTranslate } from '../i18n/toolsStrings';
 import type { SendResult } from '../limits';
 import { buildProblemsRequest, MAX_PROBLEMS, MAX_PROBLEM_CHARS, problemPath } from '../problems';
 import { onMessage, send, type UiToHost } from '../protocol';
@@ -20,7 +19,7 @@ import type { WorkLayout } from './WorkPanel';
 type Filter = 'all' | 'error' | 'warning' | 'agent';
 const COLUMNS = '18px 16px minmax(44px, max-content) minmax(0, 1fr) auto';
 /** An opened row: the whole description, where it is, and the source an agent quoted for it. */
-function ProblemDetails({ item, root, t }: { item: WorkspaceProblem; root: string; t: ReturnType<typeof toolsTranslate> }) {
+function ProblemDetails({ item, root, t }: { item: WorkspaceProblem; root: string; t: Translate }) {
   const where = `${problemPath(root, item.path)}:${item.line}${item.column ? `:${item.column}` : ''}`;
   return <div className="problem-details" data-testid={`problem-details-${item.id}`}>
     <p className="problem-message">{revealControls(item.message)}</p>
@@ -39,13 +38,13 @@ function ProblemDetails({ item, root, t }: { item: WorkspaceProblem; root: strin
 export function ProblemsPanel({ locale, inert, connected = true, onSolve }: {
   locale: string; inert: boolean; connected?: boolean; layout?: WorkLayout; onSolve: (text: string) => SendResult;
 }) {
-  const state = useWorkState('problems'); const t = toolsTranslate(locale); const ko = locale.startsWith('ko');
+  const state = useWorkState('problems'); const t = useT();
   // An agent finding shows the agent that reported it with its picture: the chat's POMP, or the member's role as the Agents tab has it.
-  const roles = effectiveRoles(useContext(RolesContext)); const main = useContext(MainRoleContext); const appT = useT();
+  const roles = effectiveRoles(useContext(RolesContext)); const main = useContext(MainRoleContext);
   const reporterOf = (item: WorkspaceProblem) => {
     const name = item.reporter && item.reporter !== MAIN_ROLE.name ? item.reporter : undefined;
     const role = name ? roles.find(candidate => candidate.name === name) : undefined;
-    return name ? { name, title: role ? roleTitle(role, appT, name) : name, look: role?.avatar, scope: role?.scope }
+    return name ? { name, title: role ? roleTitle(role, t, name) : name, look: role?.avatar, scope: role?.scope }
       : { name: MAIN_ROLE.name, title: MAIN_ROLE.title, look: main?.avatar, scope: MAIN_ROLE.scope };
   };
   // A member's finding needs the roles; when the page has none yet, they are asked for once.
@@ -106,7 +105,7 @@ export function ProblemsPanel({ locale, inert, connected = true, onSolve }: {
   const tooMany = chosen.length > MAX_PROBLEMS; const tooLong = text.length > MAX_PROBLEM_CHARS;
   const solveDisabled = blocked || !chosen.length || tooMany || tooLong;
   const toggle = (id: string, on: boolean) => setSelected(before => { const next = new Set(before); if (on) next.add(id); else next.delete(id); return next; });
-  return <ViewSection sectionKey="work-problems" className="problems-panel" headingLevel="h2" title={t('problems.title')} status={<span data-testid="problems-count">{state.items.length}</span>} bodyClassName="ui-flush" inert={inert || undefined}
+  return <ViewSection sectionKey="work-problems" headingLevel="h2" title={t('problems.title')} status={<span data-testid="problems-count">{state.items.length}</span>} bodyClassName="ui-flush" inert={inert || undefined}
     actions={<SectionRefresh onClick={() => command('refresh')} disabled={!connected || inert || !!pending} testId="problems-refresh" />}>
     <Toolbar>
       <Segmented<Filter> label={t('problems.filter')} testId="problems-filter" value={filter} onChange={setFilter} options={[
@@ -119,17 +118,17 @@ export function ProblemsPanel({ locale, inert, connected = true, onSolve }: {
     <DataTable columns={COLUMNS} label={t('problems.title')} testId="problems-table" empty={!visible.length} emptyRows={3} head={[
       <input ref={selectAll} type="checkbox" aria-label={t('problems.selectAll')} data-testid="problems-select-all" checked={visible.length > 0 && checked === visible.length} disabled={!visible.length || blocked}
         onChange={event => setSelected(before => { const next = new Set(before); visible.forEach(item => event.target.checked ? next.add(item.id) : next.delete(item.id)); return next; })} />,
-      '', t(sourceColumn), ko ? '설명' : 'Description', '']}>
+      '', t(sourceColumn), t('work.description'), '']}>
       {paged.slice.map(item => {
         const kind = kindOf(item); const shown = open.has(item.id); const reporter = kind === 'agent' ? reporterOf(item) : undefined;
         return <div key={item.id} role="rowgroup" data-testid={`problem-group-${item.id}`}>
         <Row testId={`problem-${item.id}`} selected={selected.has(item.id)}>
           <Cell><input type="checkbox" aria-label={t('problems.select')} data-testid={`problem-select-${item.id}`} checked={selected.has(item.id)} disabled={blocked} onChange={event => toggle(item.id, event.target.checked)} /></Cell>
           {reporter
-            ? <Cell title={reporter.title} className="problem-severity agent"><Avatar name={reporter.name} label={reporter.title} size={16} look={reporter.look} scope={reporter.scope} /></Cell>
-            : <Cell title={t(`problems.${kind}`)} className={`problem-severity ${kind} ui-status-icon ${kind === 'error' ? 'ui-err' : 'ui-warn'}`}>
+            ? <Cell title={reporter.title}><Avatar name={reporter.name} label={reporter.title} size={16} look={reporter.look} scope={reporter.scope} /></Cell>
+            : <Cell title={t(`problems.${kind}`)} className={`ui-status-icon ${kind === 'error' ? 'ui-err' : 'ui-warn'}`}>
               <Icon name={kind === 'error' ? 'error' : 'warning'} size={14} /></Cell>}
-          {reporter ? <Cell className="problem-reporter" title={reporter.title}>{revealControls(reporter.title)}</Cell> : <Cell className="ui-mono">{revealControls(item.code)}</Cell>}
+          {reporter ? <Cell title={reporter.title}>{revealControls(reporter.title)}</Cell> : <Cell className="ui-mono">{revealControls(item.code)}</Cell>}
           <Cell title={item.message}><button type="button" className="review-file-toggle problem-toggle" aria-expanded={shown} data-testid={`problem-toggle-${item.id}`} onClick={() => toggleOpen(item.id)}>
             <Icon name={shown ? 'chevronDown' : 'chevron'} size={12} /><span>{revealControls(item.message)}</span></button>
             <span className="ui-sub ui-mono problem-path">{revealControls(problemPath(state.root, item.path))}:{item.line}</span></Cell>

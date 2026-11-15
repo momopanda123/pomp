@@ -33,23 +33,11 @@ namespace Pomp.VisualStudio.Editor
     [TextViewRole(PredefinedTextViewRoles.Editable)]
     internal sealed class InlineEditorFeature : IWpfTextViewCreationListener
     {
-        private static WeakReference<ViewController>? lastFocused;
-        /// <summary>The POMP prompt at the selection of the last focused editor; false when there is none (or "edit" cannot run there).</summary>
-        public static bool TryShowInlinePrompt(PromptAction main = PromptAction.Ask)
+        /// <summary>The POMP prompt at the selection of <paramref name="view"/>; false when that editor has none (not a code editor, closed) or "edit" cannot run there.</summary>
+        public static bool TryShowInlinePrompt(ITextView view, PromptAction main = PromptAction.Ask)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            if (lastFocused == null || !lastFocused.TryGetTarget(out var controller)) return false;
-            return controller.OpenPrompt(main);
-        }
-
-        /// <summary>The editor the POMP prompt would open in (the last focused one), or null.</summary>
-        public static IWpfTextView? LastFocusedView
-        {
-            get
-            {
-                ThreadHelper.ThrowIfNotOnUIThread();
-                return lastFocused != null && lastFocused.TryGetTarget(out var controller) ? controller.View : null;
-            }
+            return view.Properties.TryGetProperty(typeof(ViewController), out ViewController controller) && controller.OpenPrompt(main);
         }
 
         /// <summary>An editor command of this view (from InlineCompletionKeys): true when the inline completion took it.</summary>
@@ -97,8 +85,6 @@ namespace Pomp.VisualStudio.Editor
                 view.Caret.PositionChanged += OnCaret;
                 view.LayoutChanged += OnLayout;
                 view.LostAggregateFocus += OnLostFocus;
-                view.GotAggregateFocus += OnGotFocus;
-                if (view.HasAggregateFocus) lastFocused = new WeakReference<ViewController>(this);
                 view.Properties.AddProperty(typeof(ViewController), this);
                 view.Closed += OnClosed;
                 view.VisualElement.PreviewKeyDown += OnKeyDown;
@@ -125,8 +111,6 @@ namespace Pomp.VisualStudio.Editor
             private void OnChanged(object sender, TextContentChangedEventArgs e) { if (!applying) { Clear(); CancelPending(); Schedule(); } }
             private void OnCaret(object sender, CaretPositionChangedEventArgs e) { if (!applying) { Clear(); CancelPending(); } }
             private void OnLayout(object sender, TextViewLayoutChangedEventArgs e) { if (!applying && suggestionSnapshot != null && (suggestionSnapshot != view.TextSnapshot || e.VerticalTranslation || e.HorizontalTranslation)) Clear(); }
-            private void OnGotFocus(object sender, EventArgs e) => lastFocused = new WeakReference<ViewController>(this);
-            internal IWpfTextView View => view;
             internal bool OpenPrompt(PromptAction main) { ThreadHelper.ThrowIfNotOnUIThread(); if (closed) return false; return ShowPrompt(main); }
             private void OnLostFocus(object sender, EventArgs e) { Clear(); debounce.Stop(); CancelPending(); }
             private void Schedule()
@@ -151,7 +135,8 @@ namespace Pomp.VisualStudio.Editor
                 var request = new InlineRequest { Prefix = snapshot.GetText(Math.Max(0, position - 3200), Math.Min(position, 3200)),
                     Suffix = snapshot.GetText(position, Math.Min(800, snapshot.Length - position)), Language = view.TextBuffer.ContentType.TypeName };
                 CancelPending(); pending = new CancellationTokenSource(); var token = pending.Token;
-                var assistant = services.ActiveSession;
+                if (services.ActiveSession is not IInlineAssistant assistant)
+                { services.Logger.Debug("Inline suggestion not requested: the selected conversation's backend has no inline assistant."); return; }
                 _ = services.JoinableTaskFactory.RunAsync(async () =>
                 {
                     try
@@ -229,7 +214,9 @@ namespace Pomp.VisualStudio.Editor
                 if (spans.Length == 0) spans = new[] { new SnapshotSpan(snapshot, view.Caret.Position.BufferPosition.Position, 0) };
                 // A question only needs the editor context; an edit needs a saved document and bounded selections.
                 ITextDocument? document = null;
-                var canEdit = documents.TryGetTextDocument(view.TextBuffer, out document) && snapshot.Length <= 500000 && spans.Length <= 5 && spans.All(s => s.Length <= 24000);
+                // "Propose an edit" also needs a backend with an inline assistant: without one the typed instruction would be discarded.
+                var canEdit = services.ActiveSession is IInlineAssistant
+                    && documents.TryGetTextDocument(view.TextBuffer, out document) && snapshot.Length <= 500000 && spans.Length <= 5 && spans.All(s => s.Length <= 24000);
                 if (main == PromptAction.Edit && !canEdit) return false;
                 Clear(); CancelPending(); debounce.Stop();
                 var point = view.Caret.Position.BufferPosition; var line = view.GetTextViewLineContainingBufferPosition(point); var bounds = line.GetCharacterBounds(point);
@@ -257,7 +244,8 @@ namespace Pomp.VisualStudio.Editor
                 if (document == null) return true;
                 if (view.TextSnapshot != snapshot) { SetStatus(PompLanguage.Pick("POMP: 코드가 바뀌어 질문을 취소했어요.", "POMP: the code changed, so the question was cancelled.")); return true; }
                 CancelEdit(); editRequest = new CancellationTokenSource(); var token = editRequest.Token;
-                var assistant = services.ActiveSession;
+                if (services.ActiveSession is not IInlineAssistant assistant)
+                { SetStatus(PompLanguage.Pick("POMP: 이 대화에서는 수정 제안을 쓸 수 없어요.", "POMP: edit proposals are not available in this conversation.")); return true; }
                 SetStatus(PompLanguage.Pick("POMP: 질문의 수정 제안을 준비하는 중", "POMP: preparing an edit proposal for the question"));
                 _ = services.JoinableTaskFactory.RunAsync(async () =>
                 {
@@ -304,7 +292,7 @@ namespace Pomp.VisualStudio.Editor
             {
                 closed = true; debounce.Stop(); debounce.Tick -= OnTimer; CancelPending(); CancelEdit(); Clear();
                 view.TextBuffer.Changed -= OnChanged; view.Caret.PositionChanged -= OnCaret; view.LayoutChanged -= OnLayout;
-                view.LostAggregateFocus -= OnLostFocus; view.GotAggregateFocus -= OnGotFocus; view.Closed -= OnClosed; view.Properties.RemoveProperty(typeof(ViewController)); view.VisualElement.PreviewKeyDown -= OnKeyDown;
+                view.LostAggregateFocus -= OnLostFocus; view.Closed -= OnClosed; view.Properties.RemoveProperty(typeof(ViewController)); view.VisualElement.PreviewKeyDown -= OnKeyDown;
                 TextCompositionManager.RemovePreviewTextInputStartHandler(view.VisualElement, OnCompositionStart);
                 TextCompositionManager.RemovePreviewTextInputHandler(view.VisualElement, OnCompositionEnd);
             }

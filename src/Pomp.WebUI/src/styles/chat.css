@@ -71,6 +71,36 @@
 
 .transcript-wrap.replaying *, .transcript-wrap.replaying *::before, .transcript-wrap.replaying *::after { animation: none !important; transition: none !important; }
 .transcript-wrap.replaying .transcript { overflow-anchor: none; }
+
+/* ---- Find in the conversation (Ctrl+F) ------------------------------------------------------ */
+
+/* One wrapper per transcript item for the search to tell items apart; it adds no box. */
+.find-item { display: contents; }
+.find-bar {
+  position: sticky;
+  z-index: 3;
+  top: 6px;
+  flex: none;
+  align-self: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  max-width: 30rem;
+  padding: 4px;
+  border: 1px solid var(--pomp-border);
+  border-radius: var(--pomp-radius);
+  background: var(--pomp-panel-bg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.find-bar .ui-search { flex: 1 1 110px; }
+.find-bar[data-state='none'] .ui-search { border-color: var(--pomp-error); }
+.find-controls { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; margin-left: auto; }
+.find-count { min-width: 0; padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pomp-muted-fg); font-variant-numeric: tabular-nums; }
+.find-bar .icon-btn[aria-pressed='true'] { background: var(--pomp-active-bg); color: var(--pomp-fg); }
+::highlight(pomp-find) { background-color: var(--pomp-find-match-bg); }
+::highlight(pomp-find-current) { background-color: var(--pomp-find-current-bg); text-decoration: underline; }
 .attachment-summary { margin: 5px 0 0; }
 .attachment-summary > .context-count { display: inline-flex; align-items: center; gap: 2px; height: 20px; padding: 0 4px; color: var(--pomp-fg); border-color: var(--pomp-focus-border); font-variant-numeric: tabular-nums; }
 .attachment-summary > .context-count[aria-expanded='true'] { background: var(--pomp-active-bg); }
@@ -620,11 +650,8 @@
   font-size: 0.92em;
 }
 
-/* In-memory workspace review uses host theme colors and immutable hunk identities. */
-.workspace-review { flex: 0 1 auto; max-height: 55vh; overflow: auto; padding: 12px; border-bottom: 1px solid var(--pomp-border); }
-.workspace-review header, .review-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.workspace-review header span { color: var(--pomp-muted-fg); font-size: .9em; }
-.workspace-review p { margin: 8px 0; }
+/* Proposal hunks use host theme colors (the card itself is a ViewSection: work.css, work-tab.css). */
+.review-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .review-actions { margin: 8px 0; }
 .review-files summary { cursor: pointer; overflow-wrap: anywhere; padding: 6px 0; }
 .review-hunk { border-left: 3px solid transparent; margin: 8px 0; padding-left: 8px; opacity: .65; }

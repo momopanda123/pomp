@@ -14,6 +14,7 @@
  * The check is an allowlist: a tool that is not named here (an MCP tool, another extension's tool, a future built-in) is refused.
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import { xdMountedTool } from "../lib/tool-targets.ts";
 import { isPompHost, offeredHostTools, pick, type Env } from "../lib/vs-state.ts";
 
 export const PLAN_COMMAND = "pomp-plan";
@@ -59,6 +60,9 @@ export function planBlockReason(toolName: string): string {
 export function planGuardDecision(toolName: string, input: unknown, env: Env = process.env, now: number = Date.now()): string | undefined {
 	if (!planOnlyActive(now)) return undefined;
 	if (PLAN_ENGINE_TOOLS.has(toolName) || toolName === PLAN_TOOL) return undefined;
+	// `write xd://<tool>` only carries a call to a mounted tool, whose own tool_call is judged here by its name next. The devices
+	// omp runs without one (resolve, reject, propose, report_issue) and every ordinary write are refused below.
+	if (xdMountedTool(toolName, input) !== undefined) return undefined;
 	if (toolName === "lsp") {
 		const action = input && typeof input === "object" && "action" in input ? (input as { action?: unknown }).action : undefined;
 		return typeof action === "string" && LSP_READ_ACTIONS.has(action) ? undefined : planBlockReason(toolName);
@@ -76,12 +80,16 @@ export function planPrompt(task: string): string {
 export default function planGuard(pi: ExtensionAPI): void {
 	if (!isPompHost()) return;
 
-	pi.on("tool_call", event => {
+	// A subagent's or an advisor's own run and session events (this module's handlers are bound to those sessions too) say nothing
+	// about the main run, and a subagent cannot put the main conversation under the guard.
+	const mainOnly = (ctx: unknown): boolean => (ctx as { agent?: { kind?: unknown } } | undefined)?.agent?.kind !== "sub";
+
+	pi.on("tool_call", (event, ctx) => {
 		let toolName = "this tool";
 		try {
 			toolName = String(event.toolName);
 			// Arm before the next call of the same batch is looked at.
-			if (toolName === PLAN_TOOL && !planOnlyActive()) armPlanOnly(true);
+			if (toolName === PLAN_TOOL && mainOnly(ctx) && !planOnlyActive()) armPlanOnly(true);
 			const reason = planGuardDecision(toolName, event.input);
 			if (reason) return { block: true, reason };
 		} catch {
@@ -91,9 +99,7 @@ export default function planGuard(pi: ExtensionAPI): void {
 		return undefined;
 	});
 
-	// The run the guard is for has started; the end of that run (not a retry or a compaction continuation) lifts it. A subagent's or an
-	// advisor's own run and session events (this module's handlers are bound to those sessions too) say nothing about the main run.
-	const mainOnly = (ctx: unknown): boolean => (ctx as { agent?: { kind?: unknown } } | undefined)?.agent?.kind !== "sub";
+	// The run the guard is for has started; the end of that run (not a retry or a compaction continuation) lifts it.
 	pi.on("agent_start", (_event, ctx) => {
 		if (mainOnly(ctx) && state && !state.started) state.started = true;
 	});
@@ -109,7 +115,8 @@ export default function planGuard(pi: ExtensionAPI): void {
 				if (ctx.agent?.kind === "sub") throw new Error(pick("계획만 세우기는 기본 대화에서 시작해요.", "Plan-only turns start from the main conversation."));
 				const prompt = planPrompt(args);
 				armPlanOnly(false);
-				pi.sendUserMessage(prompt);
+				// A message that never starts a run (no model, no key) must not leave the guard on for the next ordinary message.
+				void Promise.resolve(pi.sendUserMessage(prompt)).catch(() => { if (state && !state.started) disarmPlanOnly(); });
 			} catch (error) {
 				disarmPlanOnly();
 				ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");

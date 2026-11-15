@@ -1,0 +1,365 @@
+diff --git a/crates/pi-natives/src/desktop/win32/input.rs b/crates/pi-natives/src/desktop/win32/input.rs
+index 7544427de8..ffe486de1b 100644
+--- a/crates/pi-natives/src/desktop/win32/input.rs
++++ b/crates/pi-natives/src/desktop/win32/input.rs
+@@ -943,6 +943,7 @@ mod foreground {
+ 	struct ForegroundGuard {
+ 		previous: HWND,
+ 		target:   HWND,
++		target_pid: u32,
+ 		settle:   Duration,
+ 		armed:    bool,
+ 	}
+@@ -952,6 +953,16 @@ mod foreground {
+ 			control::check()?;
+ 			let target = background::hwnd(id)?;
+ 			background::ensure_integrity(id, target)?;
++			// Capture the owner before delivery: the target HWND can disappear when
++			// a click opens an independent window in the same process.
++			let mut target_pid = 0;
++			// SAFETY: `target_pid` is writable and Win32 validates the HWND.
++			unsafe { GetWindowThreadProcessId(target, &mut target_pid) };
++			if target_pid == 0 {
++				return Err(DesktopError::input_failed(
++					"the target's owning process is no longer available; no input was sent",
++				));
++			}
+ 			// SAFETY: GetForegroundWindow has no preconditions.
+ 			let previous = unsafe { GetForegroundWindow() };
+ 			if previous.is_null() {
+@@ -959,7 +970,7 @@ mod foreground {
+ 					"cannot save the current foreground window; no input was sent",
+ 				));
+ 			}
+-			let mut guard = Self { previous, target, settle, armed: true };
++			let mut guard = Self { previous, target, target_pid, settle, armed: true };
+ 			if previous != target {
+ 				let activation = (|| {
+ 					let _ = window::activate(target)?;
+@@ -997,9 +1008,19 @@ mod foreground {
+ 					return Ok(());
+ 				}
+ 				// SAFETY: GetAncestor validates the observed handle, including
+-				// null.
++				// null. Owned modals remain eligible for restoring the previous
++				// window; a new independent window of the target process does not.
+ 				let owner = unsafe { GetAncestor(current, GA_ROOTOWNER) };
+ 				if current != self.target && owner != self.target {
++					let mut current_pid = 0;
++					// SAFETY: IsWindow validates the observed HWND and Win32 validates
++					// the handle again; `current_pid` is writable.
++					if !current.is_null() && unsafe { IsWindow(current) } != 0 {
++						unsafe { GetWindowThreadProcessId(current, &mut current_pid) };
++					}
++					if current_pid == self.target_pid {
++						return Ok(());
++					}
+ 					return Err(DesktopError::input_failed(
+ 						"foreground changed during takeover; left the newly active window untouched",
+ 					));
+@@ -1673,7 +1694,13 @@ mod foreground {
+ 			let target = unsafe { GetDesktopWindow() };
+ 			assert_ne!(previous, target);
+ 			let called = Cell::new(false);
+-			let guard = ForegroundGuard { previous, target, settle: Duration::ZERO, armed: true };
++			let guard = ForegroundGuard {
++				previous,
++				target,
++				target_pid: 0,
++				settle: Duration::ZERO,
++				armed: true,
++			};
+ 			let result = guard.run(|_| {
+ 				called.set(true);
+ 				Ok(())
+diff --git a/crates/pi-natives/src/desktop/win32/window.rs b/crates/pi-natives/src/desktop/win32/window.rs
+index b6c82c79cc..c461158d98 100644
+--- a/crates/pi-natives/src/desktop/win32/window.rs
++++ b/crates/pi-natives/src/desktop/win32/window.rs
+@@ -23,7 +23,9 @@ use windows_sys::{
+ 				DPI_AWARENESS_CONTEXT, GetWindowDpiAwarenessContext,
+ 				PhysicalToLogicalPointForPerMonitorDPI, SetThreadDpiAwarenessContext,
+ 			},
+-			Input::KeyboardAndMouse::IsWindowEnabled,
++			Input::KeyboardAndMouse::{
++				INPUT, INPUT_0, INPUT_MOUSE, IsWindowEnabled, MOUSEEVENTF_MOVE, MOUSEINPUT, SendInput,
++			},
+ 			WindowsAndMessaging::{
+ 				CWP_SKIPDISABLED, CWP_SKIPINVISIBLE, CWP_SKIPTRANSPARENT, ChildWindowFromPointEx,
+ 				EnumChildWindows, GA_PARENT, GA_ROOT, GUITHREADINFO, GetAncestor, GetClassNameW,
+@@ -438,11 +440,37 @@ fn executable_is_any(hwnd: HWND, names: &[&str]) -> bool {
+ 
+ /// Requests activation without attaching to an untrusted input queue or
+ /// injecting a dummy key into whichever application currently has focus.
+-/// Foreground-lock refusal is handled by the caller before it sends input.
++///
++/// Windows hands the foreground over from another application only to the
++/// process that provided the last input. A host that has sent no input itself
++/// yet (its user last typed into another application, such as the IDE that
++/// launched it) is refused even for takeover. A zero-distance relative mouse
++/// move first makes this process that input provider: it moves no pointer and
++/// reaches no keyboard handler. A remaining refusal is handled by the caller
++/// before it sends input.
+ pub(super) fn activate(target: HWND) -> CoreResult<bool> {
+ 	control::check()?;
+-	// SAFETY: both functions take only OS-validated handles and scalar state.
++	let nudge = INPUT {
++		r#type:    INPUT_MOUSE,
++		Anonymous: INPUT_0 {
++			mi: MOUSEINPUT {
++				dx:          0,
++				dy:          0,
++				mouseData:   0,
++				dwFlags:     MOUSEEVENTF_MOVE,
++				time:        0,
++				dwExtraInfo: 0,
++			},
++		},
++	};
++	// SAFETY: these functions take only OS-validated handles and scalar state;
++	// `nudge` is one initialized INPUT copied synchronously by Win32.
+ 	unsafe {
++		if GetForegroundWindow() != target {
++			// A refused nudge (secure desktop, higher-integrity foreground) leaves
++			// the plain request below, whose refusal the caller reports.
++			SendInput(1, &nudge, size_of::<INPUT>() as i32);
++		}
+ 		SetForegroundWindow(target);
+ 		Ok(GetForegroundWindow() == target)
+ 	}
+diff --git a/packages/ai/src/auth-gateway/server.ts b/packages/ai/src/auth-gateway/server.ts
+index 9ed43122ac..99a499ed3e 100644
+--- a/packages/ai/src/auth-gateway/server.ts
++++ b/packages/ai/src/auth-gateway/server.ts
+@@ -810,6 +810,11 @@ interface ModelListRow {
+ 	max_output_tokens?: number;
+ 	input_modalities: ("text" | "image")[];
+ 	supports_tools?: boolean;
++	/**
++	 * POMP: the efforts `reasoning_effort` takes for this model, in ladder order; empty when it has no thinking to choose. A model
++	 * this PC found at run time is in no client's bundled catalog, so a client offers exactly these levels.
++	 */
++	reasoning_efforts: Effort[];
+ }
+ 
+ function handleModelsList(opts: AuthGatewayRouteOptions): Response {
+@@ -826,6 +831,7 @@ function handleModelsList(opts: AuthGatewayRouteOptions): Response {
+ 			api: model.api,
+ 			display_name: model.name,
+ 			input_modalities: model.input,
++			reasoning_efforts: [...getSupportedEfforts(model)],
+ 		};
+ 		if (modelKind(model) !== "chat") row.kind = modelKind(model);
+ 		if (model.contextWindow != null) row.context_length = model.contextWindow;
+diff --git a/packages/ai/test/auth-gateway-model-list.test.ts b/packages/ai/test/auth-gateway-model-list.test.ts
+index 197da3d383..eb7b02b3b2 100644
+--- a/packages/ai/test/auth-gateway-model-list.test.ts
++++ b/packages/ai/test/auth-gateway-model-list.test.ts
+@@ -6,11 +6,14 @@ import { startAuthGateway } from "@oh-my-pi/pi-ai/auth-gateway";
+ import { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
+ import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
+ 
+-test("model listing exposes one provider-qualified route per upstream model", async () => {
++test("model listing preserves provider routes and their supported reasoning efforts", async () => {
+ 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "gw-model-list-"));
+ 	const storage = await AuthStorage.create(path.join(dir, "auth.db"));
+-	const anthropic = createMockModel({ provider: "anthropic", id: "shared-model" });
+-	const devin = createMockModel({ provider: "devin", id: "shared-model" });
++	const anthropic = Object.assign(
++		createMockModel({ provider: "anthropic", id: "shared-model", reasoning: true }),
++		{ thinking: { mode: "effort" as const, efforts: ["low", "high"] as const } },
++	);
++	const devin = createMockModel({ provider: "devin", id: "shared-model", reasoning: false });
+ 	const handle = startAuthGateway({
+ 		bind: "127.0.0.1:0",
+ 		bearerTokens: [],
+@@ -35,6 +38,7 @@ test("model listing exposes one provider-qualified route per upstream model", as
+ 					context_length: 200_000,
+ 					max_output_tokens: 32_768,
+ 					input_modalities: ["text"],
++					reasoning_efforts: ["low", "high"],
+ 				},
+ 				{
+ 					id: "devin/shared-model",
+@@ -45,6 +49,7 @@ test("model listing exposes one provider-qualified route per upstream model", as
+ 					context_length: 200_000,
+ 					max_output_tokens: 32_768,
+ 					input_modalities: ["text"],
++					reasoning_efforts: [],
+ 				},
+ 			],
+ 		});
+diff --git a/packages/coding-agent/src/cli.ts b/packages/coding-agent/src/cli.ts
+--- a/packages/coding-agent/src/cli.ts
++++ b/packages/coding-agent/src/cli.ts
+@@ -128,6 +128,9 @@ async function showHelp(config: CliConfig<CommandMetadata>): Promise<void> {
+ 		import("./cli/help-extra"),
+ 	]);
+ 	renderRootHelp(config);
++	process.stdout.write(
++		`\nModel-free tools:\n  ${APP_NAME} mcp-server --cwd <directory> [--allow-write] [--allow-exec]\n`,
++	);
+ 	const extra = getExtraHelpText();
+ 	if (extra.trim().length > 0) {
+ 		process.stdout.write(`\n${extra}\n`);
+@@ -467,6 +470,16 @@ let runningCommand: string | undefined;
+ /** Run the CLI with the given argv (no `process.argv` prefix). */
+ export async function runCli(argv: string[]): Promise<void> {
++	// Model-free MCP owns its arguments and stdio, without profile/settings
++	// discovery, prepaint, network bootstrap or the ordinary command graph.
++	if (argv[0] === "mcp-server") {
++		runningCommand = "mcp-server";
++		// Static import would evaluate native tool/environment modules before
++		// ordinary commands establish their profile; keep this graph isolated.
++		const { runMcpServer } = await import("./pomp-mcp/server");
++		await runMcpServer(argv.slice(1));
++		return;
++	}
+ 	// `omp zsh|bash|sh [args...]`: the whole argv belongs to the shell (`--help`,
+ 	// `--profile`, `-c` included), so it dispatches before profile bootstrap,
+ 	// prepaint, network setup and the command table.
+ 	if (isNativeShell(argv[0])) {
+diff --git a/packages/coding-agent/src/edit/index.ts b/packages/coding-agent/src/edit/index.ts
+index ca61be7..4bb93a9 100644
+--- a/packages/coding-agent/src/edit/index.ts
++++ b/packages/coding-agent/src/edit/index.ts
+@@ -704,6 +704,7 @@ export class EditTool implements AgentTool<TInput> {
+ 	}
+ 
+ 	async #write(request: EditWriteRequest, signal?: AbortSignal): Promise<EditWriteResponse> {
++		signal?.throwIfAborted();
+ 		if (request.op === "delete") {
+ 			await deleteFileWithFallback(request.path, Bun.file(request.path));
+ 			if (this.session.enableLsp ?? true) {
+diff --git a/packages/coding-agent/src/exec/bash-executor.ts b/packages/coding-agent/src/exec/bash-executor.ts
+index 884592b..7b44736 100644
+--- a/packages/coding-agent/src/exec/bash-executor.ts
++++ b/packages/coding-agent/src/exec/bash-executor.ts
+@@ -43,6 +43,10 @@ import {
+ 
+ export interface BashExecutorOptions {
+ 	cwd?: string;
++	/** Explicit host settings; omitted callers retain the global initialization path. */
++	settings?: Settings;
++	/** Do not discover/source the user's shell profile. */
++	skipSnapshot?: boolean;
+ 	/** Milliseconds before aborting the command; 0 disables the executor deadline. */
+ 	timeout?: number;
+ 	onChunk?: (chunk: string) => void;
+@@ -666,7 +670,7 @@ async function executeUserShellPty(run: {
+ }
+ 
+ export async function executeBash(command: string, options?: BashExecutorOptions): Promise<BashResult> {
+-	const settings = await Settings.init();
++	const settings = options?.settings ?? (await Settings.init());
+ 	const baseShellConfig = settings.getShellConfig();
+ 	const shellConfig =
+ 		options?.useUserShell === true ? resolveUserShellConfig(settings, baseShellConfig) : baseShellConfig;
+@@ -699,7 +703,7 @@ export async function executeBash(command: string, options?: BashExecutorOptions
+ 	// has no `.envrc` on the host. The rc snapshot is independent, so both load
+ 	// concurrently.
+ 	const [snapshotPath, preflight] = await Promise.all([
+-		bashShell ? getOrCreateSnapshot(shell, shellEnv) : null,
++		bashShell && !options?.skipSnapshot ? getOrCreateSnapshot(shell, shellEnv) : null,
+ 		applyDirenvPreflight(command, commandCwd ?? process.cwd(), {
+ 			callerEnv: options?.env,
+ 			signal: options?.signal,
+diff --git a/packages/coding-agent/src/tools/bash.ts b/packages/coding-agent/src/tools/bash.ts
+index 97b5f96..5e47d89 100644
+--- a/packages/coding-agent/src/tools/bash.ts
++++ b/packages/coding-agent/src/tools/bash.ts
+@@ -1314,7 +1314,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 		// number touched by a mutating `gh` subcommand inside this bash call so
+ 		// subsequent issue:// / pr:// reads pick up the post-mutation state
+ 		// instead of the cached pre-mutation snapshot.
+-		invalidateGithubCacheForBashCommand(command);
++		if (!this.session.isolatedShell) invalidateGithubCacheForBashCommand(command);
+ 
+ 		// URL paths resolve through the embedded shell's filesystem, within the
+ 		// tier this command was approved at. A URL cwd stays a URL: only that
+@@ -1327,6 +1327,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 		const commandCwd = virtualCwd ?? resolveCommandCwd(cwd, this.session.cwd, hoistedShellCwd);
+ 		if (cwd) ran.cwd = commandCwd;
+ 		if (virtualCwd !== undefined) {
++			if (this.session.isolatedShell) throw new ToolError("This host supports only local shell working directories.");
+ 			if (name !== undefined || canUseInteractiveBashPty(pty === true, ctx)) {
+ 				throw new ToolError(
+ 					`Working directory ${virtualCwd} exists only in the embedded shell; ${name !== undefined ? "services" : "pty commands"} run external processes and need a host directory.`,
+@@ -1881,6 +1882,8 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 				// command here so the unset prefix is not applied twice.
+ 				await executeBash(command, {
+ 					cwd: commandCwd,
++					settings: this.session.isolatedShell ? this.session.settings : undefined,
++					skipSnapshot: this.session.isolatedShell,
+ 					env: sessionEnv,
+ 					sessionKey: sessionId,
+ 					minimize: !nativeShapingOff(this.session),
+@@ -1889,10 +1892,12 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 					signal,
+ 					gitGuard: cfgBashGitGuard.get(this.session.settings),
+ 					ovnfs: ovnfsCommand(this.session.settings),
+-					filesystem: this.#urlFilesystem(signal, approvalTier, text => {
+-						replies.push(text);
+-						emitFrame?.();
+-					}).shellFilesystem(),
++					filesystem: this.session.isolatedShell
++						? undefined
++						: this.#urlFilesystem(signal, approvalTier, text => {
++								replies.push(text);
++								emitFrame?.();
++							}).shellFilesystem(),
+ 					artifactPath,
+ 					artifactId,
+ 					// Stream the sink's own inline view rather than re-buffering chunks.
+diff --git a/packages/coding-agent/src/tools/index.ts b/packages/coding-agent/src/tools/index.ts
+index 1ec9360..367e70e 100644
+--- a/packages/coding-agent/src/tools/index.ts
++++ b/packages/coding-agent/src/tools/index.ts
+@@ -315,6 +315,10 @@ export interface ToolSession {
+ 	 * prohibits inherited-manager and process-global MCP fallback.
+ 	 */
+ 	enableMCP?: boolean;
++	/** Model-free hosts: use session settings, no shell profile snapshot or internal-URL filesystem. */
++	isolatedShell?: boolean;
++	/** Isolated local-tool hosts cannot invoke inference or worker-backed media conversions. */
++	modelFreeTools?: boolean;
+ 	/** Whether an edit-capable tool is available in this session (controls hashline output) */
+ 	hasEditTool?: boolean;
+ 	/** Event bus for tool/extension communication */
+diff --git a/packages/coding-agent/src/tools/read.ts b/packages/coding-agent/src/tools/read.ts
+index aa4af09..ccb3e12 100644
+--- a/packages/coding-agent/src/tools/read.ts
++++ b/packages/coding-agent/src/tools/read.ts
+@@ -1559,6 +1559,9 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
+ 		question: string | undefined,
+ 		signal?: AbortSignal,
+ 	): Promise<AgentToolResult<ReadToolDetails>> {
++		if (this.session.modelFreeTools) {
++			throw new ToolError("Video decoding is unavailable in this model-free local tool host. Read an extracted PNG or JPEG instead.");
++		}
+ 		if (question !== undefined) throw new ToolError(IMAGE_QUESTION_SELECTOR_ERROR);
+ 		const resolvedDisplayPath = formatPathRelativeToCwd(absolutePath, this.session.cwd);
+ 		const mimeType = videoMimeForPath(absolutePath);
+@@ -1647,6 +1650,9 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
+ 	}
+ 
+ 	async #readPdfPageScreenshot(options: PdfPageReadOptions): Promise<AgentToolResult<ReadToolDetails>> {
++		if (this.session.modelFreeTools) {
++			throw new ToolError("Browser-backed PDF screenshots are unavailable in this model-free local tool host. Read the PDF text or an extracted image instead.");
++		}
+ 		const { readPath, absolutePdfPath, page, pdfFileSize, question, suffixResolution, signal } = options;
+ 		const screenshot = await renderPdfPageScreenshot(this.session, absolutePdfPath, page, signal);
+ 		const screenshotFile = Bun.file(screenshot.dest);
+@@ -1693,6 +1699,12 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
+ 	}): Promise<{ content: Array<TextContent | ImageContent>; details: ReadToolDetails; sourcePath: string }> {
+ 		const { readPath, absolutePath, mimeType, imageMetadata, fileSize, imageKind, question, questionPath, signal } =
+ 			options;
++		if (this.session.modelFreeTools && question !== undefined) {
++			throw new ToolError("Model-backed image questions are unavailable in this model-free local tool host.");
++		}
++		if (this.session.modelFreeTools && imageKind === "heif") {
++			throw new ToolError("External HEIF/AVIF decoding is unavailable in this model-free local tool host. Convert the image to PNG or JPEG first.");
++		}
+ 		if (!question && !(this.session.getActiveModel?.()?.input.includes("image") ?? true)) {
+ 			const outputMime = imageMetadata?.mimeType ?? mimeType;
+ 			const imageQuestionPath = questionPath ?? formatPathRelativeToCwd(absolutePath, this.session.cwd);

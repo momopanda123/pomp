@@ -32,6 +32,11 @@ namespace Pomp.Protocol
         public const string BtwRecord = "btw_record";
         public const string BtwDelta = "btw_delta";
 
+        // Draft-only speech-to-text (checked with omp 18.18.9): the capture's phase, its whole preview so far, and its one terminal frame
+        public const string DictationState = "dictation_state";
+        public const string DictationTranscript = "dictation_transcript";
+        public const string DictationEnd = "dictation_end";
+
         // Agent session events (AgentSessionEvent)
         public const string AgentStart = "agent_start";
         public const string AgentEnd = "agent_end";
@@ -84,6 +89,10 @@ namespace Pomp.Protocol
         public const string GetSessionStats = "get_session_stats";
         public const string GetMessages = "get_messages";
         public const string GetLastAssistantText = "get_last_assistant_text";
+
+        /// <summary>Native microphone capture into a draft (checked with omp 18.18.9): <c>dictation_start {captureId}</c> answers once it records; <c>dictation_stop</c> answers <c>{text}</c>.</summary>
+        public const string DictationStart = "dictation_start";
+        public const string DictationStop = "dictation_stop";
 
         // Host replies to omp-initiated requests (no response frame)
         public const string ExtensionUiResponse = "extension_ui_response";

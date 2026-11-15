@@ -73,7 +73,7 @@ namespace Pomp.VisualStudio.Options
     /// </summary>
     [Guid(PompGuids.OptionsPageGuidString)]
     [ComVisible(true)]
-    public class PompOptionsPage : DialogPage, IPompSettings, IInlineModelSettings, IInlineModelSettingsWriter, IApprovalModeWriter, IUiShortcutSettings, IEditorShortcutSettings, ILocalEmbeddingSettings, IIsolatedExecutionSettings, IInteractiveTerminalSettings, IComputerUseSettings, IKnowledgeSettings, IEditorContextSettings
+    public class PompOptionsPage : DialogPage, IPompSettings, IInlineModelSettings, IInlineModelSettingsWriter, IApprovalModeWriter, IUiShortcutSettings, IEditorShortcutSettings, ILocalEmbeddingSettings, IIsolatedExecutionSettings, IInteractiveTerminalSettings, IComputerUseSettings, IDictationSettings, IKnowledgeSettings, IEditorContextSettings
     {
         static PompOptionsPage() => TypeDescriptor.AddProvider(new PompOptionsDescriptionProvider(TypeDescriptor.GetProvider(typeof(PompOptionsPage))), typeof(PompOptionsPage));
 
@@ -463,6 +463,24 @@ namespace Pomp.VisualStudio.Options
         [PompDisplayName("입력 단어 완성", "Word completion")]
         [Description("")]
         public bool WordCompletion { get; set; } = true;
+
+        // Voice input (docs/settings.md "음성 입력"): the composer's microphone button dictates into the draft with a model that runs on this PC.
+
+        [PompCategory("채팅", "Chat")]
+        [PompDisplayName("음성 입력 모델", "Voice input model")]
+        [Description("")]
+        [TypeConverter(typeof(DictationModelConverter))]
+        public DictationModel DictationModel { get; set; } = DictationModel.Balanced;
+
+        [PompCategory("채팅", "Chat")]
+        [PompDisplayName("음성 입력 언어", "Voice input language")]
+        [Description("")]
+        public string? DictationLanguage { get; set; }
+
+        DictationOptions IDictationSettings.Dictation
+        {
+            get { var values = Applied; return new DictationOptions(values.DictationModel, values.DictationLanguage); }
+        }
 
         // ---- Permissions -----------------------------------------------------------------------------
 
@@ -1026,6 +1044,46 @@ namespace Pomp.VisualStudio.Options
                 new StandardValuesCollection(new[] { LiveChangeRetention.LastRequest, LiveChangeRetention.UntilSaved, LiveChangeRetention.Conversation });
         }
 
+        /// <summary>Shows the voice input models in the POMP language, smallest first; the stored value stays the member name.</summary>
+        public sealed class DictationModelConverter : EnumConverter
+        {
+            private static readonly (DictationModel Value, string Korean, string English)[] Labels =
+            {
+                (DictationModel.Fast, "빠름 (Whisper base, 약 60 MB)", "Fast (Whisper base, about 60 MB)"),
+                (DictationModel.Balanced, "균형 (Whisper small, 약 190 MB)", "Balanced (Whisper small, about 190 MB)"),
+                (DictationModel.Accurate, "정확 (Whisper large-v3-turbo, 약 600 MB)", "Accurate (Whisper large-v3-turbo, about 600 MB)"),
+            };
+
+            public DictationModelConverter() : base(typeof(DictationModel)) { }
+
+            public override object? ConvertTo(ITypeDescriptorContext? context, CultureInfo? culture, object? value, Type destinationType)
+            {
+                if (destinationType == typeof(string) && value is DictationModel model)
+                {
+                    if (!Enum.IsDefined(typeof(DictationModel), model)) model = DictationModel.Balanced;
+                    if (culture == null || culture.Equals(CultureInfo.InvariantCulture)) return model.ToString();
+                    foreach (var entry in Labels)
+                        if (entry.Value == model) return PompLanguage.Pick(entry.Korean, entry.English);
+                }
+                return base.ConvertTo(context, culture, value, destinationType);
+            }
+
+            public override object ConvertFrom(ITypeDescriptorContext? context, CultureInfo? culture, object value)
+            {
+                if (value is string text)
+                {
+                    text = text.Trim();
+                    foreach (var entry in Labels)
+                        if (string.Equals(text, entry.Value.ToString(), StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(text, entry.English, StringComparison.OrdinalIgnoreCase) || text == entry.Korean) return entry.Value;
+                }
+                return DictationModel.Balanced;
+            }
+
+            public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context) =>
+                new StandardValuesCollection(new[] { DictationModel.Fast, DictationModel.Balanced, DictationModel.Accurate });
+        }
+
         /// <summary>The settings in effect. Immutable; replaced as a whole.</summary>
         public sealed class ComputerUsePolicyConverter : EnumConverter
         {
@@ -1097,6 +1155,8 @@ namespace Pomp.VisualStudio.Options
                     page.EditorContextSelectedChars, page.EditorContextLineChars, page.EditorContextWindowChars, page.EditorContextErrors, page.EditorContextTimeoutSeconds);
                 ComposerPredictions = page.ComposerPredictions;
                 WordCompletion = page.WordCompletion;
+                DictationModel = Enum.IsDefined(typeof(DictationModel), page.DictationModel) ? page.DictationModel : DictationModel.Balanced;
+                DictationLanguage = Dictation.NormalizeLanguage(page.DictationLanguage);
                 EnableCodeCaptions = page.EnableCodeCaptions;
                 LiveFollowEnabled = page.LiveFollowEnabled;
                 LiveBookmarksEnabled = page.LiveBookmarksEnabled;
@@ -1165,6 +1225,8 @@ namespace Pomp.VisualStudio.Options
                 EditorContextLimits = source.EditorContextLimits;
                 ComposerPredictions = source.ComposerPredictions;
                 WordCompletion = source.WordCompletion;
+                DictationModel = source.DictationModel;
+                DictationLanguage = source.DictationLanguage;
                 EnableCodeCaptions = source.EnableCodeCaptions;
                 LiveFollowEnabled = source.LiveFollowEnabled;
                 LiveBookmarksEnabled = source.LiveBookmarksEnabled;
@@ -1247,6 +1309,10 @@ namespace Pomp.VisualStudio.Options
             public bool ComposerPredictions { get; }
 
             public bool WordCompletion { get; }
+
+            public DictationModel DictationModel { get; }
+
+            public string? DictationLanguage { get; }
 
             public bool EnableCodeCaptions { get; private set; }
             public bool LiveFollowEnabled { get; private set; }

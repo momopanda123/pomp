@@ -199,9 +199,13 @@ namespace Pomp.VisualStudio.Adapters
             }
         }
 
+        /// <summary>The open solution's root directory that the workspace rule last found unreachable (an offline share, a removed folder); null otherwise.</summary>
+        private static volatile string? unreachableSolutionRoot;
+
         /// <summary>
-        /// Whether <paramref name="expectedRoot"/> is still the workspace root (UI thread), by the host environment's rule: the open
-        /// solution's root directory, or the fallback workspace when there is none.
+        /// Whether <paramref name="expectedRoot"/> is still the workspace root (UI thread), by the host environment's rule
+        /// (<see cref="ResolveWorkspaceRootAsync"/>): the open solution's root directory, or the fallback workspace when there is none
+        /// or when that directory is unreachable. No file-system check runs here: the unreachable root is the one the rule recorded.
         /// </summary>
         public bool IsCurrentWorkspaceRoot(string expectedRoot)
         {
@@ -216,7 +220,9 @@ namespace Pomp.VisualStudio.Adapters
                 return false;
             }
 
-            return root != null ? SamePath(root, expectedRoot) : SamePath(FallbackWorkspaceDirectory, expectedRoot);
+            if (root == null) return SamePath(FallbackWorkspaceDirectory, expectedRoot);
+            if (SamePath(root, expectedRoot)) return true;
+            return SamePath(root, unreachableSolutionRoot) && SamePath(FallbackWorkspaceDirectory, expectedRoot);
         }
 
         /// <summary>Folder that serves as the workspace when no solution or folder is open.</summary>
@@ -251,8 +257,12 @@ namespace Pomp.VisualStudio.Adapters
 
             if (root != null && Directory.Exists(root))
             {
+                unreachableSolutionRoot = null;
                 return root;
             }
+
+            // Remembered for IsCurrentWorkspaceRoot: while this folder stays unreachable, the fallback below is the workspace.
+            unreachableSolutionRoot = root;
 
             var fallback = FallbackWorkspaceDirectory;
             Directory.CreateDirectory(fallback);

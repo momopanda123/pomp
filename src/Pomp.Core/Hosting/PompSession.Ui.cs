@@ -36,9 +36,6 @@ namespace Pomp.Hosting
                     // Setup remains responsive while chat commands wait for omp.
                     _providerSetup.HandleAsync(message.Payload ?? new JObject()).Forget(_logger, "engine setup");
                     break;
-                case ComposerAutoContinue.CommandMessage:
-                    _composerAuto?.Handle(message.Payload ?? new JObject());
-                    break;
                 case GoalCommandMessage:
                     // On the chat command queue: the idle check and the send cannot interleave with another message.
                     var goal = message.Payload ?? new JObject();
@@ -49,7 +46,7 @@ namespace Pomp.Hosting
                     }
                     break;
                 case ComposerWorkflow.CommandMessage:
-                    if ((string?)message.Payload?["action"] != "refresh") _composerAuto?.Stop(PompLanguage.Pick("워크플로 제어가 바뀌었어요. 자동 이어가기가 꺼졌어요.", "Workflow control changed. Automatic continuation is off."));
+                    if ((string?)message.Payload?["action"] != "refresh") _goalRunner?.Stop(PompLanguage.Pick("워크플로 제어가 바뀌어서 목표 실행을 중지했어요.", "Goal execution stopped because workflow control changed."));
                     _composerWorkflow?.HandleAsync(message.Payload ?? new JObject(), _disposeCts.Token).Forget(_logger, "composer control");
                     break;
                 case CodeSearchTool.CommandMessage:
@@ -80,28 +77,17 @@ namespace Pomp.Hosting
                     _isolationResults?.HandleAsync(message.Payload ?? new JObject()).Forget(_logger, "isolation results");
                     break;
                 case UiMessageTypes.ChatSend:
-                    _composerAuto?.Stop(PompLanguage.Pick("채팅을 직접 입력해서 이전 워크플로의 자동 이어가기가 꺼졌어요.", "Automatic continuation of the previous workflow was turned off by manual chat input."));
                     var send = message.PayloadAs<ChatSendPayload>();
-                    if (send != null)
-                    {
-                        lock (_stateLock)
-                        {
-                            var generation = _chatStopGeneration;
-                            var wasBusy = _turns.Count > 0 || _info.IsStreaming || _chatQueue.Count > 0;
-                            _commands.Enqueue(() => HandleChatSendAsync(send, generation, forceQueue: wasBusy));
-                        }
-                    }
+                    if (send == null) break;
+                    // A message for another agent or team runs in that partner's tab: this conversation's goal run goes on.
+                    if (RelayTarget(send) == null)
+                        _goalRunner?.Stop(PompLanguage.Pick("채팅을 직접 입력해서 목표 실행을 중지했어요.", "Goal execution stopped by manual chat input."));
+                    QueueChatInput(send, steer: false);
 
                     break;
                 case UiMessageTypes.ChatSteer:
                     var steer = message.PayloadAs<ChatSendPayload>();
-                    if (steer != null)
-                    {
-                        long steerGeneration;
-                        lock (_stateLock) steerGeneration = _chatStopGeneration;
-                        // On the chat queue like a send: a send just before it is admitted first, so its run is the one steered.
-                        _commands.Enqueue(() => HandleChatSteerAsync(steer, steerGeneration));
-                    }
+                    if (steer != null) QueueChatInput(steer, steer: true);
 
                     break;
                 case UiMessageTypes.BtwAsk:
@@ -112,19 +98,10 @@ namespace Pomp.Hosting
                     HandleBtwCancelAsync(message.Payload ?? new JObject()).Forget(_logger, "side question cancel");
                     break;
                 case UiMessageTypes.ChatStop:
-                    _composerAuto?.Stop(PompLanguage.Pick("사용자가 대화를 중지했어요.", "User stopped the conversation."));
-                    CancellationTokenSource? sending;
-                    lock (_stateLock)
-                    {
-                        _chatStopGeneration++;
-                        _queuePaused = true;
-                        sending = _sendingPrompt;
-                        // Keep abort after any frame already being written, but release the preceding response wait now.
-                        _commands.Enqueue(HandleChatStopAsync);
-                    }
-
-                    PauseChatQueue(PompLanguage.Pick("사용자가 대화를 중지했어요.", "Conversation stopped by the user."));
-                    Cancel(sending);
+                    QueueChatStop();
+                    break;
+                case UiMessageTypes.AgentPlanAction:
+                    RunPlanCommandAsync(message, reply => _ui.Post(reply.Type, reply.Payload, UiDelivery.State)).Forget(_logger, "plan action");
                     break;
                 case UiMessageTypes.ChatQueue:
                     _commands.Enqueue(() => HandleQueueAsync(message.Payload ?? new JObject()));
@@ -187,6 +164,10 @@ namespace Pomp.Hosting
                     var computer = message.Payload ?? new JObject();
                     lock (_stateLock) _commands.Enqueue(() => HandleComputerSetAsync(computer));
                     break;
+                case UiMessageTypes.DictationSet:
+                    // Not through the command queue: voice input types into the draft while a reply runs or a chat send waits.
+                    HandleDictationSetAsync(message.Payload ?? new JObject()).Forget(_logger, "voice input");
+                    break;
                 case "workspace/snippet":
                     _commands.Enqueue(() => HandleSnippetAsync(message.Payload ?? new JObject()));
                     break;
@@ -217,8 +198,8 @@ namespace Pomp.Hosting
                     _commands.Enqueue(RecoverSessionAsync);
                     break;
                 case UiMessageTypes.SessionHistory:
-                    if ((string?)message.Payload?["action"] == "delete") _composerAuto?.Stop(PompLanguage.Pick("대화 삭제를 요청했어요.", "Conversation deletion requested."));
-                    if ((string?)message.Payload?["action"] == "switch") _composerAuto?.Stop(PompLanguage.Pick("대화 전환을 요청했어요.", "Conversation switch requested."));
+                    if ((string?)message.Payload?["action"] == "delete") _goalRunner?.Stop(PompLanguage.Pick("대화 삭제를 요청해서 목표 실행을 중지했어요.", "Goal execution stopped for conversation deletion."));
+                    if ((string?)message.Payload?["action"] == "switch") _goalRunner?.Stop(PompLanguage.Pick("대화 전환을 요청해서 목표 실행을 중지했어요.", "Goal execution stopped for conversation switching."));
                     _commands.Enqueue(() => HandleRecentSessionsAsync(message.Payload ?? new JObject()));
                     break;
                 case UiMessageTypes.SessionFast:
@@ -230,12 +211,12 @@ namespace Pomp.Hosting
 
                     break;
                 case UiMessageTypes.SessionNew:
-                    _composerAuto?.Stop(PompLanguage.Pick("새 대화를 요청했어요.", "New conversation requested."));
+                    _goalRunner?.Stop(PompLanguage.Pick("새 대화를 요청해서 목표 실행을 중지했어요.", "Goal execution stopped for a new conversation."));
                     var requestId = message.PayloadAs<SessionNewPayload>()?.RequestId;
                     _commands.Enqueue(() => HandleNewInTabAsync(requestId));
                     break;
                 case UiMessageTypes.BridgeRestart:
-                    _composerAuto?.Stop(PompLanguage.Pick("다시 시작을 요청했어요.", "Restart requested."));
+                    _goalRunner?.Stop(PompLanguage.Pick("다시 시작을 요청해서 목표 실행을 중지했어요.", "Goal execution stopped for restart."));
                     // Not queued behind chat commands: a restart can take a while (graceful stop, handshake, retries).
                     RestartAsync(_disposeCts.Token).Forget(_logger, "restart");
                     break;
@@ -269,6 +250,40 @@ namespace Pomp.Hosting
                     _logger.Debug("Ignoring the UI message '" + message.Type + "'.");
                     break;
             }
+        }
+
+        /// <summary><paramref name="relay"/>: the message came from another conversation (<see cref="AcceptRelay"/>); its admission is reported to it.</summary>
+        private void QueueChatInput(ChatSendPayload send, bool steer, InboundRelay? relay = null)
+        {
+            lock (_stateLock)
+            {
+                var session = _info.SessionId;
+                var connection = _epochConnection;
+                var epoch = _epoch.Token;
+                var generation = _chatStopGeneration;
+                var wasBusy = ChatRunBusyLocked() || _chatQueue.Count > 0;
+                _commands.Enqueue(async () =>
+                {
+                    try
+                    {
+                        bool changed;
+                        lock (_stateLock)
+                            changed = session != _info.SessionId || !ReferenceEquals(connection, _epochConnection)
+                                || (connection != null && epoch.IsCancellationRequested);
+                        if (changed) { RejectChangedConversation(send.ClientMessageId, relay); return; }
+                        if (steer) await HandleChatSteerAsync(send, generation).ConfigureAwait(false);
+                        else await HandleChatSendAsync(send, generation, expectedSession: session, forceQueue: wasBusy, relay: relay).ConfigureAwait(false);
+                    }
+                    finally { if (relay != null) SettleRelayAdmission(relay); }
+                });
+            }
+        }
+
+        private void RejectChangedConversation(string? clientMessageId, InboundRelay? relay = null)
+        {
+            var message = PompLanguage.Pick("대화 또는 연결이 바뀌어 메시지를 보내지 않았어요.", "The conversation or connection changed; the message was not sent.");
+            if (relay != null) relay.Refusal = message;
+            _ui.Post(UiMessageTypes.Error, new UiErrorInfo { Code = "queue_rejected", ClientMessageId = clientMessageId, Message = message, Retryable = false }, UiDelivery.State);
         }
 
         /// <summary>workspace/findFiles → workspace/files (the @-mention list).</summary>
@@ -373,8 +388,14 @@ namespace Pomp.Hosting
             }
         }
 
-        /// <summary>chat/send: (editor context + attachments +) text → <c>prompt</c>; the turn ends with <c>prompt_result</c>.</summary>
-        private async Task<bool> HandleChatSendAsync(ChatSendPayload send, long generation, CancellationToken requestToken = default, string? expectedSession = null, bool bypassQueue = false, ConversationPartnerPayload? capturedPartner = null, string? queuedItemId = null, bool forceQueue = false, string? engineText = null)
+        /// <summary>
+        /// chat/send: (editor context + attachments +) text → <c>prompt</c>; the turn ends with <c>prompt_result</c>. A send that skips the
+        /// queue (<paramref name="bypassQueue"/>) is refused while the run is busy; only the queue's own item, or with
+        /// <paramref name="queueFirstWhenBusy"/> the queue's "send now", waits in the queue instead. A message for another agent or team
+        /// is not this conversation's: it goes to that partner's tab (<see cref="RelayOut"/>) before any queue or turn of this one.
+        /// <paramref name="relay"/>: the message came from another conversation and its queue item and turn carry that.
+        /// </summary>
+        private async Task<bool> HandleChatSendAsync(ChatSendPayload send, long generation, CancellationToken requestToken = default, string? expectedSession = null, bool bypassQueue = false, ConversationPartnerPayload? capturedPartner = null, string? queuedItemId = null, bool forceQueue = false, string? engineText = null, bool queueFirstWhenBusy = false, InboundRelay? relay = null)
         {
             if (requestToken.IsCancellationRequested) return false;
             var accepted = false;
@@ -388,7 +409,28 @@ namespace Pomp.Hosting
                 return false;
             }
 
+            bool conversationChanged;
+            lock (_stateLock)
+            {
+                expectedSession ??= _info.SessionId;
+                conversationChanged = expectedSession != _info.SessionId;
+            }
+            if (conversationChanged) { RejectChangedConversation(send.ClientMessageId, relay); return false; }
+            // The engine restarts shortly to apply a new permission mode: a turn started now would be cut off by that restart.
+            if (ApprovalRestartPending())
+            {
+                // A queued item simply stays in the queue (the restart pauses it); anything else is handed back to its sender.
+                if (queuedItemId == null)
+                {
+                    var restarting = PompLanguage.Pick("권한 모드를 적용하는 중이에요. 잠시 뒤에 다시 보내 주세요.", "The permission mode is being applied. Send it again in a moment.");
+                    if (relay != null) relay.Refusal = restarting;
+                    _ui.Post(UiMessageTypes.Error, new UiErrorInfo { Code = "queue_rejected", ClientMessageId = send.ClientMessageId, Message = restarting, Retryable = false }, UiDelivery.State);
+                }
+                return false;
+            }
+
             send = CopySend(send);
+            if (relay == null && RelayTarget(send) is ConversationPartnerPayload foreign) return RelayOut(send, foreign, queuedItemId);
             if (!string.IsNullOrWhiteSpace(send.AgentInstance))
             {
                 if (queuedItemId != null)
@@ -397,7 +439,7 @@ namespace Pomp.Hosting
                     {
                         var item = _chatQueue.FirstOrDefault(q => q.Id == queuedItemId);
                         if (item == null || _queuePaused || generation != _chatStopGeneration || _queueSession != _info.SessionId
-                            || _turns.Count > 0 || _info.IsStreaming || _bridge.State != BridgeState.Running || _sessionSwitchUncertain) return false;
+                            || ChatRunBusyLocked() || _bridge.State != BridgeState.Running || _sessionSwitchUncertain) return false;
                         _chatQueue.Remove(item);
                     }
                     PublishChatQueue();
@@ -411,9 +453,13 @@ namespace Pomp.Hosting
             try
             {
                 lock (_stateLock)
-                    if (!bypassQueue && (forceQueue || _turns.Count > 0 || _info.IsStreaming || _chatQueue.Count > 0 || generation != _chatStopGeneration)) queued = EnqueueChatLocked(send, partner, generation);
+                    if (!bypassQueue && (forceQueue || ChatRunBusyLocked() || _chatQueue.Count > 0 || generation != _chatStopGeneration)) queued = EnqueueChatLocked(send, partner, generation, relay: relay);
             }
-            catch (Exception ex) { _ui.Post(UiMessageTypes.Error, new UiErrorInfo { Code = "queue_rejected", Message = ex.Message, Retryable = false }, UiDelivery.State); return false; }
+            catch (Exception ex)
+            {
+                if (relay != null) relay.Refusal = ex.Message;
+                _ui.Post(UiMessageTypes.Error, new UiErrorInfo { Code = "queue_rejected", ClientMessageId = send.ClientMessageId, Message = ex.Message, Retryable = false }, UiDelivery.State); return false;
+            }
             if (queued != null)
             {
                 PublishQueuedChat(send, queued); ScheduleQueueDispatch(); return false;
@@ -422,13 +468,7 @@ namespace Pomp.Hosting
             try { ResolvePartnerTarget(send, partner); }
             catch (Exception ex) { partnerError = ex; }
 
-            // Agents this prompt starts must come after the first job snapshot (taken once per connection and conversation, before
-            // the turn is registered): only then are they reported as new and remembered for a team continuation.
-            await _backgroundAgents.EnsureBaselineAsync(TimeSpan.FromSeconds(3), requestToken).ConfigureAwait(false);
-            if (requestToken.IsCancellationRequested) return false;
-
-            // Bound to the omp process that is current now: if it ends while the message is being composed, the message must not
-            // reach its replacement (the turn was already reported as ended).
+            // Bind before baseline discovery: a reconnect during that await must not retarget this input.
             CancellationToken epoch;
             Pomp.Bridge.OmpConnection? connection;
             lock (_stateLock)
@@ -436,6 +476,13 @@ namespace Pomp.Hosting
                 epoch = _epoch.Token;
                 connection = _epochConnection;
             }
+            // Agents started by this prompt must come after the first job snapshot, before registering the turn.
+            await _backgroundAgents.EnsureBaselineAsync(TimeSpan.FromSeconds(3), requestToken).ConfigureAwait(false);
+            if (requestToken.IsCancellationRequested) return false;
+            lock (_stateLock)
+                conversationChanged = expectedSession != _info.SessionId || !ReferenceEquals(connection, _epochConnection)
+                    || (connection != null && epoch.IsCancellationRequested);
+            if (conversationChanged) { RejectChangedConversation(send.ClientMessageId, relay); return false; }
             using var sending = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token, epoch, requestToken);
             bool stopped;
             bool busy;
@@ -453,17 +500,33 @@ namespace Pomp.Hosting
                     if (queuedItemId != null)
                     {
                         var item = _chatQueue.FirstOrDefault(q => q.Id == queuedItemId);
-                        if (item == null || _queuePaused || generation != _chatStopGeneration || _queueSession != _info.SessionId || _turns.Count > 0 || _info.IsStreaming || _bridge.State != BridgeState.Running || _sessionSwitchUncertain) return false;
+                        if (item == null || _queuePaused || generation != _chatStopGeneration || _queueSession != _info.SessionId || ChatRunBusyLocked() || _bridge.State != BridgeState.Running || _sessionSwitchUncertain) return false;
                         _chatQueue.Remove(item);
                     }
                     stopped = generation != _chatStopGeneration;
                     // One message at a time: omp keeps queued messages across an abort, so queuing inside omp would defeat Stop.
-                    busy = _turns.Count > 0 || _info.IsStreaming;
-                    if (busy) queued = EnqueueChatLocked(send, partner, generation, allowResume: !stopped);
-                    else { _sendingPrompt = sending; _turns[promptId] = turn; _backgroundAgents.SetCurrentTurnPrompt(promptId); }
+                    busy = ChatRunBusyLocked();
+                    if (busy)
+                    {
+                        // A host send that skips the queue (a goal run's start or follow-up) is refused, never parked to run later.
+                        if (bypassQueue && queuedItemId == null && !queueFirstWhenBusy) return false;
+                        queued = EnqueueChatLocked(send, partner, generation, allowResume: !stopped, relay: relay);
+                        // The queue's "send now" keeps its priority: it goes out first once the engine has settled.
+                        if (queueFirstWhenBusy) { _chatQueue.Remove(queued); _chatQueue.Insert(0, queued); }
+                    }
+                    else
+                    {
+                        _sendingPrompt = sending; _turns[promptId] = turn; _backgroundAgents.SetCurrentTurnPrompt(promptId);
+                        _chatEngineSettled = false; _streamingRevision++;
+                        if (relay != null) { turn.Relays.Add(relay); relay.State = RelayState.Running; }
+                    }
                 }
             }
-            catch (Exception ex) { _ui.Post(UiMessageTypes.Error, new UiErrorInfo { Code = "queue_rejected", Message = ex.Message, Retryable = false }, UiDelivery.State); return false; }
+            catch (Exception ex)
+            {
+                if (relay != null) relay.Refusal = ex.Message;
+                _ui.Post(UiMessageTypes.Error, new UiErrorInfo { Code = "queue_rejected", ClientMessageId = send.ClientMessageId, Message = ex.Message, Retryable = false }, UiDelivery.State); return false;
+            }
             if (queuedItemId != null) PublishChatQueue();
             if (busy)
             {
@@ -524,6 +587,7 @@ namespace Pomp.Hosting
 
                 return false;
             }
+            if (relay != null) PublishInboundRelays();
 
             try
             {
@@ -569,7 +633,10 @@ namespace Pomp.Hosting
                 }
 
                 lock (_stateLock) if (expectedSession != null && _info.SessionId != expectedSession) throw new InvalidOperationException("POMP Workflow conversation changed before dispatch.");
-                BeginRun(turn, send);
+                // What this conversation sent to other tabs meanwhile is kept in the engine's conversation before the next message.
+                if (connection != null) await FlushRelayRecordsAsync(connection, sending.Token).ConfigureAwait(false);
+                sending.Token.ThrowIfCancellationRequested();
+                BeginRun(turn, send, relay);
                 var response = await SendPromptCommandAsync(connection, promptId, message, sending.Token).ConfigureAwait(false);
                 sending.Token.ThrowIfCancellationRequested();
                 if (!response.Success)
@@ -585,6 +652,8 @@ namespace Pomp.Hosting
                 // A prompt that finished locally (a slash command) never gets a prompt_result: the response is its completion.
                 if (response.Data.GetBool("agentInvoked") == false)
                 {
+                    // A local command may admit background work without agent_start/prompt_result.
+                    lock (_stateLock) { _chatEngineSettled = false; _streamingRevision++; }
                     EndTurn(promptId, "completed", null);
                     RequestInfoRefresh();
                 }
@@ -698,12 +767,30 @@ namespace Pomp.Hosting
             return Task.FromResult(string.Join("\n\n", parts));
         }
 
+        private Task QueueChatStop(Func<Task>? stop = null)
+        {
+            _goalRunner?.Stop(PompLanguage.Pick("사용자가 대화를 중지해서 목표 실행을 중지했어요.", "Goal execution stopped because the user stopped the conversation."));
+            CancellationTokenSource? sending;
+            Task completion;
+            lock (_stateLock)
+            {
+                _chatStopGeneration++;
+                _queuePaused = true;
+                sending = _sendingPrompt;
+                // Release a preceding prompt response wait, but keep abort behind its already-written frame.
+                completion = _commands.Enqueue(stop ?? HandleChatStopAsync);
+            }
+            PauseChatQueue(PompLanguage.Pick("사용자가 대화를 중지했어요.", "Conversation stopped by the user."));
+            Cancel(sending);
+            return completion;
+        }
+
         /// <summary>
         /// chat/stop → <c>abort</c>. The turn ends when omp reports <c>prompt_result</c> with status aborted; if omp is idle and
         /// still has not reported it after <see cref="PompSessionOptions.StopSettleDelay"/>, the turn is ended here so the chat
         /// never stays blocked.
         /// </summary>
-        private async Task HandleChatStopAsync()
+        private async Task<bool> HandleChatStopAsync()
         {
             _projectHooks?.CancelCurrent();
             _terminalJobs.CancelAll();
@@ -725,7 +812,7 @@ namespace Pomp.Hosting
                 if (!response.Success)
                 {
                     PostNotice("warning", PompLanguage.Pick("이번 응답을 중단하지 못했어요: ", "The response could not be stopped: ") + response.Error);
-                    return;
+                    return false;
                 }
 
                 var withdrawn = Math.Min((response.Data?["steering"] as JArray)?.Count ?? 0, steers.Count);
@@ -740,13 +827,14 @@ namespace Pomp.Hosting
             {
                 _logger.Warn("Abort failed: " + ex.Message);
                 PostNotice("warning", PompLanguage.Pick("이번 응답 처리를 중지하지 못했어요: ", "Could not stop the turn: ") + ex.Message);
-                return;
+                return false;
             }
 
             if (open.Count > 0)
             {
                 SettleStoppedTurnsAsync(open).Forget(_logger, "stop settle");
             }
+            return true;
         }
 
         private async Task SettleStoppedTurnsAsync(IReadOnlyList<string> promptIds)
@@ -802,8 +890,8 @@ namespace Pomp.Hosting
             CancelPendingOmpRequests();
             string status;
             string? message = null;
-            bool wasUncertain; OmpConnection? connection; CancellationToken epoch;
-            lock (_stateLock) { wasUncertain = _sessionSwitchUncertain; connection = _epochConnection; epoch = _epoch.Token; }
+            bool wasUncertain; OmpConnection? connection; CancellationToken epoch; string? previousSession, previousFile;
+            lock (_stateLock) { wasUncertain = _sessionSwitchUncertain; connection = _epochConnection; epoch = _epoch.Token; previousSession = _info.SessionId; previousFile = _sessionFile; }
             var requested = false;
             try
             {
@@ -835,7 +923,11 @@ namespace Pomp.Hosting
                 else
                 {
                     var current = await connection.SendCommandAsync(OmpCommands.GetState(), TimeSpan.FromSeconds(15), epoch).ConfigureAwait(false);
-                    if (!current.Success || current.Data is not JObject currentState || string.IsNullOrEmpty(currentState.GetString("sessionId"))) throw new InvalidOperationException(PompLanguage.Pick("새 대화를 확인하지 못했어요.", "Could not confirm the new conversation."));
+                    if (!current.Success || current.Data is not JObject currentState) throw new InvalidOperationException(PompLanguage.Pick("새 대화를 확인하지 못했어요.", "Could not confirm the new conversation."));
+                    currentState = await WaitForSettledStateAsync(connection, currentState, epoch, "New conversation").ConfigureAwait(false);
+                    if (currentState.GetBool("isSettled") != true || string.IsNullOrEmpty(currentState.GetString("sessionId"))
+                        || currentState.GetString("sessionId") == previousSession || SameSessionPath(currentState.GetString("sessionFile"), previousFile))
+                        throw new InvalidOperationException(PompLanguage.Pick("새 대화를 확인하지 못했어요.", "Could not confirm the new conversation."));
                     epoch.ThrowIfCancellationRequested();
                     if (!ApplyState(currentState, acceptRecovery: true, currentLocked: () => ReferenceEquals(connection, _epochConnection), confirmSession: true))
                         throw new OperationCanceledException(epoch);

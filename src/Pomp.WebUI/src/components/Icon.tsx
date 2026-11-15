@@ -19,6 +19,14 @@ const PATHS = {
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
     </>
   ),
+  caseSensitive: (
+    <>
+      <path d="M2 17 6.5 6 11 17" />
+      <path d="M3.9 13H9.1" />
+      <circle cx="17" cy="14" r="3" />
+      <path d="M20 11v6" />
+    </>
+  ),
   cpu: (
     <>
       <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
@@ -198,6 +206,9 @@ const PATHS = {
   dot: <circle cx="12" cy="12" r="4" fill="currentColor" stroke="none" />,
   circle: <circle cx="12" cy="12" r="7" />,
   message: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
+  mic: <><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></>,
+  pause: <><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none" /><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none" /></>,
+  grip: <>{[6, 12, 18].flatMap(y => [9, 15].map(x => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.25" fill="currentColor" stroke="none" />))}</>,
 } satisfies Record<string, ReactElement>;
 
 export type IconName = keyof typeof PATHS;

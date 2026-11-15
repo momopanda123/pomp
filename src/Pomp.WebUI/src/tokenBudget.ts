@@ -1,4 +1,4 @@
-/** The token budget of automatic continuation and goal runs (docs/ui-protocol.md): optional, a whole number of tokens in this range. */
+/** Optional token budget for a user-confirmed goal run (docs/ui-protocol.md): a whole number in this range. */
 export const MIN_TOKEN_BUDGET = 10_000;
 export const MAX_TOKEN_BUDGET = 50_000_000;
 

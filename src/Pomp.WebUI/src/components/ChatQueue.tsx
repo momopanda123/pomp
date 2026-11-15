@@ -10,25 +10,29 @@ import type { UserItem } from '../state';
 import { useRoleTitle, useTeamTitle } from '../teamsCache';
 import { AgentDialog } from './AgentDialog';
 import { AttachmentSummary } from './AttachmentSummary';
+import { ConfirmPopover } from './ConfirmPopover';
 import { Icon } from './Icon';
 import { revealControls } from './RevealControls';
-import { Pager, SearchBox, matches, usePaged } from './ui';
+import { Badge, Pager, SearchBox, matches, usePaged } from './ui';
 
 const QUEUE_PAGE = 10;
 
 function QueueDestination({ item }: { item: QueueItem }) {
   const t = useT(); const role = useRoleTitle(item.agent || ''); const team = useTeamTitle(item.team || '');
-  return <small>{revealControls(item.team ? team : item.agent ? role : item.agentInstance || t('partner.main'))}</small>;
+  return <small className="hint">{revealControls(item.team ? team : item.agent ? role : item.agentInstance || t('partner.main'))}</small>;
 }
 
 export function ChatQueue({ state, replies, sessionId, disabled, pendingSends, onRecover }: {
   state: QueueState; replies: CommandReply[]; sessionId?: string; disabled: boolean; pendingSends: UserItem[]; onRecover: (item: UserItem) => void;
 }) {
   const t = useT(); const [open, setOpen] = useState(false); const [editing, setEditing] = useState<QueueItem>(); const [text, setText] = useState('');
-  const [clear, setClear] = useState(false); const opener = useRef<HTMLElement | null>(null);
+  const [clear, setClear] = useState(false); const opener = useRef<HTMLElement | null>(null); const actions = useRef<HTMLDivElement>(null);
   const { post, pending, error } = useConversationCommands(replies, sessionId);
   const other = state.items.length > 0 && state.sessionId !== sessionId;
   useEffect(() => { setEditing(undefined); setClear(false); }, [sessionId]);
+  useEffect(() => { if (!open) setClear(false); }, [open]);
+  // An item that left the queue while its editor was open (sent, removed elsewhere) has nothing left to edit.
+  useEffect(() => { if (editing && !state.items.some(item => item.id === editing.id)) setEditing(undefined); }, [state.items, editing]);
   // No count limit: a long queue is searched and shown a page at a time.
   const [query, setQuery] = useState('');
   const shown = state.items.map((item, index) => ({ item, index })).filter(({ item }) => matches(query, item.text, item.agent, item.team, item.agentInstance));
@@ -40,13 +44,18 @@ export function ChatQueue({ state, replies, sessionId, disabled, pendingSends, o
   const editInvalid = !text.trim() || !!promptRejection(text, { type: 'chat/send', payload: { clientMessageId: 'queue-edit', text, includeEditorContext: editing?.includeEditorContext ?? false } }, editing?.attachments?.map(file => file.path));
   const capture = () => { opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; };
   return <div className="chat-queue" data-testid="chat-queue">
-    <button type="button" className="conversation-strip-toggle" data-testid="queue-toggle" aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="chevronDown" size={12} /><strong>{t('queue.title', { count: state.items.length + pendingSends.length })}</strong>{state.paused && <span>{t('queue.paused')}</span>}</button>
+    <button type="button" className="conversation-strip-toggle" data-testid="queue-toggle" aria-expanded={open} onClick={() => setOpen(!open)}><Icon name={open ? 'chevronDown' : 'chevron'} size={12} /><strong>{t('queue.title', { count: state.items.length + pendingSends.length })}</strong>{state.paused && <Badge tone="warn">{t('queue.paused')}</Badge>}</button>
     {state.paused && <p className="hint" role="status" data-testid="queue-reason">{revealControls(state.reason || t('queue.paused'))}</p>}
     {other && <p className="hint" role="status" data-testid="queue-other">{t('queue.other')}</p>}
     {open && <div className="queue-expanded">
-      <div className="conversation-actions">
-        <button className="btn subtle small" type="button" data-testid="queue-pause" disabled={blocked || !state.items.length || (state.paused && other)} onClick={() => post('chat/queue', { action: state.paused ? 'resume' : 'pause' })}>{t(state.paused ? 'queue.resume' : 'queue.pause')}</button>
-        <button className="btn subtle small danger" type="button" data-testid="queue-clear" disabled={blocked || !state.items.length} onClick={() => { capture(); setClear(true); }}>{t('queue.clear')}</button>
+      <div ref={actions}>
+        <div className="conversation-actions">
+          <button className="btn subtle small" type="button" data-testid="queue-pause" disabled={blocked || !state.items.length || (state.paused && other)} onClick={() => post('chat/queue', { action: state.paused ? 'resume' : 'pause' })}>{t(state.paused ? 'queue.resume' : 'queue.pause')}</button>
+          <button className="btn subtle small danger" type="button" data-testid="queue-clear" disabled={blocked || !state.items.length} onClick={() => { capture(); setClear(true); }}>{t('queue.clear')}</button>
+        </div>
+        {clear && <ConfirmPopover anchorRef={actions} testId="queue-clear-confirm" className="queue-clear-confirm" label={t('queue.clear')} question={t('queue.confirmClear')}
+          cancelLabel={t('dialog.cancel')} confirmLabel={t('queue.clear')} confirmTestId="queue-clear-proceed" confirmDisabled={blocked || !state.items.length}
+          onCancel={() => { setClear(false); opener.current?.focus(); }} onConfirm={() => { if (post('chat/queue', { action: 'clear' })) setClear(false); }} />}
       </div>
       {state.items.length > QUEUE_PAGE && <SearchBox value={query} onChange={setQuery} testId="queue-search" />}
       <ol className="queue-list">{paged.slice.map(({ item, index }) => <li key={item.id} data-testid={`queue-item-${item.id}`}>
@@ -62,12 +71,14 @@ export function ChatQueue({ state, replies, sessionId, disabled, pendingSends, o
         </div>
       </li>)}</ol>
       <Pager paged={paged} testId="queue-pager" />
-      {pendingSends.map(item => <div className="queue-awaiting" key={item.clientMessageId} data-testid="queue-awaiting"><p>{revealControls(sentCaseFeedbackSummary(item.text, t) ?? item.text)}</p><small role={item.failed ? 'alert' : 'status'}>{revealControls(engineAbortText(item.failed?.message || t('queue.awaiting'), t))}</small>{item.failed && <button className="btn subtle small" type="button" onClick={() => onRecover(item)}>{t('queue.edit')}</button>}</div>)}
+      {pendingSends.map(item => <div className="queue-awaiting" key={item.clientMessageId} data-testid="queue-awaiting"><p>{revealControls(sentCaseFeedbackSummary(item.text, t) ?? item.text)}</p>
+        {item.failed ? <div className="composer-error" role="alert"><Icon name="error" size={12} /><span>{revealControls(engineAbortText(item.failed.message || t('queue.unconfirmed'), t))}</span></div>
+          : <small className="hint" role="status">{t('queue.awaiting')}</small>}
+        {item.failed && <button className="btn subtle small" type="button" onClick={() => onRecover(item)}>{t('queue.edit')}</button>}</div>)}
     </div>}
-    {editing && <AgentDialog testId="queue-editor" labelledBy="queue-editor-title" className="editor-dialog" returnFocus={opener.current} onClose={() => setEditing(undefined)}>
-      <div className="dialog-head"><h4 id="queue-editor-title">{t('queue.edit')}</h4></div><div className="dialog-form"><textarea data-testid="queue-edit-input" aria-label={t('queue.edit')} rows={5} value={text} onChange={event => setText(event.target.value)} /></div>
+    {editing && <AgentDialog testId="queue-editor" labelledBy="queue-editor-title" returnFocus={opener.current} onClose={() => setEditing(undefined)}>
+      <div className="dialog-head"><h4 id="queue-editor-title">{t('queue.edit')}</h4></div><div className="dialog-form"><div className="form-field"><textarea data-testid="queue-edit-input" aria-label={t('queue.edit')} rows={5} value={text} onChange={event => setText(event.target.value)} /></div></div>
       <div className="dialog-foot"><button className="btn subtle" type="button" onClick={() => setEditing(undefined)}>{t('dialog.cancel')}</button><button className="btn primary" type="button" data-testid="queue-edit-save" disabled={blocked || editInvalid} onClick={() => { if (post('chat/queue', { action: 'edit', id: editing.id, text })) setEditing(undefined); }}>{t('session.save')}</button></div>
     </AgentDialog>}
-    {clear && <AgentDialog testId="queue-clear-confirm" labelledBy="queue-clear-title" className="confirm-dialog" returnFocus={opener.current} onClose={() => setClear(false)}><h4 id="queue-clear-title">{t('queue.confirmClear')}</h4><div className="dialog-actions"><button className="btn subtle" type="button" onClick={() => setClear(false)}>{t('dialog.cancel')}</button><button className="btn danger" type="button" data-testid="queue-clear-proceed" disabled={blocked} onClick={() => { if (post('chat/queue', { action: 'clear' })) setClear(false); }}>{t('queue.clear')}</button></div></AgentDialog>}
   </div>;
 }

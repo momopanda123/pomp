@@ -118,7 +118,8 @@ namespace Pomp.VisualStudio.Commands
                 var target = !showAll && index < targets.Count ? targets[index] : null;
                 command!.Visible = index == 0 || target != null || showAll;
                 command.Enabled = target != null || showAll;
-                command.Text = showAll ? PompLanguage.Pick("에이전트·팀 찾기", "Find Agent or Team") : MenuText(target != null ? target.Title : PompLanguage.Pick("(없음)", "(none)"));
+                command.Text = services.ActiveSession is not PompSession ? "Unavailable for this backend"
+                    : showAll ? PompLanguage.Pick("에이전트·팀 찾기", "Find Agent or Team") : MenuText(target != null ? target.Title : PompLanguage.Pick("(없음)", "(none)"));
                 command.MatchedCommandId = 0;
             };
             commandService.AddCommand(command);

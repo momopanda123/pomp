@@ -113,7 +113,8 @@ namespace Pomp.VisualStudio.Editor
                 if (view.IsClosed || view.TextSnapshot != snapshot || snapshot.Length > 500000 || detail.Start < 0 || detail.Length <= 0 || detail.Start > snapshot.Length - detail.Length ||
                     !documents.TryGetTextDocument(view.TextBuffer, out var document) || !string.Equals(document.FilePath, detail.Path, StringComparison.OrdinalIgnoreCase))
                 { result.Text = Korean ? "코드 위치가 바뀌었어요" : "Source location changed."; return; }
-                var assistant = services.ActiveSession;
+                if (services.ActiveSession is not IInlineAssistant assistant)
+                { result.Text = "Code summaries are unavailable for this backend."; return; }
                 var tokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(60)); pending = tokenSource;
                 var token = tokenSource.Token; var file = document.FilePath; var exactText = snapshot.GetText();
                 request.IsEnabled = false; result.Text = Pomp.Hosting.PompLanguage.Pick("소스 확인 중", "Checking source");

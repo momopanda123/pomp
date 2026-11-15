@@ -154,6 +154,13 @@ namespace Pomp.VisualStudio.ToolWindow
                 view.UpdateLayout();
                 occlusionClip.Invalidate();
             }
+            else
+            {
+                channel.InjectFromHost(new UiMessage(UiMessageTypes.DictationSet, new JObject
+                {
+                    ["requestId"] = Guid.NewGuid().ToString("N"), ["on"] = false,
+                }));
+            }
         }
 
         /// <summary>Asks the session for a fresh conversation, exactly as the page's "new session" action does.</summary>

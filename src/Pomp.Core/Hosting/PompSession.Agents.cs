@@ -443,26 +443,17 @@ namespace Pomp.Hosting
         }
 
         /// <summary>
-        /// The prompt text for a new agent assignment or team. A message to an existing subagent uses
-        /// <c>steer_subagent</c> instead, never a main-model relay.
+        /// The prompt text of a turn of this conversation: its own team's dispatch for a team conversation, else the message as it is. A
+        /// message for another agent or team never gets here (it goes to that partner's tab, <see cref="RelayOut"/>), and a message to an
+        /// existing subagent uses <c>steer_subagent</c> instead.
         /// </summary>
         private Task<string> ApplyTargetAsync(ChatSendPayload send, string message, CancellationToken cancellationToken)
         {
             var targets = new[] { send.Team, send.Agent, send.AgentInstance }.Count(target => !string.IsNullOrWhiteSpace(target));
             if (targets > 1 || (targets > 0 && send.Main == true)) throw new InvalidOperationException(PompLanguage.Pick("보낼 대상이 너무 많아요.", "Too many targets."));
             if (!string.IsNullOrWhiteSpace(send.AgentInstance)) throw new InvalidOperationException(PompLanguage.Pick("기존 에이전트에게 직접 보내는 메시지는 메인 턴을 시작하지 않아요.", "A direct message to an existing agent must not start a main turn."));
-            if (!string.IsNullOrWhiteSpace(send.Agent)) return Task.FromResult(ApplyAgent(send.Agent!.Trim(), message));
+            if (!string.IsNullOrWhiteSpace(send.Agent)) throw new InvalidOperationException(PompLanguage.Pick("다른 에이전트에게 보내는 메시지는 그 에이전트의 탭에서 실행해요.", "A message to another agent runs in that agent's tab."));
             return ApplyTeamAsync(send.Team, message, cancellationToken);
-        }
-
-        private string ApplyAgent(string name, string message)
-        {
-            var role = GetAgentRoster().ListRoles().FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.Ordinal) && !r.Shadowed && string.IsNullOrEmpty(r.Error));
-            if (role == null || !AgentRoster.IsValidName(name))
-                throw new InvalidOperationException(PompLanguage.Pick($"에이전트 '{name}'을(를) 찾을 수 없어요.", $"Agent '{name}' was not found."));
-            RefuseInReviewOnlyWorkspace();
-            _backgroundAgents.SetCurrentTurnTeam(null);
-            return "/pomp-agent " + role.Name + " " + message;
         }
 
         private void ValidateAgentInstance(string id)
@@ -493,19 +484,11 @@ namespace Pomp.Hosting
                 throw new InvalidOperationException(PompLanguage.Pick("검토 전용 모드에서는 하위 에이전트와 팀을 실행할 수 없어요.", "Subagents and teams cannot run in a review-only workspace."));
         }
 
-        /// <summary>The prompt text for <paramref name="team"/> (null: <paramref name="message"/> unchanged); throws when the team cannot run.</summary>
-        private Task<string> ApplyTeamAsync(string? team, string message, CancellationToken cancellationToken)
+        /// <summary>The team a message can go to, as the roster has it; throws with the reason when it cannot run.</summary>
+        private AgentTeam ResolveTeam(string teamId)
         {
-            if (string.IsNullOrWhiteSpace(team))
-            {
-                _backgroundAgents.SetCurrentTurnTeam(null);
-                return Task.FromResult(message);
-            }
-
-            var teamId = team!.Trim();
-            var roster = GetAgentRoster();
-            var allTeams = roster.ListTeams();
-            var teamObj = allTeams.FirstOrDefault(t => string.Equals(t.Id, teamId, StringComparison.OrdinalIgnoreCase) && !t.Shadowed);
+            teamId = teamId.Trim();
+            var teamObj = GetAgentRoster().ListTeams().FirstOrDefault(t => string.Equals(t.Id, teamId, StringComparison.OrdinalIgnoreCase) && !t.Shadowed);
             if (teamObj == null)
             {
                 throw new InvalidOperationException(PompLanguage.Pick($"팀 '{teamId}'을(를) 찾을 수 없어요.", $"Team '{teamId}' was not found."));
@@ -526,6 +509,19 @@ namespace Pomp.Hosting
                 throw new InvalidOperationException(PompLanguage.Pick($"팀 '{teamId}'의 일부 구성원을 찾을 수 없어요: {string.Join(", ", teamObj.Missing)}", $"Some members of team '{teamId}' are missing: {string.Join(", ", teamObj.Missing)}"));
             }
 
+            return teamObj;
+        }
+
+        /// <summary>The prompt text for <paramref name="team"/> (null: <paramref name="message"/> unchanged); throws when the team cannot run.</summary>
+        private Task<string> ApplyTeamAsync(string? team, string message, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(team))
+            {
+                _backgroundAgents.SetCurrentTurnTeam(null);
+                return Task.FromResult(message);
+            }
+
+            var teamObj = ResolveTeam(team!);
             RefuseInReviewOnlyWorkspace();
             _backgroundAgents.SetCurrentTurnTeam(teamObj.Id);
             return Task.FromResult("/pomp-team " + teamObj.Id + TeamContinuation(teamObj) + " " + message + TeamKnowledge(teamObj.Id));

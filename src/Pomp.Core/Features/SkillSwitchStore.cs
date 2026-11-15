@@ -26,11 +26,23 @@ namespace Pomp.Features
         internal const int MaxNameLength = 256;
         internal const string FileName = "disabled-skills.json";
         private readonly string file;
+        private readonly object? owner;
 
-        internal SkillSwitchStore(string dataDirectory)
+        /// <summary>
+        /// Raised after the switches were stored: the file written and the owner of the store that wrote it. Every conversation's engine
+        /// follows the same file, so the other conversations apply the change to their own engine. Raised on the saving thread outside
+        /// the file gate; a handler must neither block nor throw.
+        /// </summary>
+        internal static event Action<string, object?>? Changed;
+
+        internal SkillSwitchStore(string dataDirectory, object? owner = null)
         {
             file = Path.Combine(Path.GetFullPath(dataDirectory), FileName);
+            this.owner = owner;
         }
+
+        /// <summary>The file the switches of <paramref name="dataDirectory"/> live in (what <see cref="Changed"/> reports).</summary>
+        internal static string FileOf(string dataDirectory) => Path.Combine(Path.GetFullPath(dataDirectory), FileName);
 
         internal sealed class Overrides
         {
@@ -115,8 +127,10 @@ namespace Pomp.Features
 
                 if (!changed) return false;
                 Save(current);
-                return true;
             }
+
+            Changed?.Invoke(file, owner);
+            return true;
         }
 
         /// <summary>Clears both overrides of <paramref name="name"/> (back to its default); true when the stored sets changed.</summary>
@@ -128,8 +142,10 @@ namespace Pomp.Features
                 var current = Load();
                 if (!current.On.Remove(name) && !current.Off.Remove(name)) return false;
                 Save(current);
-                return true;
             }
+
+            Changed?.Invoke(file, owner);
+            return true;
         }
 
         private void Save(Overrides overrides)

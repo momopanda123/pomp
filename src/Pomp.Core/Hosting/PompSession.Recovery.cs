@@ -114,22 +114,33 @@ namespace Pomp.Hosting
         {
             OmpConnection? connection; CancellationToken token; string root; string? path, id;
             ModelInfoPayload? model; string? thinking;
-            bool restoreInitial;
+            bool restoreInitial, modelSettingChanged, thinkingSettingChanged; long launchSerial;
             lock (_stateLock)
             {
                 connection = _epochConnection; token = _epoch.Token; root = _recoveryRoot;
                 path = _recoveryFile; id = _recoverySession; model = _recoveryModel; thinking = _recoveryThinking;
                 restoreInitial = !_managedInitialTranscriptReady;
+                modelSettingChanged = _modelSettingChanged; thinkingSettingChanged = _thinkingSettingChanged; launchSerial = _launchSerial;
                 if (connection == null || _bridge.State != BridgeState.Running || _recoveryStatus == "ready") return;
                 _sessionSwitchUncertain = true;
             }
-            PublishRecovery("restoring");
+            if (!PublishRecovery("restoring", currentLocked: () => !token.IsCancellationRequested && ReferenceEquals(connection, _epochConnection) && root == _workingDirectory)) return;
             try
             {
                 var reply = await connection.SendCommandAsync(OmpCommands.GetState(), TimeSpan.FromSeconds(15), token).ConfigureAwait(false);
                 if (!reply.Success || reply.Data is not JObject state) throw new InvalidOperationException("Could not read the active conversation.");
                 // Judge only a settled engine: right after a start it may still be draining queued or background work.
                 state = await WaitForSettledStateAsync(connection, state, token).ConfigureAwait(false);
+                if (state.GetBool("isSettled") != true) throw new InvalidOperationException("The conversation is not settled yet.");
+                // The engine was restarted because the Model or Thinking level setting changed: what it started with is what the user
+                // asked for, so that (not the conversation's earlier choice) is applied again after the conversation is restored.
+                if (modelSettingChanged)
+                {
+                    var launched = state.GetObject("model");
+                    var provider = launched?.GetString("provider"); var modelId = launched?.GetString("id");
+                    model = string.IsNullOrEmpty(provider) || string.IsNullOrEmpty(modelId) ? null : new ModelInfoPayload { Provider = provider!, Id = modelId! };
+                }
+                if (thinkingSettingChanged) thinking = state.GetString("thinkingLevel");
                 var unsaved = false;
                 if (!string.IsNullOrEmpty(id) && (state.GetString("sessionId") != id || (!string.IsNullOrEmpty(path) && !SameSessionPath(state.GetString("sessionFile"), path))))
                 {
@@ -140,7 +151,6 @@ namespace Pomp.Hosting
                 {
                     id = null; path = null;
                     PostNotice("info", PompLanguage.Pick("이전 대화의 세션 파일이 없어 새 대화로 이어가요.", "The previous conversation has no session file; it continues as a new one."));
-                    state = await RestoreModelAsync(connection, state, model, thinking, token).ConfigureAwait(false);
                 }
                 else if (!string.IsNullOrEmpty(id) && (state.GetString("sessionId") != id || (!string.IsNullOrEmpty(path) && !SameSessionPath(state.GetString("sessionFile"), path))))
                 {
@@ -159,28 +169,37 @@ namespace Pomp.Hosting
                     reply = await connection.SendCommandAsync(OmpCommands.GetState(), TimeSpan.FromSeconds(15), token).ConfigureAwait(false);
                     if (!reply.Success || reply.Data is not JObject restored) throw new InvalidOperationException("Could not confirm the restored conversation.");
                     state = await WaitForSettledStateAsync(connection, restored, token).ConfigureAwait(false);
-                    // omp records no model_change for the model a new conversation inherits: its file alone would restart on the launch model.
-                    state = await RestoreModelAsync(connection, state, model, thinking, token).ConfigureAwait(false);
                 }
                 if (state.GetBool("isSettled") != true) throw new InvalidOperationException("The conversation is not settled yet.");
                 if (string.IsNullOrEmpty(state.GetString("sessionId")) || (!string.IsNullOrEmpty(id) && (state.GetString("sessionId") != id || (!string.IsNullOrEmpty(path) && !SameSessionPath(state.GetString("sessionFile"), path)))))
                     throw new InvalidOperationException("The requested conversation was not confirmed.");
+                // Also restore picker choices when the new engine already opened the right conversation.
+                state = await RestoreModelAsync(connection, state, model, thinking, token).ConfigureAwait(false);
+                if (state.GetBool("isSettled") != true) throw new InvalidOperationException("The conversation is not settled yet.");
+                if (string.IsNullOrEmpty(state.GetString("sessionId")) || (!string.IsNullOrEmpty(id) && (state.GetString("sessionId") != id || (!string.IsNullOrEmpty(path) && !SameSessionPath(state.GetString("sessionFile"), path)))))
+                    throw new InvalidOperationException("The requested conversation was not confirmed.");
                 token.ThrowIfCancellationRequested();
-                ApplyState(state, acceptRecovery: true, currentLocked: () => ReferenceEquals(connection, _epochConnection) && root == _workingDirectory, confirmSession: true);
+                if (!ApplyState(state, acceptRecovery: true, currentLocked: () => !token.IsCancellationRequested && ReferenceEquals(connection, _epochConnection) && root == _workingDirectory, confirmSession: true))
+                    throw new OperationCanceledException(token);
+                // Applied: a later restart for another reason keeps the conversation's model and level again.
+                if (modelSettingChanged || thinkingSettingChanged)
+                    lock (_stateLock)
+                        if (_launchSerial == launchSerial) { _modelSettingChanged = false; _thinkingSettingChanged = false; }
                 if (restoreInitial)
                 {
-                    try { await RestoreTranscriptAsync(connection, token).ConfigureAwait(false); }
-                    catch (Exception ex) when (!(ex is OperationCanceledException)) { _logger.Warn("Could not restore the tab transcript: " + ex.Message); }
-                    finally { lock (_stateLock) _managedInitialTranscriptReady = true; }
+                    await RestoreTranscriptAsync(connection, token).ConfigureAwait(false);
+                    token.ThrowIfCancellationRequested();
+                    lock (_stateLock)
+                        if (ReferenceEquals(connection, _epochConnection) && root == _workingDirectory)
+                            _managedInitialTranscriptReady = true;
                 }
                 // The host transcript is deliberately retained, including tool output and interrupted turns.
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             catch (Exception ex)
             {
-                lock (_stateLock) _managedInitialTranscriptReady = true;
                 if (PublishRecovery("failed", PompLanguage.Pick("이전 대화를 확인하지 못했어요. 기록은 유지했습니다.", "Could not confirm the previous conversation. Its displayed history was kept."),
-                    () => ReferenceEquals(connection, _epochConnection) && !token.IsCancellationRequested))
+                    () => ReferenceEquals(connection, _epochConnection) && root == _workingDirectory && !token.IsCancellationRequested))
                     _logger.Warn("Conversation recovery failed: " + ex.Message);
             }
         }

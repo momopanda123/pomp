@@ -33,7 +33,6 @@ type SavedRow = { kind: 'key'; name: string; saved: SetupSavedKey } | { kind: 'l
  */
 export function ApiKeySection({ setup, cmd, locale, inert, defaultOpen }: ApiKeySectionProps) {
   const t = useT();
-  const ko = locale.toLowerCase().startsWith('ko');
   const titleId = useId();
   const keyRef = useRef<HTMLInputElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -129,17 +128,17 @@ export function ApiKeySection({ setup, cmd, locale, inert, defaultOpen }: ApiKey
   const saved = cmd.feedback('saveKey').done || cmd.feedback('saveLocalServer').done;
   // Reads the saved servers' model lists again (another PC that stopped sharing a provider, a server that loaded a model) and the
   // saved keys; the other chat tabs read theirs when their model list is next shown.
-  const refreshing = cmd.feedback('models').pending;
+  const refreshing = cmd.feedback('refreshModels').pending;
 
   return (
     <ViewSection sectionKey="setup-key" className="setup-section key-section" title={t('setup.key.title')} headingId={titleId} aria-labelledby={titleId} data-testid="setup-key"
       status={savedCount} bodyClassName="ui-flush"
       actions={<>
-        <SectionRefresh testId="key-refresh" label={t('setup.key.refresh')} disabled={inert || refreshing}
-          onClick={() => cmd.post('models', (requestId) => ({ requestId, action: 'refreshModels' }))} />
         <button type="button" className="btn small" data-testid="key-toggle" aria-expanded={open} disabled={inert || open} onClick={openForm}>
-          <Icon name="plus" size={12} />{ko ? '키 추가' : 'Add key'}
+          <Icon name="plus" size={12} />{t('apikey.add')}
         </button>
+        <SectionRefresh testId="key-refresh" label={t('setup.key.refresh')} disabled={inert || refreshing}
+          onClick={() => cmd.post('refreshModels', (requestId) => ({ requestId, action: 'refreshModels' }))} />
       </>}>
 
       {open && (keyProvider || local) && (
@@ -206,7 +205,7 @@ export function ApiKeySection({ setup, cmd, locale, inert, defaultOpen }: ApiKey
                   {removal?.error && <span className="ui-sub ui-err" role="alert">{revealControls(removal.error)}</span>}
                 </span>
               </Cell>
-              <Cell><Badge tone="ok" icon="check">{ko ? '저장됨' : 'Saved'}</Badge></Cell>
+              <Cell><Badge tone="ok" icon="check">{t('setup.key.saved')}</Badge></Cell>
               <Actions>
                 <IconButton icon="trash" tone="danger" testId={`remove-key-${saved.provider}`} label={t('setup.keys.removeFor', { name })}
                   disabled={inert || removal?.pending} onClick={() => removeKey(saved.provider)} />
@@ -236,7 +235,7 @@ export function ApiKeySection({ setup, cmd, locale, inert, defaultOpen }: ApiKey
             {removal?.error && <span className="ui-sub ui-err" role="alert">{revealControls(removal.error)}</span>}
           </span>
         </Cell>
-        <Cell><Badge tone="ok" icon="check">{ko ? '저장됨' : 'Saved'}</Badge></Cell>
+        <Cell><Badge tone="ok" icon="check">{t('setup.key.saved')}</Badge></Cell>
         <Actions>
           <IconButton icon="edit" testId={`edit-local-${server.id}`} label={t('setup.local.editFor', { name: server.name })}
             disabled={inert || open || removal?.pending} onClick={() => editServer(server.id)} />

@@ -8,7 +8,7 @@ import type { ToolsController } from '../../toolsState';
 import { useWorkState } from '../../work/store';
 import { Icon } from '../Icon';
 import { SectionRefresh, ViewSection } from '../ViewSection';
-import { Badge, DataTable, Field, FormActions, IconButton, matches, Pager, SearchBox, Toolbar, usePaged } from '../ui';
+import { Actions, Badge, Cell, DataTable, Field, FormActions, IconButton, matches, Pager, Row, SearchBox, Toolbar, usePaged } from '../ui';
 import { bytesOver, ChoiceField, ConfirmDelete, InPageDialog, ScopeChoice } from './InPageDialog';
 
 interface Editor { original?: WorkflowInfo; name: string; scope: ResourceScope; description: string; task: string; steps: string }
@@ -72,7 +72,8 @@ export function WorkflowsView({ controller, locale, disabled, busy, workspaceKey
   async function save() {
     if (!editor || !fields || locked) return;
     const { name, description, task, steps } = fields;
-    if (!/^[a-z0-9-]{2,40}$/.test(name) || description.length > 500 || control.test(description) ||
+    // The name rule is for new files only (as the host applies it): a saved workflow keeps whatever its file is called, and its name field is locked.
+    if ((!editor.original && !/^[a-z0-9-]{2,40}$/.test(name)) || description.length > 500 || control.test(description) ||
       // Characters, as the host counts them; the file's bytes are checked below.
       task.trim().length < 1 || task.length > 16000 || task.includes('\0') || steps.length > 32 || steps.some(step => step.length > 500 || control.test(step))) {
       setValidation(t('workflows.invalid')); return;
@@ -130,13 +131,13 @@ export function WorkflowsView({ controller, locale, disabled, busy, workspaceKey
           head={[t('tcol.name'), t('tcol.steps'), <span className="narrow-hide">{t('tcol.scope')}</span>, '']}>
           {paged.slice.map(workflow => {
             const key = `${workflow.scope}:${workflow.name}`; const fixed = !!workflow.note || !!workflow.unreadable;
-            return <div className="ui-tr" role="row" key={key} data-testid={`workflows-row-${workflow.scope}-${workflow.name}`}>
-              <span role="cell" className="ui-cell"><span className="tools-name-line"><strong>{workflow.name}</strong><span className="inline-kind">{scopeBadge(workflow.scope)}</span></span>
+            return <Row key={key} testId={`workflows-row-${workflow.scope}-${workflow.name}`}>
+              <Cell><span className="tools-name-line"><strong>{workflow.name}</strong><span className="inline-kind">{scopeBadge(workflow.scope)}</span></span>
                 {workflow.description && <span className="ui-sub" title={workflow.description}>{workflow.description}</span>}
-                {fixed && <span role="note" className="ui-sub ui-warn" title={workflow.note || t('tools.unreadable')}>{workflow.note || t('tools.unreadable')}</span>}</span>
-              <span role="cell" className="ui-cell ui-muted tools-num">{fixed ? '–' : workflow.stepCount ?? workflow.steps.length}</span>
-              <span role="cell" className="ui-cell narrow-hide">{scopeBadge(workflow.scope)}</span>
-              <span role="cell" className="ui-cell ui-actions">
+                {fixed && <span role="note" className="ui-sub ui-warn" title={workflow.note || t('tools.unreadable')}>{workflow.note || t('tools.unreadable')}</span>}</Cell>
+              <Cell className="ui-muted tools-num">{fixed ? '–' : workflow.stepCount ?? workflow.steps.length}</Cell>
+              <Cell className="narrow-hide">{scopeBadge(workflow.scope)}</Cell>
+              <Actions>
                 {fixed ? <IconButton icon="external" label={t('workflows.open')} testId={`workflows-open-${workflow.scope}-${workflow.name}`} disabled={locked} onClick={() => { void controller.command('workflows', { action: 'open', scope: workflow.scope, name: workflow.name }); }} />
                   : <>
                     {onStart && <IconButton icon="play" label={starting === key ? t('workflows.starting') : t('workflows.start')} testId={`workflows-start-${workflow.scope}-${workflow.name}`} disabled={locked || running || !!starting} onClick={() => start(workflow)} />}
@@ -144,8 +145,8 @@ export function WorkflowsView({ controller, locale, disabled, busy, workspaceKey
                     <IconButton icon="copy" label={t('workflows.duplicate')} testId={`workflows-duplicate-${workflow.scope}-${workflow.name}`} disabled={locked} onClick={() => openEditor(workflow, true)} />
                   </>}
                 <IconButton icon="trash" tone="danger" label={t('tools.delete')} testId={`workflows-delete-${workflow.scope}-${workflow.name}`} disabled={locked} onClick={() => { setEditor(undefined); setDeleting(workflow); }} />
-              </span>
-            </div>;
+              </Actions>
+            </Row>;
           })}
         </DataTable>
       </div>

@@ -498,6 +498,9 @@ namespace Pomp.Features
                 if (_disposed) throw new OperationCanceledException();
                 if (_login != null || _run != null) throw new ProviderSetupException(SetupText.Get("이미 로그인이 진행 중입니다.", "A provider login is already running."));
                 var resolution = _resolver.Resolve(_settings.OmpExecutablePath, _environment.ExtensionDirectory);
+                // The same engine policy as every other launch: a damaged or replaced bundled engine starts nothing, not this console either.
+                var refusal = BundledEngine.Refusal(resolution, _environment.ExtensionDirectory, out _);
+                if (refusal != null) throw new ProviderSetupException(refusal);
                 if (!resolution.Found) throw new ProviderSetupException(OmpNotFoundText());
                 try
                 {

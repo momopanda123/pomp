@@ -91,10 +91,16 @@ namespace Pomp.VisualStudio.Commands
         /// </summary>
         public async Task ShowInlineEditAsync()
         {
-            await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
-            var view = InlineEditorFeature.LastFocusedView;
-            if (view != null) await SelectQuestionScopeAsync(view);
-            if (InlineEditorFeature.TryShowInlinePrompt(PromptAction.Ask)) return;
+            // The active editor (the one the menu or key was used in), never an earlier one: an editor without a POMP prompt of its
+            // own (plain text) must not send the question to a code file that had the focus before.
+            var view = await ActiveViewAsync();
+            if (view != null)
+            {
+                await SelectQuestionScopeAsync(view);
+                await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+                if (!view.IsClosed && InlineEditorFeature.TryShowInlinePrompt(view, PromptAction.Ask)) return;
+            }
+
             await PrefillChatAsync(new ComposerPrefillPayload { IncludeEditorContext = true });
         }
 
@@ -172,13 +178,23 @@ namespace Pomp.VisualStudio.Commands
         /// </summary>
         public async Task AddToKnowledgeAsync()
         {
-            if (!(services.KnowledgeEditor is IKnowledgeEditor editor)) return;
+            if (!(services.KnowledgeEditor is IKnowledgeEditor editor))
+            { await SetStatusAsync("POMP: knowledge editing is unavailable for this backend."); return; }
             var lines = await ReadKnowledgeLinesAsync();
             if (lines == null) return;
 
             await ShowChatAsync(focus: true);
             await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
-            editor.OpenKnowledgeDraft(lines);
+            try
+            {
+                editor.OpenKnowledgeDraft(lines);
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException)
+            {
+                // The knowledge refused these lines (a blank line, too many lines, a file outside the workspace, an engine still
+                // starting): said in the status bar like this command's other reasons, not only in the log.
+                await SetStatusAsync("POMP: " + FirstLine(ex.Message));
+            }
         }
 
         /// <summary>The lines for a knowledge piece (see <see cref="ActiveLinesAsync"/>); null when there are none, with the reason in the status bar.</summary>
@@ -353,7 +369,7 @@ namespace Pomp.VisualStudio.Commands
                 services.Logger.Warn("The clipboard could not be read: " + ex.Message);
                 return;
             }
-            if ((paths.Count > 0 || png != null) && services.ActiveSession is PompSession session) await session.PasteIntoBasketAsync(paths, png, package.DisposalToken);
+            if (paths.Count > 0 || png != null) await services.ActiveSession.PasteIntoBasketAsync(paths, png, package.DisposalToken);
         }
 
         /// <summary>
@@ -364,7 +380,7 @@ namespace Pomp.VisualStudio.Commands
         public async Task DropIntoBasketAsync(IReadOnlyList<string> paths)
         {
             if (paths.Count == 0) paths = await SolutionExplorerSelectionAsync();
-            if (paths.Count > 0 && services.ActiveSession is PompSession session) await session.PasteIntoBasketAsync(paths, null, package.DisposalToken);
+            if (paths.Count > 0) await services.ActiveSession.PasteIntoBasketAsync(paths, null, package.DisposalToken);
         }
 
         private async Task<IReadOnlyList<string>> SolutionExplorerSelectionAsync()

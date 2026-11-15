@@ -633,7 +633,10 @@ namespace Pomp.Hosting
         {
             if (lines == null) throw new ArgumentNullException(nameof(lines));
             string root; lock (_stateLock) root = _workingDirectory;
-            var relative = root.Length == 0 ? null : RelativeWorkspacePath(root, lines.FullPath ?? "");
+            // The workspace is known only once the engine was launched: the first use of the command opens the window before that.
+            if (root.Length == 0)
+                throw new InvalidOperationException(OneLine(PompLanguage.Pick("POMP가 아직 시작하는 중이에요. 잠시 뒤에 다시 해 주세요.", "POMP is still starting. Try again in a moment.")));
+            var relative = RelativeWorkspacePath(root, lines.FullPath ?? "");
             if (relative == null || lines.StartLine < 1 || lines.EndLine < lines.StartLine || lines.EndLine > lines.StartLine + 199)
                 throw new ArgumentException(OneLine(PompLanguage.Pick("줄 위치가 올바르지 않아요.", "The line range is invalid.")));
             var text = KnowledgeText.Normalize(lines.Text ?? "");

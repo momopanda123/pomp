@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from '@oh-my-pi/pi-coding-agent';
 import fs from 'node:fs';
 import path from 'node:path';
+import { xdMountedTool } from '../lib/tool-targets.ts';
 import { isPompHost, offeredHostTools, type Env } from '../lib/vs-state.ts';
 interface GuardState { version: 1; active: boolean; paused: boolean; phase: string; root: string }
 /** Cooperative engine dispatch guard, not an OS sandbox. The host opts in only with this module installed. */
@@ -21,9 +22,12 @@ export function composerGuardDecision(toolName: string, input: unknown, cwd: str
   if (state.paused) return 'POMP Workflow is paused. Resume or cancel in the workflow panel; already running tools may finish.';
   const normalized = (value: string) => value.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
   if (normalized(cwd) !== normalized(state.root)) return 'POMP Workflow belongs to another workspace; refresh the host workflow before continuing.';
+  // `write xd://<tool>` only carries a call to a mounted tool, whose own tool_call is judged here by its name next. The devices
+  // omp runs without one (resolve, reject, propose, report_issue) and every ordinary write fall through to the refusal below.
+  if (xdMountedTool(toolName, input) !== undefined) return;
   // Host admission enforces its phase and permission kind again, including after approval.
   if (offeredHostTools(env).has(toolName)) return;
-  if (['read', 'grep', 'find', 'ls', 'todo'].includes(toolName)) return;
+  if (['read', 'grep', 'glob', 'find', 'ls', 'todo'].includes(toolName)) return;
   const action = input && typeof input === 'object' && 'action' in input ? input.action : undefined;
   if (toolName === 'lsp' && typeof action === 'string' && ['diagnostics', 'definition', 'references', 'symbols', 'hover'].includes(action)) return;
   return 'During POMP Workflow, direct writes, shell execution, child spawning and unknown extension tools are blocked. Use the advertised VS source tools and propose_workspace_edits; use separately approved VS execution only in Verification. This tool filter is not OS isolation.';

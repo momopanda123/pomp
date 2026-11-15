@@ -52,8 +52,8 @@ export function approvalTasks(input: unknown): { agent: string; task: string }[]
 export default function teams(pi: ExtensionAPI): void {
   if (!isPompHost()) return;
 
-  // Which agents the main agent may spawn until its turn ends: a team's members (membersOnly), the one addressed agent, or none for a
-  // direct message to an existing agent.
+  // Which agents the main agent may spawn until its turn ends: a team's members (membersOnly). A message to one agent is not relayed
+  // through this conversation: the host delivers it to that agent's own conversation tab (docs/architecture.md §8.3).
   let activeMembersOnly: { teamId: string; label: string; allowed: Set<string> } | null = null;
   // The isolation team whose turn is running (docs/architecture.md §8.11): only its member tasks run isolated, and all of them do.
   let activeIsolation: string | null = null;
@@ -95,39 +95,20 @@ export default function teams(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on('agent_end', (_event, ctx) => {
-    if (ctx.agent?.kind !== 'sub') {
-      activeMembersOnly = null;
-      activeIsolation = null;
-    }
+  const clearRestrictions = (): void => {
+    activeMembersOnly = null;
+    activeIsolation = null;
+  };
+  // The restrictions last for the user's whole turn: a run that settles only to continue (a member's result is awaited, a todo
+  // reminder, a retry, a compaction) keeps them.
+  pi.on('agent_end', (event, ctx) => {
+    if (ctx.agent?.kind === 'sub' || (event as { willContinue?: unknown } | undefined)?.willContinue === true) return;
+    clearRestrictions();
   });
-
-  // A new assignment for exactly one agent (docs/architecture.md §8.3): the main agent only relays.
-  pi.registerCommand('pomp-agent', {
-    description: 'Give the message to one agent as a new assignment (the main agent only relays it)',
-    handler: async (args, ctx) => {
-      const match = /^\s*([a-z0-9-]{2,40})\s+([\s\S]+)$/.exec(args);
-      if (!match) {
-        ctx.ui.notify('Agent name or message is missing.', 'warning');
-        return;
-      }
-      const name = match[1]!;
-      const info = resolveRole(name, readVsState()?.solutionRoot ?? ctx.cwd);
-      if (!info) {
-        ctx.ui.notify(`Agent not found: ${name}`, 'warning');
-        return;
-      }
-      const brief = [
-        `<!-- pomp-agent:${name} -->`,
-        `The user addressed this message directly to the agent \`${name}\` (${info.title}: ${info.job}).`,
-        `Call the \`task\` tool once with agent \`${name}\` and the user's message below as the assignment, verbatim; add only the context it needs to be self-contained. Do not do the work yourself and do not use other agents.`,
-        `When it finishes, show its result to the user, attributed to ${info.title}.`,
-        `<!-- /pomp-agent -->`,
-      ].join('\n\n');
-      activeMembersOnly = { teamId: name, label: `the direct message to agent '${name}'`, allowed: new Set([name]) };
-      pi.sendUserMessage(`${brief}\n\n${match[2]}`);
-    },
-  });
+  for (const name of ['session_start', 'session_switch'] as const)
+    pi.on(name, (_event, ctx) => { if (ctx?.agent?.kind !== 'sub') clearRestrictions(); });
+  // A message that never starts a run (no model, no key) must not leave the restrictions on for the next ordinary message.
+  const send = (text: string): void => { void Promise.resolve(pi.sendUserMessage(text)).catch(clearRestrictions); };
 
   pi.registerCommand('pomp-team', {
     description: 'Execute a team dispatch with coordinated instructions',
@@ -296,7 +277,7 @@ export default function teams(pi: ExtensionAPI): void {
       activeIsolation = isolated ? team.id : null;
 
       const promptText = userMessage ? `${brief}\n\n${userMessage}` : brief;
-      pi.sendUserMessage(promptText);
+      send(promptText);
     },
   });
 }

@@ -7,7 +7,7 @@ import type { ToolsController } from '../../toolsState';
 import { Icon } from '../Icon';
 import { revealControls } from '../RevealControls';
 import { SectionRefresh, ViewSection } from '../ViewSection';
-import { Badge, DataTable, Field, FormActions, IconButton, matches, Pager, SearchBox, Switch, Toolbar, usePaged } from '../ui';
+import { Actions, Badge, Cell, DataTable, Field, FormActions, IconButton, matches, Pager, Row, SearchBox, Switch, Toolbar, usePaged } from '../ui';
 import { bytesOver, ChoiceField, ConfirmDelete, InPageDialog, ScopeChoice } from './InPageDialog';
 
 interface Draft { mode: 'create' | 'import'; name: string; scope: ResourceScope; description: string; alwaysApply: boolean; globs: string; body: string; content: string }
@@ -142,19 +142,19 @@ export function RulesView({ controller, locale, disabled, busy, active }: { cont
       <div className="tools-narrow" style={{ '--ui-cols-narrow': 'minmax(0, 1fr) auto auto' } as CSSProperties}>
         <DataTable columns="minmax(0, 1fr) auto auto auto" label={t('tools.rules')} testId="rules-table" empty={!rules.length} emptyRows={3}
           head={[t('tcol.name'), t('tcol.applies'), <span className="narrow-hide">{t('tcol.scope')}</span>, '']}>
-          {paged.slice.map(rule => <div className="ui-tr" role="row" key={`${rule.scope}:${rule.name}`} data-testid={`rules-row-${rule.scope}-${rule.name}`}>
-            <span role="cell" className="ui-cell"><span className="tools-name-line"><strong>{rule.name}</strong><span className="inline-kind">{scopeBadge(rule.scope)}</span></span>
+          {paged.slice.map(rule => <Row key={`${rule.scope}:${rule.name}`} testId={`rules-row-${rule.scope}-${rule.name}`}>
+            <Cell><span className="tools-name-line"><strong>{rule.name}</strong><span className="inline-kind">{scopeBadge(rule.scope)}</span></span>
               {rule.description && <span className="ui-sub" title={rule.description}>{rule.description}</span>}
-              {(rule.note || rule.unreadable) && <span role="note" className="ui-sub ui-warn" title={rule.note || t('tools.unreadable')}>{rule.note || t('tools.unreadable')}</span>}</span>
+              {(rule.note || rule.unreadable) && <span role="note" className="ui-sub ui-warn" title={rule.note || t('tools.unreadable')}>{rule.note || t('tools.unreadable')}</span>}</Cell>
             {/* What an unreadable file applies to is not known, so no target badge. */}
-            <span role="cell" className="ui-cell tools-applies">{!rule.unreadable && applies(rule)}</span>
-            <span role="cell" className="ui-cell narrow-hide">{scopeBadge(rule.scope)}</span>
-            <span role="cell" className="ui-cell ui-actions">
+            <Cell className="tools-applies">{!rule.unreadable && applies(rule)}</Cell>
+            <Cell className="narrow-hide">{scopeBadge(rule.scope)}</Cell>
+            <Actions>
               {!rule.unreadable && <IconButton icon="edit" label={t('rules.edit')} testId={`rules-edit-${rule.scope}-${rule.name}`} disabled={locked} onClick={() => { void edit(rule); }} />}
               <IconButton icon="external" label={t('rules.open')} testId={`rules-open-${rule.scope}-${rule.name}`} disabled={locked} onClick={() => { void controller.command('rules', { action: 'open', scope: rule.scope, name: rule.name }); }} />
               <IconButton icon="trash" tone="danger" label={t('tools.delete')} testId={`rules-delete-${rule.scope}-${rule.name}`} disabled={locked} onClick={() => { setEditor(undefined); setDraft(undefined); setDeleting(rule); }} />
-            </span>
-          </div>)}
+            </Actions>
+          </Row>)}
         </DataTable>
       </div>
       <Pager paged={paged} testId="rules-pager" />

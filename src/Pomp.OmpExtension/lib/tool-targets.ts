@@ -46,7 +46,8 @@ function unwrapReadHeader(value: string): string {
 function collectPatchPaths(text: string, add: (path: string) => void): void {
 	const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 	for (const rawLine of body.split("\n")) {
-		const line = rawLine.replace(/\r$/, "");
+		// omp's own parser ignores trailing blanks on a header row and blanks around `MV`, so this one does too.
+		const line = rawLine.replace(/\r$/, "").trimEnd();
 		if (line.startsWith("[") && line.endsWith("]")) {
 			add(unquote(line.slice(1, -1).trim().replace(HASHLINE_TAG, "")));
 			continue;
@@ -56,7 +57,7 @@ function collectPatchPaths(text: string, add: (path: string) => void): void {
 			add(unquote(line.trimStart().replace(PILCROW_RUN, "").trim().replace(HASHLINE_TAG, "")));
 			continue;
 		}
-		const move = /^MV\s+(.+)$/.exec(line);
+		const move = /^\s*MV\s+(.+)$/.exec(line);
 		if (move) {
 			add(unquote(move[1]));
 			continue;
@@ -146,11 +147,32 @@ export const NETWORK_TOOLS: ReadonlySet<string> = new Set(["web_search", "fetch"
 
 const NETWORK_TARGET_FIELDS = ["url", "uri", "query", "q", "path", "repo", "repository"] as const;
 
-const WEB_URL = /^https?:\/\//i;
+/** What omp's `read` fetches as a web page: `http(s)://`, the single-slash spelling it repairs, and a bare `www.` host. */
+const WEB_URL = /^(?:https?:\/\/?|www\.)/i;
+/** omp's internal URLs that `read` answers from another machine (GitHub/GitLab items, a remote host's files). */
+const REMOTE_READ_URL = /^(?:issue|pr|mr|ssh):\/\//i;
+
+/** The mounted tool a `write` call addresses through omp's `xd://<tool>` transport; undefined for every other call. */
+export function xdDevice(toolName: string, input: unknown): string | undefined {
+	if (toolName !== "write" || !isRecord(input) || typeof input.path !== "string") return undefined;
+	return /^xd:\/\/([^/?#]+)$/i.exec(input.path.trim())?.[1];
+}
+
+/** `xd://` devices omp runs itself, with no `tool_call` of their own: a guard has to judge the outer `write`. */
+const XD_DIRECT_DEVICES: Record<string, true> = { resolve: true, reject: true, propose: true, report_issue: true };
+
+/**
+ * The mounted tool behind a `write xd://<tool>` whose own `tool_call` follows, so a guard may let the outer `write` pass and judge
+ * the tool by its name. Undefined for an ordinary write and for the devices that never raise a `tool_call`.
+ */
+export function xdMountedTool(toolName: string, input: unknown): string | undefined {
+	const device = xdDevice(toolName, input);
+	return device !== undefined && !Object.hasOwn(XD_DIRECT_DEVICES, device.toLowerCase()) ? device : undefined;
+}
 
 /**
  * What a built-in tool call reaches on the network (a URL or search text; empty when the call names none), or undefined when it
- * is not a network call. `read` also reads local files, so it counts only when an argument is an http(s) URL.
+ * is not a network call. `read` also reads local files, so it counts only when an argument is a web address or a remote internal URL.
  */
 export function networkTarget(toolName: string, input: unknown): string | undefined {
 	const args = isRecord(input) ? input : {};
@@ -163,7 +185,9 @@ export function networkTarget(toolName: string, input: unknown): string | undefi
 	}
 	if (toolName === "read") {
 		for (const value of Object.values(args)) {
-			if (typeof value === "string" && WEB_URL.test(value.trim())) return value.trim();
+			if (typeof value !== "string") continue;
+			const text = value.trim();
+			if (WEB_URL.test(text) || REMOTE_READ_URL.test(text)) return text;
 		}
 	}
 	return undefined;

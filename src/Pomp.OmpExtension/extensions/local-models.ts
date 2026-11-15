@@ -7,7 +7,8 @@
  * on `/pomp-local-models <request id>` (the host asks before it lists models), which replaces the list with what the server lists now:
  * a model the server dropped (another PC signed out of its provider) goes, a new one comes. No omp model cache is involved.
  * An address given without `/v1` is tried as `<address>/models` and then `<address>/v1/models`. A server that does not answer keeps
- * the list it had (a first one is registered without models), so a later refresh can find them.
+ * the list it had (a first one is registered without models), so a later refresh can find them. omp runs this module again for
+ * every subagent: those runs reuse what the server answered last and never ask it again.
  */
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { DEFAULT_MODEL_PER_PROVIDER } from "@oh-my-pi/pi-catalog/provider-models";
@@ -175,6 +176,14 @@ export function registerServer(pi: ProviderRegistry, server: LocalServer, baseUr
 }
 
 /**
+ * What each saved server answered last (null: registered, never answered), for the whole engine process. omp runs this module again
+ * for every subagent, and the providers are shared with the main conversation: asking the server again there would delay every
+ * subagent, and a server that happens not to answer would put its bare address over the working one.
+ */
+const answers = new Map<string, { baseUrl: string; models: LocalModel[] } | null>();
+const answerKey = (server: LocalServer): string => `${server.id}\n${server.address}\n${server.key ?? ""}`;
+
+/**
  * Reads every server again and replaces each answering server's model list; one that does not answer keeps its list.
  * Returns the number of servers that answered and the number of models they list.
  */
@@ -184,6 +193,7 @@ export async function refreshServers(pi: ProviderRegistry, servers: LocalServer[
 	await Promise.all(servers.map(async server => {
 		const found = await readModels(server, fetchImpl, catalog);
 		if (!found) return;
+		answers.set(answerKey(server), found);
 		if (registerServer(pi, server, found.baseUrl, found.models, true, warn)) { answered++; count += found.models.length; }
 	}));
 	return { servers: answered, models: count };
@@ -194,7 +204,15 @@ export default async function localModels(pi: ExtensionAPI): Promise<void> {
 	const servers = parseServers(process.env.POMP_LOCAL_MODELS);
 	const warn = (message: string, data: object): void => { try { pi.logger?.warn?.(message, data); } catch { /* logging only */ } };
 	await Promise.all(servers.map(async server => {
+		const key = answerKey(server);
+		const last = answers.get(key);
+		if (last !== undefined) {
+			// A later run of this module: the provider exists already. One that never answered is left as it is.
+			if (last) registerServer(pi, server, last.baseUrl, last.models, false, warn);
+			return;
+		}
 		const found = await readModels(server);
+		answers.set(key, found);
 		registerServer(pi, server, found?.baseUrl ?? server.address, found?.models ?? [], false, warn);
 	}));
 	if (servers.length === 0) return;

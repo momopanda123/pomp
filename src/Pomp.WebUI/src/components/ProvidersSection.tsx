@@ -18,7 +18,6 @@ interface ProvidersSectionProps {
   /** A sign-in is starting or running: one at a time. */
   busy: boolean;
   inert: boolean;
-  locale: string;
   onSignIn: (provider: string) => void;
   onConsole: () => void;
   onRetry: () => void;
@@ -33,7 +32,7 @@ const canSignIn = (provider: SetupProvider, busy: boolean, inert: boolean): bool
  * "Add an account": a grid of provider tiles (the popular ones first), searchable and paged. Every tile signs in to a subscription plan, so
  * the section title says so once; a tile shows the provider's name and whether it is connected already, and a click starts its sign-in.
  */
-export function ProvidersSection({ providers, state, providersError, required, busy, inert, locale, onSignIn, onConsole, onRetry }: ProvidersSectionProps) {
+export function ProvidersSection({ providers, state, providersError, required, busy, inert, onSignIn, onConsole, onRetry }: ProvidersSectionProps) {
   const t = useT();
   const titleId = useId();
   const [query, setQuery] = useState('');
@@ -95,7 +94,7 @@ export function ProvidersSection({ providers, state, providersError, required, b
           <div className="prov-grid" data-testid="provider-list" role="list" aria-label={t('setup.add.title')}>
             {paged.slice.map((provider) => {
               const label = providerLabel(provider.id, provider.name);
-              const method = providerMethod(provider.id, locale);
+              const method = providerMethod(provider.id, t);
               const popular = POPULAR_PROVIDERS.includes(provider.id);
               return (
                 <div role="listitem" key={provider.id} className="prov-cell">

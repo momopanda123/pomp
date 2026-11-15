@@ -75,6 +75,15 @@ namespace Pomp.Hosting
         /// <summary>User profile home directory for agent roles (tests); defaults to user profile.</summary>
         public string? UserHome { get; set; }
 
+        /// <summary>Official Antigravity app/CLI lookup (tests); defaults to installed locations, PATH agy and Windows registration.</summary>
+        public Func<string?>? AntigravityInstallationLocator { get; set; }
+
+        /// <summary>ACP process launcher; independent of native OMP launcher injection.</summary>
+        public IOmpProcessLauncher? AcpLauncher { get; set; }
+
+        /// <summary>Official agy CLI lookup; never a desktop application executable.</summary>
+        public Func<string?>? AntigravityCliLocator { get; set; }
+
         /// <summary>User teams directory (tests); defaults to %APPDATA%\Pomp\teams.</summary>
         public string? UserTeamsDirectory { get; set; }
 
@@ -104,7 +113,7 @@ namespace Pomp.Hosting
         private readonly ProviderSetup _providerSetup;
         private readonly WorkspaceReviewController? _workspaceReview;
         private readonly ComposerWorkflow? _composerWorkflow;
-        private readonly ComposerAutoContinue? _composerAuto;
+        private readonly GoalRunner? _goalRunner;
         private readonly TerminalJobs _terminalJobs;
         private readonly InteractiveTerminal _interactiveTerminal;
         private readonly BackgroundAgents _backgroundAgents;
@@ -166,8 +175,9 @@ namespace Pomp.Hosting
         internal string? ConversationId { get { lock (_stateLock) return _info.SessionId; } }
         internal string? ConversationFile { get { lock (_stateLock) return _sessionFile; } }
         internal bool ConversationRunning { get { lock (_stateLock) return _info.IsStreaming || _info.HasPendingAsyncWork || _turns.Count > 0; } }
+        internal bool ConversationWaiting => _ui.PendingRequestCount > 0;
         internal string ConversationRoot { get { lock (_stateLock) return _workingDirectory; } }
-        internal ConversationTabsStatePayload ConversationTabs => TabsView();
+        internal ConversationTabsStatePayload ConversationTabs => TabsView(includePlan: false);
         internal Task RunHistoryCommandAsync(JObject args, Func<string, string, bool>? ownedElsewhere = null) =>
             _commands.Enqueue(() => HandleRecentSessionsAsync(args, ownedElsewhere));
         internal void InitializeConversation(string root, string? id, string? file, ConversationPartnerPayload? partner)
@@ -178,12 +188,17 @@ namespace Pomp.Hosting
                 _recoverySession = id;
                 _recoveryFile = file;
                 _newConversationPartner = partner == null ? null : CopyPartner(partner);
+                // Known from here on, before the engine starts and before a page is attached: nothing can load the workflow journal earlier.
+                _workflowJournalScope = partner == null || partner.Kind == "main" || string.IsNullOrEmpty(partner.Id) ? "" : partner.Kind + ":" + partner.Id;
                 _managedInitialSession = id;
                 _managedInitialTranscriptReady = id == null;
             }
         }
         private string? _managedInitialSession;
         private bool _managedInitialTranscriptReady = true;
+        // The conversation host checked this root's origin before its first store read; the engine start reports what it found.
+        private WorkspaceOrigin.Outcome? _adoptedWorkspaceOrigin;
+        internal void AdoptWorkspaceOrigin(WorkspaceOrigin.Outcome origin) { lock (_stateLock) _adoptedWorkspaceOrigin = origin; }
         internal void FreezeWorkspace() { Interlocked.Exchange(ref _workspaceSwitching, 1); _gate.ResetSession(); }
         private void NotifyConversationChanged() => ConversationStateChanged?.Invoke(this, EventArgs.Empty);
         internal void UnfreezeWorkspace() => Interlocked.Exchange(ref _workspaceSwitching, 0);
@@ -203,7 +218,7 @@ namespace Pomp.Hosting
         private bool _refreshRunning;
         private bool _refreshQueued;
 
-        // Bumped by every streaming lifecycle event (_stateLock): a get_state reply older than one of them does not decide IsStreaming.
+        // Bumped by prompt admission/completion and streaming events (_stateLock): older get_state replies cannot clear activity.
         private long _streamingRevision;
         private Timer? _solutionTimer;
         private int _disposed;
@@ -271,7 +286,7 @@ namespace Pomp.Hosting
                 registry.Register(_workspaceReview.CreateTool());
                 _isolationResults = CreateIsolationResults(adapters, environment);
                 if (adapters is IIsolatedExecutionAdapters isolated) registry.Register(new IsolatedExecutionTool(featureAdapters, isolated.IsolatedRunner, environment, () => (settings as IIsolatedExecutionSettings)?.EnableExperimentalIsolation == true));
-                _composerWorkflow = new ComposerWorkflow(environment, _ui, () => { lock (_stateLock) return _sessionSwitchUncertain ? "" : _info.SessionId ?? ""; }, () => { lock (_stateLock) return _terminalJobs.HasUnfinishedWork || (_interactiveTerminal?.HasUnfinishedWork ?? false) || _info.HasPendingAsyncWork; }, () => _dispatcher?.ActiveCount ?? 0, () => { lock (_stateLock) return _turns.Count > 0 || _info.IsStreaming || _sessionSwitchUncertain; });
+                _composerWorkflow = new ComposerWorkflow(environment, _ui, () => { lock (_stateLock) return _sessionSwitchUncertain ? "" : _info.SessionId ?? ""; }, () => { lock (_stateLock) return _terminalJobs.HasUnfinishedWork || (_interactiveTerminal?.HasUnfinishedWork ?? false) || _info.HasPendingAsyncWork; }, () => _dispatcher?.ActiveCount ?? 0, () => { lock (_stateLock) return _turns.Count > 0 || _info.IsStreaming || _sessionSwitchUncertain; }, WorkflowJournalScope);
                 registry.Register(_composerWorkflow);
                 _workspaceReview.StateObserved = _composerWorkflow.ObserveReview;
                 _workspaceReview.AdmissionCheck = _composerWorkflow.CheckReview;
@@ -321,6 +336,7 @@ namespace Pomp.Hosting
             registry.Register(new KnowledgeProposalTool(this));
             _dispatcher = new HostToolDispatcher(registry, _gate, (frame, token) => _bridge.SendFrameAsync(frame, token), _logger);
             _dispatcher.AdmissionCheck = (invocation, kind) => WorkspaceSwitchBlock() ?? ProjectExecutionPolicy.CheckTool(_workingDirectory, invocation.ToolName, invocation.Arguments) ?? ProjectExecutionPolicy.CheckHostPermission(_workingDirectory, kind) ?? _composerWorkflow?.CheckTool(invocation, kind);
+            _dispatcher.OwnerContext = () => EditorSessionContext;
             _contextBuilder = new EditorContextBuilder(adapters, _logger, CurrentEditorContextLimits);
             _vsState = new VsStateWriter(adapters, _logger, _options.AdapterTimeout);
             _vsState.StateObserved = RefreshActiveRules;
@@ -333,13 +349,15 @@ namespace Pomp.Hosting
             }
             if (_composerWorkflow != null)
             {
-                _composerAuto = new ComposerAutoContinue(_composerWorkflow.View, ComposerContinuationReady, QueueComposerContinuationAsync, _ui, usage: ConversationTokens, notice: (level, text) => PostNotice(level, text));
+                _goalRunner = new GoalRunner(_composerWorkflow.View, GoalContinuationReady, QueueGoalContinuationAsync, usage: ConversationTokens, notice: (level, text) => PostNotice(level, text));
                 // The model can ask for a goal run; the page's confirmation card decides (docs/ui-protocol.md "Goal runs").
                 registry.Register(new GoalRequestTool(this));
             }
             _ui.SnapshotProvider = BuildSnapshot;
             _ui.CommandReceived += OnUiCommand;
             _ui.PageReady += OnPageReady;
+            _ui.Ready += OnUiReady;
+            _ui.PendingRequestsChanged += OnPendingRequestsChanged;
             _dispatcher.Completed += OnHostToolCompleted;
             _bridge.StateChanged += OnBridgeStateChanged;
             _bridge.FrameReceived += OnFrameReceived;
@@ -353,6 +371,7 @@ namespace Pomp.Hosting
                 try { _adapters.Solution.SolutionChanged += OnSolutionChanged; }
                 catch (Exception ex) { _logger.Warn("Could not subscribe to solution changes: " + ex.Message); }
             }
+            SubscribeSharedResources();
         }
 
         /// <inheritdoc />
@@ -366,7 +385,11 @@ namespace Pomp.Hosting
         }
 
         /// <inheritdoc />
-        public void DetachUi(IUiChannel channel) => _ui.Detach(channel);
+        public void DetachUi(IUiChannel channel)
+        {
+            _ui.Detach(channel);
+            StopUnattendedDictation();
+        }
 
         /// <inheritdoc />
         public async Task EnsureStartedAsync(CancellationToken cancellationToken)
@@ -449,6 +472,9 @@ namespace Pomp.Hosting
             _settings.Changed -= OnHelloSettingsChanged;
             _ui.CommandReceived -= OnUiCommand;
             _ui.PageReady -= OnPageReady;
+            _ui.Ready -= OnUiReady;
+            _ui.PendingRequestsChanged -= OnPendingRequestsChanged;
+            UnsubscribeSharedResources();
 
             Cancel(_disposeCts);
             CancelComposerPrediction();
@@ -456,7 +482,7 @@ namespace Pomp.Hosting
             _providerSetup.Dispose();
             CancelEpoch();
             DisposeComputerOwner();
-            _composerAuto?.Dispose();
+            _goalRunner?.Dispose();
             _workspaceReview?.Dispose();
             _isolationResults?.Dispose();
             _projectHooks?.Dispose();
@@ -496,20 +522,29 @@ namespace Pomp.Hosting
             }
         }
 
-        private void OnPageReady(object? sender, TimeSpan elapsed)
+        /// <summary>
+        /// Every <c>ui/ready</c>, also a reloaded page on the same channel: the states that are not part of the snapshot are sent again
+        /// (a reloaded page starts without them).
+        /// </summary>
+        private void OnUiReady(object? sender, EventArgs e)
         {
             _providerSetup.Publish();
             _workspaceReview?.Publish();
             _isolationResults?.Publish();
             _composerWorkflow?.RefreshAsync(_disposeCts.Token).Forget(_logger, "composer state");
-            _composerAuto?.Publish();
             _terminalJobs.Publish();
             _interactiveTerminal.Publish();
             _projectHooks?.Publish();
-            _backgroundAgents.Publish(); _backgroundAgents.InitializeAsync().Forget(_logger, "background task metadata");
+            _backgroundAgents.Publish();
             _problems.RefreshAsync(_disposeCts.Token).Forget(_logger, "problems snapshot");
             _advisors.Publish();
             _codeSearch?.Publish();
+        }
+
+        /// <summary>The first <c>ui/ready</c> of an attached page (after <see cref="OnUiReady"/>): one-time warm-up and the first-render time.</summary>
+        private void OnPageReady(object? sender, TimeSpan elapsed)
+        {
+            _backgroundAgents.InitializeAsync().Forget(_logger, "background task metadata");
             _codeSearch?.WarmAsync(false, _disposeCts.Token).Forget(_logger, "warm code index");
             _metrics.Time("ui.pageReady", elapsed);
             _logger.Info("The chat page was ready " + (long)elapsed.TotalMilliseconds + " ms after the tool window attached it.");
@@ -563,6 +598,9 @@ namespace Pomp.Hosting
             // A .pomp copied from another project keeps only its settings; a moved project keeps its history (WorkspaceOrigin).
             try { ReportWorkspaceOrigin(await WorkspaceOrigin.ReconcileAsync(root, _environment as IPompRecycleBin, _logger, cancellationToken).ConfigureAwait(false)); }
             catch (Exception ex) when (!(ex is OperationCanceledException)) { _logger.Warn("Could not check where this workspace's POMP data came from: " + ex.Message); }
+            WorkspaceOrigin.Outcome? adoptedOrigin;
+            lock (_stateLock) { adoptedOrigin = _adoptedWorkspaceOrigin; _adoptedWorkspaceOrigin = null; }
+            if (adoptedOrigin != null) ReportWorkspaceOrigin(adoptedOrigin);
 
             // omp treats any --config overlay problem as a hard startup error: the file must exist (absolute path) before the spawn.
             var overlayPath = Path.Combine(dataDirectory, "omp", "pomp-overlay-" + _engineKey + ".yml");
@@ -613,7 +651,19 @@ namespace Pomp.Hosting
             Directory.CreateDirectory(launchDirectory);
             var launch = new OmpLaunchOptions { ExecutablePath = resolution.Path!, WorkingDirectory = launchDirectory };
             BundledEngine.UseOwnNatives(launch, dataDirectory);
-            lock (_stateLock) _launchedApprovalMode = _settings.ApprovalMode;
+            var launchModel = LaunchModel() ?? string.Empty;
+            var launchThinking = _settings.ThinkingLevel ?? string.Empty;
+            lock (_stateLock)
+            {
+                _launchedApprovalMode = _settings.ApprovalMode;
+                // A launch with another Model or Thinking level setting than the one before: recovery keeps the new values.
+                if (_launchSettingsKnown)
+                {
+                    _modelSettingChanged |= !string.Equals(launchModel, _launchedModel, StringComparison.Ordinal);
+                    _thinkingSettingChanged |= !string.Equals(launchThinking, _launchedThinking, StringComparison.Ordinal);
+                }
+                _launchSettingsKnown = true; _launchedModel = launchModel; _launchedThinking = launchThinking; _launchSerial++;
+            }
             foreach (var argument in OmpLaunchArguments.Build(
                 _settings.UseRpcUiMode,
                 root,
@@ -810,13 +860,21 @@ namespace Pomp.Hosting
             ObserveAdvisorContext();
             _providerSetup.BridgeStateChanged(e.State);
             ComputerBridgeStateChanged(e.State);
+            DictationBridgeStateChanged(e.State);
             ResourceBridgeStateChanged(e.State);
             MainInstructionsBridgeStateChanged(e.State);
+            NotifyConversationChanged();
             if (e.State == BridgeState.Failed && e.Reason == BridgeFailureReasons.ModelNotFound) StartWithoutSavedModel();
         }
 
         // The configured model omp refused at start-up; launches leave it out until the setting names another model.
         private string? _refusedModel;
+
+        // The Model and Thinking level settings of the latest launch, and whether either differed from the launch before it. Until a
+        // recovery has applied them, the conversation's earlier model or level is not put back over the new setting (_stateLock).
+        private bool _launchSettingsKnown, _modelSettingChanged, _thinkingSettingChanged;
+        private string _launchedModel = string.Empty, _launchedThinking = string.Empty;
+        private long _launchSerial;
 
         private string? LaunchModel()
         {
@@ -891,7 +949,7 @@ namespace Pomp.Hosting
             }
 
             _vsState.Stop();
-            _composerAuto?.Stop(PompLanguage.Pick("연결이 끊겼어요. 자동 이어가기가 꺼졌어요.", "Disconnected. Automatic continuation is off."));
+            _goalRunner?.Stop(PompLanguage.Pick("연결이 끊겨서 목표 실행을 중지했어요.", "Goal execution stopped because the connection was lost."));
             PauseChatQueue(PompLanguage.Pick("연결이 끊겼어요.", "Disconnected."));
             _backgroundAgents.Disconnect();
             _interactiveTerminal.Disconnect();
@@ -987,7 +1045,7 @@ namespace Pomp.Hosting
 
         private void OnSolutionChanged(object? sender, EventArgs e)
         {
-            _composerAuto?.Stop(PompLanguage.Pick("작업 영역이 바뀌었어요. 자동 이어가기가 꺼졌어요.", "Workspace changed. Automatic continuation is off."));
+            _goalRunner?.Stop(PompLanguage.Pick("작업 영역이 바뀌어서 목표 실행을 중지했어요.", "Goal execution stopped because the workspace changed."));
             _composerWorkflow?.Interrupt(PompLanguage.Pick("작업 영역이 바뀌었어요.", "Workspace changed."));
             if (Volatile.Read(ref _disposed) == 1)
             {

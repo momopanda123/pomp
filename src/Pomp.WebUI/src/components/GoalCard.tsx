@@ -12,8 +12,8 @@ export interface GoalCardState { key: number; text: string; tokenBudget?: number
 
 /**
  * The confirmation of a goal run (typed `/goal`, or asked for by the model): the goal text and an optional token budget, start or cancel.
- * Automatic continuation costs model usage, so nothing starts before the answer. It is a card at the end of the conversation like the
- * other requests (Enter starts, Esc cancels); the host starts the workflow and arms the continuation when it gets the answer.
+ * A goal run can make bounded follow-up model requests, so nothing starts before the answer. The card sits at the end of the
+ * conversation like other requests (Enter starts, Esc cancels); the host starts the workflow after confirmation.
  */
 export function GoalCard({ card, root, sessionId, busy, onClose }: { card: GoalCardState; root: string; sessionId: string; busy: boolean; onClose: () => void }) {
   const t = useT();

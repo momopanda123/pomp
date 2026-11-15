@@ -84,7 +84,7 @@ namespace Pomp.Hosting
 
         private async Task HandleRecentSessionsAsync(JObject args, Func<string, string, bool>? ownedElsewhere = null)
         {
-            var requestId = args.GetString("requestId"); var action = args.GetString("action") ?? "refresh"; var switched = false; string? pageSession = null;
+            var requestId = args.GetString("requestId"); var action = args.GetString("action") ?? "refresh"; var switched = false; var engineSettled = false; string? pageSession = null;
             string knownRoot; lock (_stateLock) knownRoot = _workingDirectory;
             var answer = new JObject { ["requestId"] = requestId, ["root"] = knownRoot, ["entries"] = new JArray() };
             RecentSessionStore? store = null;
@@ -93,7 +93,7 @@ namespace Pomp.Hosting
                 if (action != "refresh" && action != "switch" && action != "messages" && action != "preview" && action != "rename" && action != "compact" && action != "delete") throw new ArgumentException(PompLanguage.Pick("알 수 없는 세션 기록 명령이에요.", "Unknown session-history command."));
                 if (action == "switch" && SessionChangeBusy())
                 {
-                    DeferSessionChange(() => HandleRecentSessionsAsync(args), requestId ?? "", "history-switch", null, null);
+                    DeferSessionChange(() => HandleRecentSessionsAsync(args, ownedElsewhere), requestId ?? "", "history-switch", null, null);
                     return;
                 }
                 string? name = null; string? instructions = null;
@@ -133,7 +133,7 @@ namespace Pomp.Hosting
                     if (!recovered.Success || !(recovered.Data is JObject recoveredState)) throw new InvalidOperationException(PompLanguage.Pick("활성 세션이 아직 확실하지 않아요.", "The active session is still uncertain."));
                     // Judge the switch only once the engine is settled: right after it, omp may still be loading or draining work.
                     recoveredState = await WaitForSettledStateAsync(connection, recoveredState, token.Token, "Session switch check").ConfigureAwait(false);
-                    if (recoveredState.GetBool("isSettled") != true || (ReferenceEquals(_uncertainSessionConnection, connection) && !string.Equals(recoveredState.GetString("sessionFile"), _uncertainSessionPath, StringComparison.OrdinalIgnoreCase)))
+                    if (recoveredState.GetBool("isSettled") != true || (ReferenceEquals(_uncertainSessionConnection, connection) && !SameSessionPath(recoveredState.GetString("sessionFile"), _uncertainSessionPath)))
                         throw new InvalidOperationException(PompLanguage.Pick("요청한 세션 전환은 확인되지 않았어요.", "The requested session switch is not confirmed."));
                     token.Token.ThrowIfCancellationRequested();
                     if (!ApplyState(recoveredState, currentLocked: () => ReferenceEquals(connection, _epochConnection), confirmSession: true))
@@ -153,13 +153,14 @@ namespace Pomp.Hosting
                     if (!ApplyState(latestState, revision, currentLocked: () => ReferenceEquals(connection, _epochConnection)) && !ReferenceEquals(connection, _epochConnection))
                         throw new OperationCanceledException(token.Token);
                     pageSession = latestState.GetString("sessionId");
+                    engineSettled = latestState.GetBool("isSettled") == true;
                 }
                 else if (action != "refresh" && action != "preview") throw new InvalidOperationException(PompLanguage.Pick("POMP가 연결되지 않았어요.", "POMP is not connected."));
 
                 if (action == "switch" || action == "messages" || action == "compact" || action == "delete")
                 {
                     if (action == "messages" && args.GetString("sessionId") != pageSession) throw new InvalidOperationException(PompLanguage.Pick("세션이 바뀌었어요.", "Session changed."));
-                    lock (_stateLock) if (_info.IsStreaming || _info.HasPendingAsyncWork || _turns.Count > 0) throw new InvalidOperationException(PompLanguage.Pick("현재 세션이나 백그라운드 작업이 진행 중이에요.", "The current session or background work is still running."));
+                    lock (_stateLock) if (_info.IsStreaming || _info.HasPendingAsyncWork || _turns.Count > 0 || (action != "messages" && !engineSettled)) throw new InvalidOperationException(PompLanguage.Pick("현재 세션이나 백그라운드 작업이 진행 중이에요.", "The current session or background work is still running."));
                     if (_ui.PendingRequestCount > 0) throw new InvalidOperationException(PompLanguage.Pick("대기 중인 승인이나 질문이 있어요.", "An approval or question is pending."));
                     if (_bridge.State != BridgeState.Running) throw new InvalidOperationException(PompLanguage.Pick("POMP가 연결되지 않았어요.", "POMP is not connected."));
                 }
@@ -168,12 +169,27 @@ namespace Pomp.Hosting
                     if (_terminalJobs.HasUnfinishedWork || _interactiveTerminal.HasUnfinishedWork) throw new InvalidOperationException(PompLanguage.Pick("실행 중인 터미널 작업이 있어요.", "A terminal job is still running."));
                     string? activeFile; lock (_stateLock) activeFile = _sessionFile;
                     var path = await Task.Run(() => store.Resolve(args.GetString("root") ?? "", args.GetString("id") ?? "", activeFile), token.Token).ConfigureAwait(false);
-                    _uncertainSessionPath = path; _uncertainSessionConnection = connection; _sessionSwitchUncertain = true;
+                    token.Token.ThrowIfCancellationRequested();
+                    lock (_stateLock)
+                    {
+                        if (!ReferenceEquals(connection, _epochConnection)) throw new OperationCanceledException(token.Token);
+                        _uncertainSessionPath = path; _uncertainSessionConnection = connection; _sessionSwitchUncertain = true;
+                    }
                     var response = await SwitchSessionAsync(connection!, path, token.Token).ConfigureAwait(false);
-                    if (!response.Success || response.Data.GetBool("cancelled") == true) { _sessionSwitchUncertain = _recoveryStatus != "ready"; throw new InvalidOperationException(response.Error ?? PompLanguage.Pick("세션 전환이 취소됐어요.", "The session switch was cancelled.")); }
+                    token.Token.ThrowIfCancellationRequested();
+                    if (!response.Success || response.Data.GetBool("cancelled") == true)
+                    {
+                        lock (_stateLock)
+                            if (ReferenceEquals(connection, _epochConnection)) _sessionSwitchUncertain = _recoveryStatus != "ready";
+                        throw new InvalidOperationException(response.Error ?? PompLanguage.Pick("세션 전환이 취소됐어요.", "The session switch was cancelled."));
+                    }
                     token.Token.ThrowIfCancellationRequested();
                     var current = await connection!.SendCommandAsync(OmpCommands.GetState(), TimeSpan.FromSeconds(10), token.Token).ConfigureAwait(false);
+                    token.Token.ThrowIfCancellationRequested();
                     if (!current.Success || current.Data is not JObject currentState || !SameSessionPath(currentState.GetString("sessionFile"), path) || string.IsNullOrEmpty(currentState.GetString("sessionId")))
+                        throw new InvalidOperationException(PompLanguage.Pick("선택한 세션 상태를 확인하지 못했어요.", "Could not confirm the selected session state."));
+                    currentState = await WaitForSettledStateAsync(connection, currentState, token.Token, "Session switch").ConfigureAwait(false);
+                    if (currentState.GetBool("isSettled") != true || !SameSessionPath(currentState.GetString("sessionFile"), path) || string.IsNullOrEmpty(currentState.GetString("sessionId")))
                         throw new InvalidOperationException(PompLanguage.Pick("선택한 세션 상태를 확인하지 못했어요.", "Could not confirm the selected session state."));
                     token.Token.ThrowIfCancellationRequested();
                     if (!ApplyState(currentState, acceptRecovery: true, currentLocked: () => ReferenceEquals(connection, _epochConnection), confirmSession: true))

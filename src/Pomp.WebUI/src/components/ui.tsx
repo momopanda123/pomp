@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEventHandler, type KeyboardEvent, type KeyboardEventHandler, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEventHandler, type KeyboardEvent, type KeyboardEventHandler, type ReactNode, type Ref } from 'react';
 import { useT } from '../i18n';
 import { Icon, type IconName } from './Icon';
 import '../styles/ui.css';
@@ -21,10 +21,11 @@ export function Badge({ tone = 'neutral', icon, children, title, mono = false, t
   return <span className={`ui-badge ui-badge-${tone}${mono ? ' ui-mono' : ''}`} title={title} data-testid={testId}>{icon && <Icon name={icon} size={11} />}{children}</span>;
 }
 
-export function IconButton({ icon, label, onClick, disabled = false, testId, tone }: {
-  icon: IconName; label: string; onClick: () => void; disabled?: boolean; testId?: string; tone?: 'danger';
+/** `pressed`: a toggle (aria-pressed); `keys`: the shortcut it answers (aria-keyshortcuts). */
+export function IconButton({ icon, label, onClick, disabled = false, testId, tone, pressed, keys }: {
+  icon: IconName; label: string; onClick: () => void; disabled?: boolean; testId?: string; tone?: 'danger'; pressed?: boolean; keys?: string;
 }) {
-  return <button type="button" className={`icon-btn ui-icon-btn${tone ? ' ui-icon-btn-' + tone : ''}`} title={label} aria-label={label} disabled={disabled} data-testid={testId} onClick={onClick}>
+  return <button type="button" className={`icon-btn ui-icon-btn${tone ? ' ui-icon-btn-' + tone : ''}`} title={label} aria-label={label} aria-pressed={pressed} aria-keyshortcuts={keys} disabled={disabled} data-testid={testId} onClick={onClick}>
     <Icon name={icon} size={14} />
   </button>;
 }
@@ -87,10 +88,11 @@ export function Pager({ paged, testId }: { paged: { page: number; pages: number;
   </div>;
 }
 
-export function SearchBox({ value, onChange, label, testId, disabled = false }: { value: string; onChange: (value: string) => void; label?: string; testId?: string; disabled?: boolean }) {
+/** `inputRef` and `onKeyDown` are for a search that owns the focus (the conversation's find bar). */
+export function SearchBox({ value, onChange, label, testId, disabled = false, inputRef, onKeyDown }: { value: string; onChange: (value: string) => void; label?: string; testId?: string; disabled?: boolean; inputRef?: Ref<HTMLInputElement>; onKeyDown?: KeyboardEventHandler<HTMLInputElement> }) {
   const t = useT(); const name = label ?? t('ui.search');
   return <label className="ui-search"><Icon name="search" size={13} />
-    <input type="search" value={value} placeholder={name} aria-label={name} data-testid={testId} disabled={disabled} spellCheck={false} onChange={event => onChange(event.target.value)} />
+    <input ref={inputRef} type="search" value={value} placeholder={name} aria-label={name} data-testid={testId} disabled={disabled} spellCheck={false} onChange={event => onChange(event.target.value)} onKeyDown={onKeyDown} />
   </label>;
 }
 const nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });

@@ -83,15 +83,19 @@ namespace Pomp.VisualStudio.Composition
         /// <summary>This PC's model sharing (Accounts tab); started when it was left on, stopped with the services.</summary>
         public ModelShareService ModelShare { get; }
 
-        /// <summary>Reads the host's current epoch, not a potentially delayed WebView projection.</summary>
-        public void RefreshEditorSession()
+        /// <summary>
+        /// Reads the host's current epoch, not a potentially delayed WebView projection, and makes it the conversation the editor
+        /// displays. Returns that conversation's context, or null without a session.
+        /// </summary>
+        public EditorSessionContext? RefreshEditorSession()
         {
             Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
             IEditorSessionContextSource? source;
             lock (gate) source = session as IEditorSessionContextSource;
-            if (source == null) return;
+            if (source == null) return null;
             var state = source.EditorSessionContext;
             EditorFollow.SetSession(state.WorkspaceRoot, state.SessionId, state.IsStreaming, state.TaskId, state.SessionTitle);
+            return state;
         }
 
         /// <summary>The chat session (created on first use, on the UI thread).</summary>
@@ -111,7 +115,12 @@ namespace Pomp.VisualStudio.Composition
             }
         }
         /// <summary>The selected conversation for editor commands that act on chat input or model context.</summary>
-        public PompSession ActiveSession => ((PompConversationHost)Session).ActiveSession;
+        public IConversationSession ActiveSession => ((PompConversationHost)Session).ActiveSession;
+
+        /// <summary>Stable invalidation source for optional editor capabilities across backend and tab switches.</summary>
+        public event EventHandler? ActiveSessionChanged;
+
+        private void OnActiveSessionChanged(object? sender, EventArgs args) => ActiveSessionChanged?.Invoke(this, args);
 
         /// <summary>The knowledge of the open workspace for the editor (menu, line colors): the session's, or null when it offers none or the services are disposed.</summary>
         public IKnowledgeEditor? KnowledgeEditor
@@ -120,7 +129,7 @@ namespace Pomp.VisualStudio.Composition
             {
                 try
                 {
-                    return Session as IKnowledgeEditor;
+                    return ActiveSession as IKnowledgeEditor;
                 }
                 catch (ObjectDisposedException)
                 {
@@ -209,6 +218,7 @@ namespace Pomp.VisualStudio.Composition
             }
 
             Settings.Changed -= OnSettingsChanged;
+            if (current is PompConversationHost host) host.ActiveSessionChanged -= OnActiveSessionChanged;
 
             pendingRestart?.Cancel();
             pendingRestart?.Dispose();
@@ -262,7 +272,9 @@ namespace Pomp.VisualStudio.Composition
                     registry.Register(tool);
                 return registry;
             }
-            return new PompConversationHost(Settings, Environment, Adapters, Logger, CreateRegistry, null, ModelShare);
+            var host = new PompConversationHost(Settings, Environment, Adapters, Logger, CreateRegistry, null, ModelShare);
+            host.ActiveSessionChanged += OnActiveSessionChanged;
+            return host;
         }
 
         private void SubscribeLifecycleEvents()

@@ -263,6 +263,13 @@
 .composer-send { display: flex; flex: none; gap: 2px; }
 /* Matches the default single-line input row (28px input incl. border) while it grows with it. */
 .composer-send-btn { width: 28px; min-width: 28px; height: 28px; padding: 0; justify-content: center; }
+/* The microphone is that square in the plain button style (Send is the primary one); while it records it takes the Stop button's
+   outline and its icon breathes. */
+.dictation-btn.recording { background: transparent; border-color: var(--pomp-error); }
+.dictation-btn.recording:hover:not(:disabled) { background: color-mix(in srgb, var(--pomp-error) 16%, transparent); }
+.dictation-btn.recording .icon { color: var(--pomp-error); animation: dictation-recording 1.4s ease-in-out infinite; }
+@keyframes dictation-recording { 50% { opacity: 0.4; } }
+@media (prefers-reduced-motion: reduce) { .dictation-btn.recording .icon { animation: none; } }
 
 /* Bottom toolbar order, left to right: permission mode, destination picker, then the model controls. */
 .composer-bar .permission-mode-anchor { order: -1; }
@@ -297,6 +304,7 @@
   cursor: pointer;
 }
 .mention-option:hover, .mention-option.selected { background: var(--pomp-selection-bg); }
+.mention-kind { margin-right: 4px; color: var(--pomp-muted-fg); vertical-align: -2px; }
 .mention-status, .file-directory { color: var(--pomp-muted-fg); }
 .composer-warning { display: flex; align-items: baseline; gap: 5px; margin: 4px 0; color: var(--pomp-warning); font-size: 0.92em; overflow-wrap: anywhere; }
 
@@ -438,9 +446,8 @@
   font-size: 0.9em;
 }
 
-.diff-modes { display: inline-flex; gap: 2px; }
-.diff-modes .btn { min-height: var(--pomp-bar-height); padding: 1px 5px; font-size: 1em; }
-.diff-modes [aria-pressed="true"] { background: var(--pomp-selection-bg); color: var(--pomp-fg); }
+/* The layout switch is the shared segmented control, one step smaller to sit in the diff's header line. */
+.diff-head .ui-seg > button { min-height: 20px; padding: 0 6px; }
 .diff-table.split { width: 100%; table-layout: fixed; }
 .diff-table.split .split-number { width: calc((var(--digits, 3) + 2) * 1ch); }
 .diff-table.split .ln { position: static; }

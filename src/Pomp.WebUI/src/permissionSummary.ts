@@ -33,11 +33,12 @@ function taskPreview(lines: string[], start: number): string | undefined {
   }
   const text = preview.join('\n');
   if (!text) return undefined;
+  // A cut preview says so: the approval card must not show part of a task as the whole of it.
   if (text.length > PREVIEW_CHARS || (clipped && text.length === PREVIEW_CHARS)) {
     // Do not leave half a surrogate pair at the clipping boundary.
-    return text.slice(0, PREVIEW_CHARS).replace(/[\uD800-\uDBFF]$/, '');
+    return `${text.slice(0, PREVIEW_CHARS - 1).replace(/[\uD800-\uDBFF]$/, '')}…`;
   }
-  return text;
+  return clipped ? `${text}…` : text;
 }
 
 /**

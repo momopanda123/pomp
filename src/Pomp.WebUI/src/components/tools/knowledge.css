@@ -1,6 +1,7 @@
 /* Tools › 지식: a table of knowledge (color tag, pieces, scope, actions) whose rows open to their pieces; the form's color row ends with "+". */
 .knowledge-view .knowledge-form > fieldset { display: flex; flex-direction: column; gap: 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .knowledge-view .knowledge-form p { margin: 0; }
+.knowledge-view .knowledge-form .ui-seg { align-self: flex-start; }
 .knowledge-view .ui-tr.knowledge-row { min-height: 34px; }
 .knowledge-view .knowledge-group + .knowledge-group > .knowledge-row { border-top: 1px solid color-mix(in srgb, var(--pomp-border) 65%, transparent); }
 .knowledge-view .knowledge-group > .ui-tr { border-bottom: 0; }
@@ -37,7 +38,7 @@
 .knowledge-piece-main { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
 .knowledge-piece > .ui-actions { flex: none; padding-top: 2px; }
 .knowledge-view .knowledge-anchor { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; margin: 0; color: var(--pomp-muted-fg); font-size: 12px; white-space: nowrap; }
-.knowledge-view .knowledge-anchor > code { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.knowledge-view .knowledge-anchor > code { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--pomp-font-mono); }
 .knowledge-view .knowledge-anchor > .ui-badge { flex: none; }
 .knowledge-view .knowledge-anchor > .icon { flex: none; }
 .knowledge-view .knowledge-text { max-height: 200px; margin: 0; padding: 6px 8px; overflow: auto; border-radius: var(--pomp-radius);
@@ -47,11 +48,12 @@
 .knowledge-view .ui-tr .knowledge-text { max-height: 96px; margin-top: 4px; }
 
 /* Color: 16 presets, the custom color when one is set, then the dashed "+" that opens the #RRGGBB field. */
+.knowledge-view .knowledge-color-field { min-width: 0; }
 .knowledge-color-label { font-size: .92em; color: var(--pomp-fg); }
 .knowledge-view .knowledge-swatches { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
 .knowledge-view button.knowledge-swatch { display: inline-flex; flex: none; width: 24px; height: 24px; min-width: 0; min-height: 0; padding: 2px; border: 1px solid transparent;
   border-radius: var(--pomp-radius); background: transparent; cursor: pointer; }
-.knowledge-view button.knowledge-swatch > span { flex: 1; border-radius: 3px; pointer-events: none; }
+.knowledge-view button.knowledge-swatch > span { flex: 1; border-radius: 3px; background: var(--knowledge-color); pointer-events: none; }
 .knowledge-view button.knowledge-swatch[aria-checked='true'] { padding: 1px; border: 2px solid var(--pomp-fg); }
 .knowledge-view button.knowledge-swatch:focus-visible { outline: 1px solid var(--pomp-focus-border); outline-offset: 1px; }
 .knowledge-view button.knowledge-swatch-add { align-items: center; justify-content: center; padding: 0; border: 1px dashed color-mix(in srgb, var(--pomp-fg) 45%, transparent); color: var(--pomp-muted-fg); }

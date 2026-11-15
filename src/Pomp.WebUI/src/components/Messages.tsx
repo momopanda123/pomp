@@ -1,7 +1,8 @@
-import { memo, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useContext, useRef, useState, useSyncExternalStore } from 'react';
 import { parseSentCaseFeedback, sentCaseFeedbackText } from '../caseFeedbackMessage';
 import { clip, copyText } from '../format';
-import { useT } from '../i18n';
+import { useT, type MessageKey } from '../i18n';
+import { useFindReveal } from '../findReveal';
 import { engineAbortText, isEngineAbort } from '../engineAbortText';
 import type {
   AbortedItem,
@@ -17,10 +18,11 @@ import { Icon } from './Icon';
 import { Markdown } from './Markdown';
 import { plainControls, revealControls } from './RevealControls';
 import { UserTextBody } from './SentCaseFeedback';
-import { useRoleTitle, useTeamTitle } from '../teamsCache';
+import { OpenPartnerContext, useRoleTitle, useTeamTitle } from '../teamsCache';
 import { useWorkState } from '../work/store';
-import type { SendTarget } from '../protocol';
+import type { RelayStatus, SendTarget } from '../protocol';
 import { markMenuHandled, useContextMenu, type ContextMenuItem } from './ContextMenu';
+import { Badge, type BadgeTone } from './ui';
 
 /** Non-empty selection text fully inside `root`, or undefined (then "Copy selection" is not offered). */
 function selectionIn(root: HTMLElement): string | undefined {
@@ -34,7 +36,7 @@ function selectionIn(root: HTMLElement): string | undefined {
 }
 
 /** Who the user's message went to: the destination's picture and name only (the agent of a running member; POMP for the main conversation). */
-function TargetBadge({ target }: { target: SendTarget }) {
+export function TargetBadge({ target }: { target: SendTarget }) {
   const teamTitle = useTeamTitle(target.id);
   const background = useWorkState('background');
   const agent = target.kind === 'instance' ? background?.jobs.find(job => job.id === target.id)?.agent || target.id : target.id;
@@ -47,8 +49,32 @@ function TargetBadge({ target }: { target: SendTarget }) {
   </div>;
 }
 
-function TeamBriefCard({ teamId, kind = 'team', content }: { teamId: string; kind?: 'team' | 'agent' | 'dm'; content: string }) {
+const RELAY_TONES: Record<RelayStatus, BadgeTone> = { sending: 'info', delivered: 'info', working: 'accent', waiting: 'warn', done: 'ok', failed: 'error', stopped: 'neutral', unknown: 'neutral' };
+
+/** The "open tab" button of a relay: the agent or team tab where the message runs. Absent without tabs (a page outside the host). */
+export function OpenRelayTab({ target }: { target: SendTarget }) {
+  const t = useT();
+  const open = useContext(OpenPartnerContext);
+  if (!open || (target.kind !== 'agent' && target.kind !== 'team')) return null;
+  return <button type="button" className="btn subtle small relay-open" data-testid="relay-open-tab" title={t('relay.openTitle')} onClick={() => open(target)}><Icon name="external" size={12} />{t('relay.open')}</button>;
+}
+
+/** Where a message sent to another agent or team stands: it runs in that partner's own tab, this chat only follows it. */
+function RelayStatusRow({ relay, target }: { relay: NonNullable<UserItem['relay']>; target: SendTarget }) {
+  const t = useT();
+  return <div className="relay-status" data-testid="relay-status" data-relay-status={relay.status}>
+    <Badge tone={RELAY_TONES[relay.status]} testId="relay-status-badge">{t(`relay.status.${relay.status}` as MessageKey)}</Badge>
+    {relay.detail && <span className="relay-status-detail">{revealControls(relay.detail)}</span>}
+    <OpenRelayTab target={target} />
+  </div>;
+}
+
+/** The routing brief the host wrapped in comments in a user message: [1] kind, [2] team or agent id, [3] the brief; null when there is none. */
+export const teamBriefMatch = (text: string): RegExpExecArray | null => /<!--\s*pomp-(team|agent|dm):([^\s>]+)\s*-->([\s\S]*?)<!--\s*\/pomp-\1\s*-->/.exec(text);
+
+function TeamBriefCard({ teamId, kind = 'team', content, findKey }: { teamId: string; kind?: 'team' | 'agent' | 'dm'; content: string; findKey: string }) {
   const [open, setOpen] = useState(false);
+  useFindReveal(findKey, () => setOpen(true));
   const teamTitle = useTeamTitle(teamId);
   const background = useWorkState('background');
   const agent = kind === 'dm' ? background?.jobs.find(job => job.id === teamId)?.agent || teamId : teamId;
@@ -56,7 +82,7 @@ function TeamBriefCard({ teamId, kind = 'team', content }: { teamId: string; kin
   const title = kind === 'team' ? teamTitle : roleTitle;
 
   return (
-    <div className="team-brief-card" data-testid={`${kind}-brief-card`}>
+    <div className="team-brief-card" data-testid={`${kind}-brief-card`} data-find-collapsed={open ? undefined : ''}>
       <button
         type="button"
         className="team-brief-toggle"
@@ -102,7 +128,7 @@ export const UserMessage = memo(function UserMessage({ item }: { item: UserItem 
   const { menuProps, renderMenu } = useContextMenu();
   const bubbleRef = useRef<HTMLDivElement>(null);
   // Host-authored routing briefs stay collapsed; text outside their comments is unchanged.
-  const teamMatch = /<!--\s*pomp-(team|agent|dm):([^\s>]+)\s*-->([\s\S]*?)<!--\s*\/pomp-\1\s*-->/.exec(item.text);
+  const teamMatch = teamBriefMatch(item.text);
   const messageMenu = (): ContextMenuItem[] => {
     const root = bubbleRef.current;
     if (!root) return [];
@@ -156,7 +182,7 @@ export const UserMessage = memo(function UserMessage({ item }: { item: UserItem 
     return (
       <div className={state ? `msg user ${state}` : 'msg user'} ref={bubbleRef} tabIndex={-1} {...bubbleHandlers}>
         {before && <div className="user-text user-text-content" data-testid="user-text-content">{revealControls(before)}</div>}
-        <TeamBriefCard kind={kind} teamId={teamId} content={teamContent} />
+        <TeamBriefCard kind={kind} teamId={teamId} content={teamContent} findKey={item.key} />
         {after && <UserTextBody text={after} reveal />}
         {item.attachments && item.attachments.length > 0 && <AttachmentSummary files={item.attachments} testId="user-attachments" />}
         <EditorContextChip context={item.editorContext} />
@@ -175,6 +201,7 @@ export const UserMessage = memo(function UserMessage({ item }: { item: UserItem 
     <div className={state ? `msg user ${state}` : 'msg user'} ref={bubbleRef} tabIndex={-1} {...bubbleHandlers}>
       {/* No badge = the conversation itself answered; a badge names the one-message target (an agent, team or running member). */}
       {item.target && item.target.kind !== 'main' && <TargetBadge target={item.target} />}
+      {item.relay && item.target && <RelayStatusRow relay={item.relay} target={item.target} />}
       {item.steered && <div className={item.withdrawn ? 'message-steered-badge withdrawn' : 'message-steered-badge'} data-testid="message-steered" title={t(item.withdrawn ? 'msg.steerWithdrawnTitle' : 'msg.steeredTitle')}><Icon name={item.withdrawn ? 'stop' : 'zap'} size={12} /><span>{t(item.withdrawn ? 'msg.steerWithdrawn' : 'msg.steered')}</span></div>}
       {item.subagentAccepted && <div className="message-steered-badge" data-testid="message-subagent-accepted" title={t('msg.subagentAcceptedTitle')}><Icon name="check" size={12} /><span>{t('msg.subagentAccepted')}</span></div>}
       <UserTextBody text={item.text} />

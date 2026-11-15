@@ -392,8 +392,10 @@ namespace Pomp.VisualStudio.Adapters
             {
                 var services = Composition.PompServices.Current;
                 if (services == null || (!services.Settings.AppliedLiveFollowEnabled && !services.Settings.AppliedLiveBookmarksEnabled)) return;
-                services.RefreshEditorSession();
-                services.EditorFollow.Record(path, buffer, before, buffer.CurrentSnapshot);
+                // The selected conversation is what the editor displays; the edit belongs to the conversation whose tool made it
+                // (the host's EditorSessionScope), which may run in a background tab.
+                var selected = services.RefreshEditorSession();
+                services.EditorFollow.Record(path, buffer, before, buffer.CurrentSnapshot, Pomp.Hosting.EditorSessionScope.Current ?? selected);
             }
             catch (Exception ex)
             {

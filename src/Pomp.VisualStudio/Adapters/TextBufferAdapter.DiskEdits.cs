@@ -46,6 +46,8 @@ namespace Pomp.VisualStudio.Adapters
             {
                 var fullPath = VsAdapterContext.NormalizePath(path);
                 if (fullPath == null || holds.ContainsKey(fullPath) || !context.Rdt.IsMonikerValid(fullPath)) continue;
+                // A document with unsaved changes is never held: Visual Studio itself must ask about the tool's write.
+                if (TryCaptureOpenBuffer(fullPath)?.IsDirty == true) continue;
                 var cookie = context.Rdt.GetDocumentCookie(fullPath);
                 if (cookie == VSConstants.VSCOOKIE_NIL || !(context.Rdt.GetDocumentData(cookie) is IVsDocDataFileChangeControl control)) continue;
                 if (ErrorHandler.Failed(control.IgnoreFileChanges(1))) continue;
@@ -67,9 +69,10 @@ namespace Pomp.VisualStudio.Adapters
         {
             var fullPath = VsAdapterContext.NormalizePath(path);
             if (fullPath == null) return;
-            await context.Jtf.SwitchToMainThreadAsync(cancellationToken);
             try
             {
+                // Inside the try: a switch cancelled by the caller's time limit (a busy UI thread) must still end the hold below.
+                await context.Jtf.SwitchToMainThreadAsync(cancellationToken);
                 if (applied) await ShowAsync(fullPath, before, cancellationToken);
             }
             finally
@@ -113,8 +116,8 @@ namespace Pomp.VisualStudio.Adapters
                 }
                 if (text == after)
                 {
-                    services.RefreshEditorSession();
-                    services.EditorFollow.RecordLoaded(file, buffer, Loaded(diff, snapshot));
+                    var selected = services.RefreshEditorSession();
+                    services.EditorFollow.RecordLoaded(file, buffer, Loaded(diff, snapshot), Pomp.Hosting.EditorSessionScope.Current ?? selected);
                     return;
                 }
                 context.Log.Debug("Live: " + file + " holds neither the text before nor after the tool's edit; its change is not shown.");
@@ -136,10 +139,13 @@ namespace Pomp.VisualStudio.Adapters
             holds.Remove(fullPath);
             try
             {
-                context.GetService<IVsFileChangeEx>(typeof(SVsFileChangeEx)).SyncFile(fullPath);
+                // A buffer that got unsaved changes while it was held keeps the pending file change: once the document reacts to file
+                // changes again Visual Studio asks about the tool's write, instead of the next save silently overwriting it.
+                var dirty = TryCaptureOpenBuffer(fullPath)?.IsDirty == true;
+                if (!dirty) context.GetService<IVsFileChangeEx>(typeof(SVsFileChangeEx)).SyncFile(fullPath);
                 if (hold.DocData is IVsDocDataFileChangeControl control) control.IgnoreFileChanges(0);
                 var buffer = DocumentTable.TryGetTextBuffer(context, fullPath);
-                if (buffer != null && hold.DocData is IVsPersistDocData persist && TryCaptureOpenBuffer(fullPath)?.IsDirty != true
+                if (!dirty && buffer != null && hold.DocData is IVsPersistDocData persist
                     && File.Exists(fullPath) && buffer.CurrentSnapshot.GetText() != ReadDiskText(fullPath))
                     ErrorHandler.ThrowOnFailure(persist.ReloadDocData(0));
             }
