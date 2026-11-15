@@ -137,6 +137,15 @@ namespace Pomp.Protocol
             return command;
         }
 
+        public static JObject DictationStart(string captureId)
+        {
+            var command = Command(OmpCommandTypes.DictationStart);
+            command["captureId"] = captureId;
+            return command;
+        }
+
+        public static JObject DictationStop() => Command(OmpCommandTypes.DictationStop);
+
         public static JObject ExtensionUiValue(string requestId, string value) =>
             new JObject { ["type"] = OmpCommandTypes.ExtensionUiResponse, ["id"] = requestId, ["value"] = value };
 

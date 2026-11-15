@@ -3,7 +3,7 @@ import { toolsTranslate, type ToolsTranslate } from '../../i18n/toolsStrings';
 import { MASKED_ENV, type McpServer, type ResourceScope } from '../../toolsProtocol';
 import type { ToolsController } from '../../toolsState';
 import { Icon } from '../Icon';
-import { Badge, DataTable, Field, FormActions, IconButton, Pager, Segmented, Switch, usePaged } from '../ui';
+import { Badge, Cell, DataTable, Field, FormActions, IconButton, Pager, Row, Segmented, Switch, usePaged } from '../ui';
 import { ChoiceField, ConfirmDelete, InPageDialog, ScopeChoice } from './InPageDialog';
 import { HEADER_NAME, headerValueValid, MCP_IMPORT_MAX_CHARS, parseMcpImport } from './mcpImport';
 
@@ -90,15 +90,15 @@ export function useMcpManager({ controller, locale, disabled, busy, onCreated, o
         <Field label={t('mcp.importPaste')}>{id => <textarea id={id} className="tools-mono" data-testid="mcp-import-text" rows={8} spellCheck={false} maxLength={MCP_IMPORT_MAX_CHARS} value={importing.text} onChange={event => setImporting({ ...importing, text: event.target.value })} />}</Field>
       </fieldset>
         {importing.text.trim() && !entries && <p role="alert" className="ui-err" data-testid="mcp-import-unreadable">{t('mcp.importUnreadable')}</p>}
-        {entries && <DataTable className="tools-import-preview" columns="minmax(0, 1fr) auto minmax(0, max-content)" label={t('mcp.importTitle')} testId="mcp-import-preview" head={[t('tcol.name'), t('tcol.transport'), t('tcol.state')]}>{previewPage.slice.map(entry => <div className="ui-tr" role="row" key={entry.name}>
-          <span role="cell" className="ui-cell"><strong>{entry.name}</strong>
+        {entries && <DataTable className="tools-import-preview" columns="minmax(0, 1fr) auto minmax(0, max-content)" label={t('mcp.importTitle')} testId="mcp-import-preview" head={[t('tcol.name'), t('tcol.transport'), t('tcol.state')]}>{previewPage.slice.map(entry => <Row key={entry.name}>
+          <Cell><strong>{entry.name}</strong>
             {entry.server && <span className="ui-sub ui-mono">{entry.server.type === 'stdio' ? [entry.server.command, ...(entry.server.args ?? [])].join(' ') : entry.server.url}</span>}
-            {[...Object.keys(entry.server?.env ?? {}), ...Object.keys(entry.server?.headers ?? {})].length > 0 && <span className="ui-sub ui-mono">{[...Object.keys(entry.server?.env ?? {}), ...Object.keys(entry.server?.headers ?? {})].join(', ')}: {MASKED_ENV}</span>}</span>
-          <span role="cell" className="ui-cell">{entry.server && <Badge>{entry.server.type}</Badge>}</span>
-          <span role="cell" className="ui-cell" title={entry.error === 'fields' ? (entry.fields ?? []).join(', ') : undefined}>{entry.error
+            {[...Object.keys(entry.server?.env ?? {}), ...Object.keys(entry.server?.headers ?? {})].length > 0 && <span className="ui-sub ui-mono">{[...Object.keys(entry.server?.env ?? {}), ...Object.keys(entry.server?.headers ?? {})].join(', ')}: {MASKED_ENV}</span>}</Cell>
+          <Cell>{entry.server && <Badge>{entry.server.type}</Badge>}</Cell>
+          <Cell title={entry.error === 'fields' ? (entry.fields ?? []).join(', ') : undefined}>{entry.error
             ? <Badge tone={entry.error === 'exists' ? 'warn' : 'error'}>{entry.error === 'exists' ? t('mcp.importExists') : entry.error === 'fields' ? t('mcp.importFields', { fields: (entry.fields ?? []).join(', ') }) : t('mcp.importInvalid')}</Badge>
-            : <Badge tone="ok">{t('mcp.importReady')}</Badge>}</span>
-        </div>)}</DataTable>}
+            : <Badge tone="ok">{t('mcp.importReady')}</Badge>}</Cell>
+        </Row>)}</DataTable>}
         {entries && <Pager paged={previewPage} testId="mcp-import-pager" />}
         {imported && imported.failures.map((failure, index) => <p role="alert" className="ui-err" key={index}>{failure}</p>)}
         <FormActions><button type="button" className="btn" disabled={importRunning} onClick={() => setImporting(undefined)}>{t('tools.cancel')}</button>

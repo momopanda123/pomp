@@ -8,6 +8,8 @@ export const TeamsContext = createContext<readonly Team[]>([]);
 export const RolesContext = createContext<readonly Role[]>([]);
 /** POMP's own role (the chat agent): its picture wherever the page shows POMP as an agent. */
 export const MainRoleContext = createContext<MainRole | undefined>(undefined);
+/** Opens (or switches to) the agent or team tab of a target; absent where tabs do not exist. Relay cards use it for "open tab". */
+export const OpenPartnerContext = createContext<((target: SendTarget) => void) | undefined>(undefined);
 /** The name pictures and reports use for the chat agent; no role file can take it. Its pictures are the user's, like a built-in role's. */
 export const MAIN_ROLE = { name: 'main', title: 'POMP', scope: 'bundled' } as const;
 

@@ -32,6 +32,8 @@ export default function tools(pi: ExtensionAPI): void {
   if (ctx.agent?.kind === 'sub' || !supported()) return;
   capture(); const active = conversationDefaults(ctx.sessionManager?.getSessionId()); selected = new Set(active); forced.clear();
   if (active.length !== pi.getActiveTools().length || names(pi.getActiveTools()).some((n, i) => n !== active[i])) await pi.setActiveTools(active);
+  // The engine pins write as the transport for mounted tools; a role without file writing must not show it as selected.
+  forced = new Set(pi.getActiveTools().filter(n => n === 'write' && !active.includes(n)));
   snapshot(ctx, '');
  };
  pi.on('tool_call', event => {

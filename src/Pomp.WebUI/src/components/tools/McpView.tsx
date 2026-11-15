@@ -4,7 +4,7 @@ import type { CatalogEntry, McpServer, ResourceScope } from '../../toolsProtocol
 import type { ToolsController } from '../../toolsState';
 import { Icon } from '../Icon';
 import { SectionRefresh, ViewSection } from '../ViewSection';
-import { Badge, DataTable, Field, FormActions, IconButton, matches, Pager, SearchBox, Switch, Toolbar, usePaged } from '../ui';
+import { Actions, Badge, Cell, DataTable, Field, FormActions, IconButton, matches, Pager, Row, SearchBox, Switch, Toolbar, usePaged } from '../ui';
 import { ChoiceField, InPageDialog, ScopeChoice } from './InPageDialog';
 import { useMcpManager } from './McpManage';
 
@@ -12,7 +12,7 @@ import { useMcpManager } from './McpManage';
  * Tools › MCP: the configured servers (state, connection kind, tools in this conversation, switch, test/edit/delete) and the servers of the
  * bundled catalog that can still be installed. The props are ToolsTab's.
  */
-export function McpView({ controller, locale, disabled, busy }: { controller: ToolsController; locale: string; disabled: boolean; busy: boolean }) {
+export function McpView({ controller, locale, disabled, busy, externalDisabled }: { controller: ToolsController; locale: string; disabled: boolean; busy: boolean; externalDisabled: boolean }) {
   const t = toolsTranslate(locale);
   const [query, setQuery] = useState('');
   const root = useRef<HTMLDivElement>(null); const refocus = useRef('');
@@ -30,6 +30,7 @@ export function McpView({ controller, locale, disabled, busy }: { controller: To
   const toolCount = (server: McpServer) => controller.tools.tools.filter(tool => tool.group === 'mcp' && tool.server === server.name).length;
   const refreshing = controller.pending('mcp') || controller.pending('catalog');
   return <div className="tools-scroll-body" ref={root} data-testid="mcp-view">
+    <AntigravitySection controller={controller} locale={locale} disabled={externalDisabled} />
     <ViewSection sectionKey="tools-mcp" title={t('tools.mcpServers')} status={controller.mcp.servers.length} bodyClassName="ui-flush"
       actions={<>
         <button type="button" className="btn small subtle" data-testid="mcp-import" disabled={mcp.locked} onClick={mcp.startImport}><Icon name="download" size={12} />{t('tools.import')}</button>
@@ -80,6 +81,47 @@ export function McpView({ controller, locale, disabled, busy }: { controller: To
   </div>;
 }
 
+/**
+ * Antigravity consumes POMP's bundled tools; this is not another server for the current conversation. The card follows the other Tools
+ * cards: the state badge and the check sit in the header, notes run edge to edge above and below the facts, the one action sits in the foot.
+ */
+function AntigravitySection({ controller, locale, disabled }: { controller: ToolsController; locale: string; disabled: boolean }) {
+  const t = toolsTranslate(locale);
+  const state = controller.mcp.antigravity;
+  const refresh = controller.feedback('mcp', 'antigravity-refresh');
+  const setup = controller.feedback('mcp', 'antigravity-setup');
+  const feedback = setup.requestId || setup.error ? setup : refresh;
+  const pending = controller.pending('mcp'); const locked = disabled || pending;
+  const canSetup = state?.installed && state.canConfigure && !!state.workspaceRoot && !!state.serverName && !!state.configHash;
+  const status = !state ? 'antigravity.unchecked' : !state.installed ? 'antigravity.notInstalled' : state.configured ? 'antigravity.configured' : 'antigravity.notConfigured';
+  const result = feedback.error || (setup.ok ? setup.output || t('antigravity.saved') : undefined);
+  const progress = setup.pending ? t('antigravity.settingUp') : refresh.pending ? t('antigravity.detecting') : '';
+  return <ViewSection sectionKey="tools-antigravity" title={t('antigravity.title')} data-testid="antigravity-section" bodyClassName="ui-flush"
+    actions={<>
+      <Badge tone={state?.configured ? 'ok' : 'neutral'} testId="antigravity-status">{t(status)}</Badge>
+      <SectionRefresh testId="antigravity-refresh" label={t('antigravity.detect')} disabled={locked} onClick={() => { void controller.command('mcp', { action: 'antigravity-refresh' }); }} />
+    </>}>
+    <p className="ui-note ui-muted">{t('antigravity.description')}</p>
+    <div className="ui-form">
+      <ChoiceField label={t('antigravity.application')}><span className="ui-mono" data-testid="antigravity-application">{state?.applicationPath || t(!state ? 'antigravity.unchecked' : state.installed ? 'ext.installed' : 'antigravity.notInstalled')}</span></ChoiceField>
+      <ChoiceField label={t('antigravity.workspace')}><span className="ui-mono" data-testid="antigravity-workspace">{state?.workspaceRoot || t('antigravity.unavailable')}</span></ChoiceField>
+      <ChoiceField label={t('antigravity.config')}><span className="ui-mono" data-testid="antigravity-config">{state?.configPath || t('antigravity.unavailable')}</span></ChoiceField>
+      {state?.serverName && <ChoiceField label={t('mcp.name')}><span className="ui-mono" data-testid="antigravity-server">{state.serverName}</span></ChoiceField>}
+    </div>
+    <p className="ui-note" data-testid="antigravity-permissions">{t('antigravity.permissions')}</p>
+    <p className="ui-note ui-muted" data-testid="antigravity-connection">{t('antigravity.connection')}</p>
+    {state?.message && state.message !== result && <p className="ui-note ui-muted" data-testid="antigravity-message">{state.message}</p>}
+    {result && <p className="ui-note" role={feedback.error ? 'alert' : 'status'} data-testid="antigravity-result">{result}</p>}
+    <div className="ui-card-foot">
+      <span className="ui-grow ui-muted" role="status" aria-live="polite" data-testid="antigravity-pending">{progress}</span>
+      <button type="button" className="btn small primary" data-testid="antigravity-setup" disabled={locked || !canSetup} onClick={() => {
+        if (locked || !canSetup || !state) return;
+        void controller.command('mcp', { action: 'antigravity-setup', name: state.serverName, expectedHash: state.configHash });
+      }}>{t('antigravity.setup')}</button>
+    </div>
+  </ViewSection>;
+}
+
 /** The catalog's MCP servers: name, pinned version and Install (asks the scope and the inputs the entry needs). An entry installed in every scope it allows shows Installed. */
 function CatalogSection({ controller, locale, locked: blocked }: { controller: ToolsController; locale: string; locked: boolean }) {
   const t = toolsTranslate(locale);
@@ -124,13 +166,13 @@ function CatalogSection({ controller, locale, locked: blocked }: { controller: T
         head={[t('tcol.name'), <span className="narrow-hide">{t('tcol.version')}</span>, '']}>
         {entries.map(item => {
           const free = open(item);
-          return <div className="ui-tr" role="row" key={item.id} data-testid={`catalog-row-${item.id}`}>
-            <span role="cell" className="ui-cell"><strong>{item.title}</strong><span className="ui-sub" title={item.description}>{item.description}</span></span>
-            <span role="cell" className="ui-cell narrow-hide ui-mono ui-muted">{item.version}</span>
-            <span role="cell" className="ui-cell ui-actions">{free.length
+          return <Row key={item.id} testId={`catalog-row-${item.id}`}>
+            <Cell><strong>{item.title}</strong><span className="ui-sub" title={item.description}>{item.description}</span></Cell>
+            <Cell className="narrow-hide ui-mono ui-muted">{item.version}</Cell>
+            <Actions>{free.length
               ? <button type="button" className="btn small" data-testid={`catalog-install-${item.id}`} disabled={locked || !!installing} onClick={() => { setValidation(''); setInstalling({ entry: item, scope: free[0], inputs: {} }); }}>{t('catalog.install')}</button>
-              : <Badge tone="ok" icon="check">{t('catalog.installed')}</Badge>}</span>
-          </div>;
+              : <Badge tone="ok" icon="check">{t('catalog.installed')}</Badge>}</Actions>
+          </Row>;
         })}
       </DataTable>
     </div>

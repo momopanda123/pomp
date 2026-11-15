@@ -27,7 +27,8 @@ export function Avatar({ name, label, size = 24, missing = false, look, scope, i
   const stored = useAvatarImage(scope, name, image === undefined ? look?.imageRev : undefined);
   const shown = image === undefined ? stored : image ?? undefined;
   const initial = [...(label.trim() || name)][0]?.toUpperCase() ?? '?';
-  const style: CSSProperties = missing ? { width: size, height: size } : { width: size, height: size, background: look?.color ?? avatarColor(name), fontSize: Math.max(10, Math.round(size * 0.46)) };
+  // The size and the identity color are data: the stylesheet turns them into the box, the background and the letter size.
+  const style = { '--avatar-size': `${size}px`, ...(missing ? {} : { '--avatar-color': look?.color ?? avatarColor(name) }) } as CSSProperties;
   return <span className={`ui-avatar agents-avatar shape-${look?.shape ?? 'circle'}${missing ? ' missing' : ''}${shown ? ' has-image' : ''}`} style={style} aria-hidden="true">
     {missing ? <Icon name="warning" size={11} /> : shown ? <img src={shown} alt="" draggable={false} /> : initial}
   </span>;
@@ -77,13 +78,13 @@ function modelLabel(role: Role, setup: SetupState | null, t: ReturnType<typeof u
   return entries.length > 1 ? `${label} +${entries.length - 1}` : label;
 }
 
-export function RolesCard({ roles, hidden = 0, effective, main, setup, locale, connected, inert, busy, dialogOpen, openPending, modelUnavailable, onNew, onMessage, onCopy, onEdit, onEditBuiltin, onEditAvatar, onEditMain, onDelete, onOpen }: {
-  roles: Role[]; hidden?: number; effective: Role[]; main?: MainRole; setup: SetupState | null; locale: string; connected: boolean; inert: boolean; busy: boolean; dialogOpen: boolean; openPending: boolean;
+export function RolesCard({ roles, hidden = 0, effective, main, setup, connected, inert, busy, dialogOpen, openPending, modelUnavailable, onNew, onMessage, onCopy, onEdit, onEditBuiltin, onEditAvatar, onEditMain, onDelete, onOpen }: {
+  roles: Role[]; hidden?: number; effective: Role[]; main?: MainRole; setup: SetupState | null; connected: boolean; inert: boolean; busy: boolean; dialogOpen: boolean; openPending: boolean;
   modelUnavailable: (model?: string) => boolean;
   onNew: () => void; onMessage: (role: Role) => void; onCopy: (role: Role) => void; onEdit: (role: Role) => void; onEditBuiltin: (role: Role) => void;
   onEditAvatar: (role: Role) => void; onEditMain: () => void; onDelete: (role: Role) => void; onOpen: (role: Role) => void;
 }) {
-  const t = useT(); const ko = locale.startsWith('ko');
+  const t = useT();
   const [query, setQuery] = useState(''); const [scope, setScope] = useState<RoleScopeFilter>('all');
   // Project roles first, then the user's, then the engine's own; by name inside.
   const rank = (role: Role) => isBuiltin(role) ? 2 : role.scope === 'user' ? 1 : 0;
@@ -98,12 +99,12 @@ export function RolesCard({ roles, hidden = 0, effective, main, setup, locale, c
   const blocked = !connected || inert;
   // The picture editor takes POMP as a role of the user's, like a built-in role.
   const mainAsRole: Role = { name: MAIN_ROLE.name, title: MAIN_ROLE.title, job: '', description: '', instructions: '', tools: 'all', scope: MAIN_ROLE.scope, editable: false, avatar: main?.avatar };
-  return <ViewSection sectionKey="agents-roles" className="agents-card" headingLevel="h2" title={t('agents.roles')} status={<span data-testid="roles-count">{roles.length + 1}</span>} bodyClassName="ui-flush"
+  return <ViewSection sectionKey="agents-roles" headingLevel="h2" title={t('agents.roles')} status={<span data-testid="roles-count">{roles.length + 1}</span>} bodyClassName="ui-flush"
     actions={<button type="button" className="btn small" data-testid="new-role-btn" disabled={blocked || dialogOpen} onClick={onNew}><Icon name="plus" size={12} />{t('agents.newRole')}</button>}>
     <Toolbar>
       <SearchBox value={query} onChange={setQuery} testId="roles-search" />
       <Segmented<RoleScopeFilter> label={t('agents.scopeLabel')} testId="roles-scope" value={scope} onChange={setScope} options={[
-        { id: 'all', label: ko ? '전체' : 'All', badge: count('all'), testId: 'roles-scope-all' },
+        { id: 'all', label: t('skills.filterAll'), badge: count('all'), testId: 'roles-scope-all' },
         { id: 'project', label: t('ui.scope.project'), badge: count('project'), testId: 'roles-scope-project' },
         { id: 'user', label: t('ui.scope.user'), badge: count('user'), testId: 'roles-scope-user' },
       ]} />
@@ -151,10 +152,10 @@ export function RolesCard({ roles, hidden = 0, effective, main, setup, locale, c
               {!role.error && <Badge tone={role.model ? 'info' : 'neutral'} icon="cpu" title={[role.model, role.thinkingLevel].filter(Boolean).join(' · ') || undefined} testId={`role-model-${role.name}`}>{revealControls(modelLabel(role, setup, t))}</Badge>}
               {isFileRole(role) && <Badge tone={scopeTone}>{role.scope === 'user' ? t('ui.scope.user') : t('ui.scope.project')}</Badge>}
               {!role.error && <Badge>{t(`agents.tools.${role.tools}`)}</Badge>}
-              {role.error && <Badge tone="error" icon="error">{ko ? '파일 오류' : 'File error'}</Badge>}
-              {!role.error && role.note && <Badge title={plainControls(role.note)} testId={`role-note-${role.name}`}>{ko ? 'VS에서 편집' : 'Edit in VS'}</Badge>}
-              {shadowed && <Badge title={t('agents.shadowed')} testId={`role-shadowed-${role.scope}-${role.name}`}>{ko ? '가려짐' : 'Hidden'}</Badge>}
-              {modelUnavailable(role.model) && <Badge tone="warn" icon="warning" title={t('agents.modelUnavailableWarning')} testId={`role-model-warning-${role.name}`}>{ko ? '모델 없음' : 'No model'}</Badge>}
+              {role.error && <Badge tone="error" icon="error">{t('agents.fileError')}</Badge>}
+              {!role.error && role.note && <Badge title={plainControls(role.note)} testId={`role-note-${role.name}`}>{t('agents.editInVs')}</Badge>}
+              {shadowed && <Badge title={t('agents.shadowed')} testId={`role-shadowed-${role.scope}-${role.name}`}>{t('agents.hidden')}</Badge>}
+              {modelUnavailable(role.model) && <Badge tone="warn" icon="warning" title={t('agents.modelUnavailableWarning')} testId={`role-model-warning-${role.name}`}>{t('status.noModel')}</Badge>}
             </span>
           </Cell>
           <Actions>
@@ -173,11 +174,11 @@ export function RolesCard({ roles, hidden = 0, effective, main, setup, locale, c
   </ViewSection>;
 }
 
-export function TeamsCard({ agents, teams, effective, locale, connected, inert, editorOpen, exportOpen, importOpen, onNew, onImport, onMessage, onEdit, onExport, onDelete }: {
-  agents: AgentsStatePayload | null; teams: Team[]; effective: Role[]; locale: string; connected: boolean; inert: boolean; editorOpen: boolean; exportOpen: boolean; importOpen: boolean;
+export function TeamsCard({ agents, teams, effective, connected, inert, editorOpen, exportOpen, importOpen, onNew, onImport, onMessage, onEdit, onExport, onDelete }: {
+  agents: AgentsStatePayload | null; teams: Team[]; effective: Role[]; connected: boolean; inert: boolean; editorOpen: boolean; exportOpen: boolean; importOpen: boolean;
   onNew: () => void; onImport: () => void; onMessage: (team: Team) => void; onEdit: (team: Team) => void; onExport: (team: Team) => void; onDelete: (team: Team) => void;
 }) {
-  const t = useT(); const ko = locale.startsWith('ko');
+  const t = useT();
   const [query, setQuery] = useState('');
   const all = agents?.teams ?? [];
   const roleOf = (name: string) => effective.find(item => item.name === name) ?? agents?.roles.find(item => item.name === name);
@@ -186,7 +187,7 @@ export function TeamsCard({ agents, teams, effective, locale, connected, inert, 
     .sort((a, b) => byName(a.title || a.id, b.title || b.id) || byName(a.id, b.id) || a.scope.localeCompare(b.scope));
   const paged = usePaged(visible, query);
   const blocked = !connected || inert;
-  return <ViewSection sectionKey="agents-teams" className="agents-card" headingLevel="h2" title={t('agents.teams')} status={<span data-testid="teams-count">{all.length}</span>} bodyClassName="ui-flush"
+  return <ViewSection sectionKey="agents-teams" headingLevel="h2" title={t('agents.teams')} status={<span data-testid="teams-count">{all.length}</span>} bodyClassName="ui-flush"
     actions={<>
       <button type="button" className="btn small subtle" data-testid="import-team-btn" disabled={blocked || importOpen} onClick={onImport}><Icon name="download" size={12} />{t('agents.importTeam')}</button>
       <button type="button" className="btn small" data-testid="new-team-btn" disabled={blocked || editorOpen} onClick={onNew}><Icon name="plus" size={12} />{t('agents.newTeam')}</button>
@@ -207,9 +208,9 @@ export function TeamsCard({ agents, teams, effective, locale, connected, inert, 
               <Badge tone="info" testId={`team-mode-${team.id}`}>{t(`agents.mode.${team.mode}`)}</Badge>
               <Badge tone={team.scope === 'project' ? 'accent' : 'neutral'}>{team.scope === 'user' ? t('ui.scope.user') : t('ui.scope.project')}</Badge>
               {team.isolation && <Badge testId={`team-isolated-${team.id}`}>{t('agents.isolatedBadge')}</Badge>}
-              {shadowed && <Badge title={t('agents.shadowedProject')} testId={`team-shadowed-${team.scope}-${team.id}`}>{ko ? '가려짐' : 'Hidden'}</Badge>}
-              {team.missing?.length > 0 && <Badge tone="warn" icon="warning" title={t('agents.missingMembersWarning', { count: team.missing.length })} testId={`team-missing-${team.id}`}>{ko ? `구성원 ${team.missing.length}명 없음` : `${team.missing.length} missing`}</Badge>}
-              {team.error && <Badge tone="error" icon="error">{ko ? '파일 오류' : 'File error'}</Badge>}
+              {shadowed && <Badge title={t('agents.shadowedProject')} testId={`team-shadowed-${team.scope}-${team.id}`}>{t('agents.hidden')}</Badge>}
+              {team.missing?.length > 0 && <Badge tone="warn" icon="warning" title={t('agents.missingMembersWarning', { count: team.missing.length })} testId={`team-missing-${team.id}`}>{t('agents.missingCount', { count: team.missing.length })}</Badge>}
+              {team.error && <Badge tone="error" icon="error">{t('agents.fileError')}</Badge>}
             </span>
           </Cell>
           <Cell><span className="agents-avatar-stack" title={plainControls(flow)}>

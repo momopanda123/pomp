@@ -1,18 +1,13 @@
 /* Accounts · model panel (connected accounts + usage / add an account / API key / model). Built for narrow panes: down to 190 px
    wide the controls stack, inputs take the full width and long labels wrap (never a horizontal scrollbar). Theme variables only. */
 
-/* Account content lives inside its full-height tab page. */
+/* Account content lives inside its full-height tab page (shell.css gives the page its height and background). */
 .setup-panel {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 560px;
   min-height: 0;
   max-height: 100%;
-  border: 1px solid var(--pomp-focus-border);
-  border-radius: var(--pomp-radius);
-  background: var(--pomp-panel-bg);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
   outline: none;
   /* Korean wraps between words, not inside them ("목/록"); a single token longer than the pane still breaks (overflow-wrap). */
   word-break: keep-all;
@@ -51,11 +46,6 @@
   flex-shrink: 0;
 }
 
-.setup-intro {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 .setup-section {
   display: flex;
   flex-direction: column;
@@ -67,24 +57,6 @@
 .setup-section > .view-section-body { display: flex; flex-direction: column; gap: 7px; }
 .setup-section + .setup-section, .login-stack + .setup-section { padding-top: 0; }
 .setup-body .view-section-header { align-items: center; }
-
-.setup-h {
-  margin: 0;
-  font-size: 1em;
-  font-weight: 600;
-}
-
-.setup-h-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.setup-sub {
-  color: var(--pomp-muted-fg);
-  font-size: 0.92em;
-}
 
 .setup-stack {
   display: flex;
@@ -101,15 +73,14 @@
   color: var(--pomp-warning);
 }
 
-/* Editor-only selection shares the panel's compact control tokens; its labels remain readable at 190px. */
-.editor-model-hint { margin: 0; }
+/* Editor-only selection shares the panel's compact control tokens; its labels remain readable at 190px: a card too narrow for the
+   label and the chosen model's badge side by side puts the badge on a line of its own instead of squeezing the label to a letter column. */
 .editor-model-choices { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.editor-model-choice { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; min-height: var(--pomp-control-height); padding: 5px 7px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: transparent; color: var(--pomp-fg); text-align: left; cursor: pointer; }
+.editor-model-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; width: 100%; min-width: 0; min-height: var(--pomp-control-height); padding: 5px 7px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: transparent; color: var(--pomp-fg); text-align: left; cursor: pointer; }
 .editor-model-choice:hover:not(:disabled) { background: var(--pomp-hover-bg); }
 .editor-model-choice[aria-checked="true"] { border-color: var(--pomp-focus-border); background: var(--pomp-active-bg); }
 .editor-model-choice:disabled { opacity: .55; cursor: default; }
-.editor-model-label { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
-.editor-model-provider { display: block; margin-top: 2px; color: var(--pomp-muted-fg); font-size: .85em; }
+.editor-model-label { flex: 1 1 6em; min-width: 0; overflow-wrap: anywhere; }
 .editor-model-radio { flex: none; width: 12px; height: 12px; border: 1px solid var(--pomp-muted-fg); border-radius: 50%; }
 /* Selected: the ring takes the colour of the row's outline and the dot the text colour. Not the accent: the host maps it from the selected document
    tab's background, which in some themes is about as pale or as dark as the row and the circle would vanish into it. The gap between ring and dot
@@ -177,47 +148,6 @@ a.btn {
   flex: 1 1 9em;
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-/* ---- Disclosure headers (all providers, API key) ------------------------------------------------------------------- */
-
-.fold-h {
-  margin: 0;
-}
-
-.fold {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  width: 100%;
-  min-width: 0;
-  padding: 2px 0;
-  border: 0;
-  background: transparent;
-  color: var(--pomp-fg);
-  font: inherit;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-}
-
-.fold:hover {
-  color: var(--pomp-accent);
-}
-
-.fold-caret {
-  color: var(--pomp-muted-fg);
-  transition: transform 0.12s ease;
-}
-
-.fold-caret.open {
-  transform: rotate(90deg);
-}
-
-.fold-count {
-  color: var(--pomp-muted-fg);
-  font-size: 0.92em;
-  font-weight: 400;
 }
 
 /* ---- Sign-in card -------------------------------------------------------------------------------------------------- */
@@ -403,6 +333,10 @@ a.btn {
 
 .acct-confirm-title {
   font-weight: 600;
+}
+
+.acct-confirm-question {
+  min-width: 0;
 }
 
 /* An account's head opens and closes its usage like a section header; a closed one shows its tightest limit. */
@@ -673,8 +607,9 @@ button.acct-toggle > .acct-who {
   white-space: nowrap;
 }
 
-/* Every provider here signs in to a subscription plan: the title carries that once instead of a badge on each tile. */
-.prov-add-title { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+/* Every provider here signs in to a subscription plan: the title carries that once instead of a badge on each tile. In a narrow pane
+   the badge moves below the title, which keeps its words whole. */
+.prov-add-title { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; }
 .prov-add-title > .ui-badge { flex: none; font-weight: normal; }
 .prov-tile > .ui-badge { flex: none; }
 .prov-tile-check { display: inline-flex; flex: none; color: var(--pomp-success); }
@@ -682,25 +617,6 @@ button.acct-toggle > .acct-who {
 .prov-empty { --ui-empty-rows: 1; }
 
 /* ---- API key ------------------------------------------------------------------------------------------------------- */
-
-.setup-form {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  margin: 0;
-}
-
-.setup-field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.setup-field > span {
-  color: var(--pomp-muted-fg);
-  font-size: 0.92em;
-}
 
 .setup-panel select.field {
   min-width: 0;
@@ -802,20 +718,11 @@ button.acct-toggle > .acct-who {
 /* Saved: a green check left of Save, no sentence (its name is for screen readers). */
 .share-saved { display: inline-flex; align-items: center; color: var(--pomp-success); }
 .share-clients { display: flex; flex-direction: column; min-width: 0; }
-.share-clients-empty { gap: 4px; }
 .share-confirm { margin: 0 10px 10px; }
-.share-client-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-client-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Narrow pane: the panel is the whole pane (no margin, no frame), with tighter padding. */
+/* Narrow pane: tighter padding. */
 @media (max-width: 360px) {
-  .setup-panel {
-    height: 100%;
-    max-width: none;
-    border-width: 0;
-    border-radius: 0;
-    box-shadow: none;
-  }
-
   .setup-head {
     padding-left: 8px;
   }

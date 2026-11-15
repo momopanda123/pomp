@@ -1,5 +1,6 @@
 import { useWorkScope, useWorkSnapshot, type WorkState } from './work/store';
 import type { SessionInfoPayload } from './protocol';
+import type { ConversationPlan } from './conversationProtocol';
 
 export interface WorkAttention {
   review: number; plan: number; codeReview: number; workflow: number; terminal: number;
@@ -17,12 +18,14 @@ export interface WorkAttention {
  * 'blocked or failed', or error-bearing history entries, with at least one while a hook runs.
  * History = zero. These badges never issue host commands and keep no browser storage.
  */
-export function getWorkAttention(state: WorkState, session: SessionInfoPayload | null): WorkAttention {
-  const unfinished = session?.planOpenCount ?? 0;
+export function getWorkAttention(state: WorkState, session: SessionInfoPayload | null, plans?: readonly ConversationPlan[]): WorkAttention {
+  const planAttention = plans
+    ? plans.reduce((sum, plan) => sum + (plan.isStreaming || plan.hasPendingAsyncWork ? plan.planOpenCount : 0), 0)
+    : session?.isStreaming || session?.hasPendingAsyncWork ? session?.planOpenCount ?? 0 : 0;
   const hookEntries = state.hooks?.history.filter(entry => !!entry.error || ['failed', 'error', 'pending', 'queued', 'awaitingApproval', 'awaiting approval', 'blocked or failed'].includes(entry.status)).length ?? 0;
   return {
     review: openReviewFiles(state).length + state.isolation.filter(item => item.status === 'pending' || item.status === 'blocked').length,
-    plan: session?.isStreaming || session?.hasPendingAsyncWork ? unfinished : 0,
+    plan: planAttention,
     codeReview: state.problems.items.length,
     workflow: state.workflow?.id && state.workflow.phase === 'awaitingReview' ? 1 : 0,
     terminal: state.terminal.jobs.filter(job => ['queued', 'running'].includes(job.state)).length + (state.interactive.enabled === true && state.interactive.supported === true && state.interactive.connected && ['starting', 'running', 'closing'].includes(state.interactive.state) ? 1 : 0),
@@ -55,7 +58,7 @@ export function workBadgeKeys(state: WorkState): string[] {
 }
 
 /** Session identity scopes the shared panel store; switching workspace/session clears stale badges and panel data. */
-export function useWorkAttention(session: SessionInfoPayload | null): WorkAttention {
+export function useWorkAttention(session: SessionInfoPayload | null, plans?: readonly ConversationPlan[]): WorkAttention {
   useWorkScope(session?.workingDirectory ?? '', session?.sessionId);
-  return getWorkAttention(useWorkSnapshot(), session);
+  return getWorkAttention(useWorkSnapshot(), session, plans);
 }

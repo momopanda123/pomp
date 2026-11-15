@@ -1,4 +1,4 @@
-/* Agents & Teams, Computer use, and Team brief styling */
+/* Agents page (roles, teams, running agents, their dialogs), the composer's send target and computer use, and team brief styling */
 
 /* The chip row stays put; .agents-scroll below it scrolls with the same 8px gutter as the Work and Tools tabs. */
 .agents-panel {
@@ -21,153 +21,12 @@
   flex-direction: column;
   gap: 6px;
   min-width: 0;
-  border-bottom: 1px solid var(--pomp-border);
-  padding-bottom: 10px;
-}
-.agents-section:last-of-type {
-  border-bottom: 0;
-}
-
-.agents-section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-width: 0;
-}
-.agents-section-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-  min-width: 0;
-}
-.agents-section-head h3 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--pomp-fg);
-}
-
-.runs-notice {
-  font-size: .8rem;
-  color: var(--pomp-muted-fg);
-}
-
-.agents-empty-text {
-  margin: 4px 0;
-  color: var(--pomp-muted-fg);
-  font-size: .85rem;
-}
-.agents-empty-text.group-empty {
-  padding-left: 6px;
 }
 
 .agents-scroll { display: flex; flex: 1; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; padding: 8px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
-/* Runs/history keep headers above their own content while the panel scrolls. */
+/* Every view keeps its own height while the page scrolls. */
 .agents-scroll > * { flex-shrink: 0; }
-.agents-panel .agents-section { border-bottom: 0; padding-bottom: 0; }
-.agents-panel .history-list { list-style: none; margin: 8px 0; padding: 0; }
-.agents-panel .history-list > .view-item { padding: 8px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); }
-.history-prompt { max-height: 160px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
-.run-group-header { flex-wrap: wrap; }
-/* Run rows */
-.run-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-.run-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px;
-  border: 1px solid var(--pomp-border);
-  border-radius: var(--pomp-radius);
-  background: var(--pomp-panel-bg);
-  min-width: 0;
-}
-.run-group-header {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: .85rem;
-  color: var(--pomp-fg);
-  margin-bottom: 4px;
-}
-.run-group-id {
-  color: var(--pomp-muted-fg);
-  font-size: .75rem;
-}
-
-.run-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-.run-row {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 5px 6px;
-  background: var(--pomp-bg);
-  border: 1px solid var(--pomp-border);
-  border-radius: var(--pomp-radius);
-  min-width: 0;
-}
-.run-row-main {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 5px 8px;
-  min-width: 0;
-  font-size: .82rem;
-}
-.run-role-title {
-  color: var(--pomp-fg);
-}
-.run-status-badge {
-  padding: 1px 4px;
-  border-radius: var(--pomp-radius-sm);
-  font-size: .75rem;
-  font-weight: 500;
-  background: var(--pomp-border);
-  color: var(--pomp-fg);
-}
-.run-status-badge.running {
-  background: var(--pomp-accent);
-  color: var(--pomp-button-fg);
-}
-.run-status-badge.completed {
-  background: var(--pomp-success);
-  color: var(--pomp-button-fg);
-}
-.run-status-badge.failed,
-.run-status-badge.error {
-  background: var(--pomp-error);
-  color: var(--pomp-button-fg);
-}
-.run-stat, .run-model {
-  color: var(--pomp-muted-fg);
-  font-size: .78rem;
-}
-.run-recent-tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  margin-top: 2px;
-}
-.tool-chip {
-  padding: 1px 3px;
-  background: var(--pomp-input-bg);
-  border: 1px solid var(--pomp-border);
-  border-radius: var(--pomp-radius-sm);
-  font-size: .72rem;
-  font-family: monospace;
-}
+/* A member's controls sit at the end of its line (chat progress list, running table). */
 .run-row-actions {
   display: flex;
   flex-wrap: wrap;
@@ -186,6 +45,8 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* A refused or unanswered control says so on its own line, like a card's error note. */
+.ui-note.run-control-error { flex: 1 1 100%; min-width: 0; padding: 2px 0; text-align: right; white-space: normal; overflow-wrap: anywhere; }
 
 /* Roles and teams: one table card each (components/AgentsTables.tsx). A row is avatar, name/id, one sub line and badges, then actions. */
 .agents-name-cell { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
@@ -194,11 +55,13 @@
 .agents-name-line > strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .agents-id { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
 .agents-badges { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; margin-top: 2px; }
-.agents-avatar { font-size: 11px; line-height: 1; overflow: hidden; }
+/* The picture's size and identity color arrive as custom properties (components/AgentsTables.tsx): the box, the background and the letter follow them. */
+.ui-avatar.agents-avatar { width: var(--avatar-size, 24px); height: var(--avatar-size, 24px); background: var(--avatar-color, transparent);
+  font-size: max(10px, calc(var(--avatar-size, 24px) * .46)); line-height: 1; overflow: hidden; }
 .agents-avatar.shape-rounded { border-radius: 28%; }
-.agents-avatar.shape-square { border-radius: 2px; }
+.agents-avatar.shape-square { border-radius: var(--pomp-radius-sm); }
 .agents-avatar.shape-hexagon { border-radius: 0; clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%); }
-.agents-avatar.has-image { background: transparent !important; }
+.ui-avatar.agents-avatar.has-image { background: transparent; }
 .agents-avatar > img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .agents-avatar-button { display: inline-flex; padding: 0; border: 0; background: none; border-radius: var(--pomp-radius-sm); cursor: pointer; }
 .agents-avatar-button:focus-visible { outline: 1px solid var(--pomp-focus-border); outline-offset: 2px; }
@@ -214,9 +77,9 @@
 .avatar-swatch.add:hover:not(:disabled) { background: var(--pomp-hover-bg); }
 .agents-dialog .color-picker { margin-top: 8px; }
 .avatar-image-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.agents-avatar.missing { box-sizing: border-box; border: 1px dashed var(--pomp-warning); background: transparent; color: var(--pomp-warning); }
+.ui-avatar.agents-avatar.missing { box-sizing: border-box; border: 1px dashed var(--pomp-warning); background: transparent; color: var(--pomp-warning); }
 .agents-avatar-stack { display: inline-flex; align-items: center; padding-left: 4px; }
-.agents-avatar-stack > .agents-avatar { margin-left: -4px; box-shadow: 0 0 0 2px var(--pomp-bg); font-size: 10px; }
+.agents-avatar-stack > .agents-avatar { margin-left: -4px; box-shadow: 0 0 0 2px var(--pomp-bg); }
 /* A destination's picture in the composer (chip, target list, @ list): small, a team's members overlapped against the surface they sit on. */
 .destination-avatar-stack > .agents-avatar { box-shadow: 0 0 0 1px var(--pomp-panel-bg); }
 .send-target-chip .destination-avatar-stack > .agents-avatar { box-shadow: 0 0 0 1px var(--pomp-bg); }
@@ -260,7 +123,7 @@
 }
 .agents-dialog .dialog-head h4 {
   margin: 0;
-  font-size: .95rem;
+  font-size: 1em;
   font-weight: 600;
 }
 .agents-dialog .dialog-form {
@@ -301,8 +164,11 @@
   color: var(--pomp-error);
 }
 .agents-dialog .switch-field { gap: 2px; align-items: flex-start; }
+/* The scope choice keeps its own width instead of stretching across the field. */
+.agents-dialog .form-field > .ui-seg { align-self: flex-start; }
 .agents-dialog .field-error p { margin: 0; }
-.agents-dialog .template-preview .ui-table { border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); overflow: hidden; }
+/* A table inside a dialog has no card around it: it gets its own frame. */
+.agents-dialog :is(.template-preview, .team-member-picker) .ui-table { border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); overflow: hidden; }
 .agents-dialog .dialog-loading { min-height: 48px; justify-content: center; align-items: center; }
 .agents-dialog .dialog-status { margin: 0; padding: 0 10px 8px; color: var(--pomp-muted-fg); }
 .agents-dialog .switch-field .ui-switch { max-width: 100%; white-space: normal; text-align: left; }
@@ -313,7 +179,7 @@
   padding: 4px 8px;
   background: color-mix(in srgb, var(--pomp-error) 12%, var(--pomp-bg));
   color: var(--pomp-error);
-  font-size: .8rem;
+  font-size: .92em;
 }
 /* requests.css gives every .dialog-foot a column (the request card's footer stacks its rows): a dialog's buttons sit in one row. */
 .agents-dialog .dialog-foot {
@@ -325,15 +191,6 @@
   padding: 8px 10px;
   border-top: 1px solid var(--pomp-border);
 }
-.checkbox-field label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: .8rem;
-  color: var(--pomp-fg);
-  cursor: pointer;
-}
-
 .templates-bar {
   display: flex;
   align-items: center;
@@ -391,29 +248,17 @@
   width: 22px;
   height: 22px;
 }
-.add-member-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 3px;
-  margin-top: 4px;
-}
-.add-label {
-  font-size: .92em;
-  color: var(--pomp-muted-fg);
-}
-
 .confirm-dialog {
   padding: 12px;
   gap: 10px;
 }
 .confirm-dialog h4 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 1em;
+  font-weight: 600;
 }
 .confirm-dialog p {
   margin: 0;
-  font-size: .85rem;
   color: var(--pomp-fg);
   line-height: 1.4;
 }
@@ -423,50 +268,13 @@
   gap: 6px;
 }
 
-.transcript-messages {
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  overflow-y: auto;
-  max-height: 55vh;
-}
-.transcript-msg {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px;
-  border-radius: var(--pomp-radius-sm);
-  font-size: .82rem;
-}
-.transcript-msg.user {
-  background: var(--pomp-selection-bg);
-  align-self: flex-end;
-  max-width: 90%;
-}
-.transcript-msg.assistant {
-  background: var(--pomp-bg);
-  border: 1px solid var(--pomp-border);
-  align-self: flex-start;
-  max-width: 95%;
-}
-.transcript-role {
-  font-size: .72rem;
-  color: var(--pomp-muted-fg);
-  text-transform: uppercase;
-}
-.transcript-body {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
 .agents-banner {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
   border-radius: var(--pomp-radius-sm);
-  font-size: .82rem;
+  font-size: .92em;
 }
 .agents-banner.error {
   background: color-mix(in srgb, var(--pomp-error) 15%, var(--pomp-bg));
@@ -610,9 +418,6 @@
 .agents-dialog .dialog-foot, .agents-dialog .dialog-actions, .confirm-popover-actions { flex-wrap: wrap; }
 .agents-dialog .btn, .confirm-popover .btn, .agents-panel .btn { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .agents-dialog .dialog-error { flex-wrap: wrap; }
-.run-group-header { flex-wrap: wrap; min-width: 0; }
-.run-group-header > *, .run-row-main > *, .role-badge, .member-chip { min-width: 0; max-width: 100%; }
-.run-group-id { overflow-wrap: anywhere; }
 .role-model-picker { min-width: 0; }
 .role-model-picker > button { width: 100%; min-width: 0; min-height: var(--pomp-control-height); padding: 0 8px; justify-content: space-between; text-align: left;
   border-color: var(--pomp-input-border); background: var(--pomp-input-bg); color: var(--pomp-input-fg); }
@@ -620,7 +425,6 @@
 .role-model-picker .picker-pop.inline { margin-top: 4px; max-height: 260px; }
 .selected-member-row { flex-wrap: wrap; }
 .member-slug { min-width: 0; overflow-wrap: anywhere; }
-.transcript-limit { padding: 0 10px; }
 .composer-bar .send-target-anchor .picker-pop.up { left: 0; right: auto; width: max-content; min-width: 120px; max-width: min(240px, calc(100vw - 24px)); bottom: calc(100% + 4px); }
 .composer-bar .send-target-anchor .chip-text { min-width: 0; max-width: 8em; }
 .permission-mode-anchor { position: relative; display: flex; flex: 1 0 auto; min-width: 0; }
@@ -646,31 +450,6 @@
 .mention-group { padding: 4px 6px; font-size: .78rem; color: var(--pomp-muted-fg); border-top: 1px solid var(--pomp-border); overflow-wrap: anywhere; }
 .team-brief-toggle { min-width: 0; overflow-wrap: anywhere; }
 .team-brief-toggle strong { min-width: 0; }
-
-/* Background panel compact progress */
-.job-team-badge {
-  font-size: .78rem;
-  color: var(--pomp-fg);
-  margin-top: 2px;
-}
-.job-progress-compact {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  font-size: .78rem;
-  color: var(--pomp-muted-fg);
-  margin-top: 3px;
-}
-.prog-stat {
-  display: inline-block;
-}
-.prog-model {
-  color: var(--pomp-fg);
-}
-.prog-tools {
-  font-family: monospace;
-}
-
 /* The role and team editors label their fields in small muted text; the knowledge to tick is ordinary text. */
 .agents-dialog .knowledge-checklist label { font-size: inherit; color: var(--pomp-fg); }
 

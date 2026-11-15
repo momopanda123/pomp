@@ -149,6 +149,11 @@ namespace Pomp.Hosting
                     case OmpFrameTypes.BtwDelta:
                         HandleBtwFrame(frame);
                         break;
+                    case OmpFrameTypes.DictationState:
+                    case OmpFrameTypes.DictationTranscript:
+                    case OmpFrameTypes.DictationEnd:
+                        HandleDictationFrame(frame);
+                        break;
                     default:
                         // turn_start/turn_end, subagent frames, host_uri_cancel...: nothing to show.
                         break;
@@ -253,6 +258,16 @@ namespace Pomp.Hosting
             }
 
             var message = frame.Json.GetObject("message");
+            // The final answer of a turn another conversation asked for goes back to it: the turn's last answer text.
+            lock (_stateLock)
+            {
+                var relayed = _turns.Values.FirstOrDefault(turn => turn.Relays.Count > 0);
+                if (relayed != null)
+                {
+                    var answer = MessageText(message?["content"]);
+                    if (answer.Length > 0) relayed.FinalText = answer;
+                }
+            }
             CountUsage(frame, message);
             EnsureAssistantStarted(messageId);
 
@@ -518,6 +533,9 @@ namespace Pomp.Hosting
                     ResultText = text.Length == 0 ? null : TextUtil.Truncate(text, ToolResultDisplayChars),
                     DurationMs = state?.ElapsedMilliseconds,
                 });
+
+            // The plan changed with this tool: the plan snapshot follows it now, not only at the end of the next assistant message.
+            if (!isError && (name == "todo" || name == "todo_write")) RequestInfoRefresh();
         }
 
         // ---- turns -----------------------------------------------------------------------------------------------------
@@ -528,6 +546,13 @@ namespace Pomp.Hosting
             if (string.IsNullOrEmpty(result.Id))
             {
                 return;
+            }
+            var origin = _bridge.OriginOf(frame);
+            lock (_stateLock)
+            {
+                if (!_turns.ContainsKey(result.Id!) || (origin != null && (origin.IsClosed || !ReferenceEquals(origin, _epochConnection)))) return;
+                _chatEngineSettled = result.SessionSettled;
+                _streamingRevision++;
             }
 
             var status = NormalizeStatus(result.Status);
@@ -584,7 +609,8 @@ namespace Pomp.Hosting
         private void EndTurn(string promptId, string status, UiErrorInfo? error)
         {
             var end = new ChatTurnEndPayload { PromptId = promptId, Status = status, Error = error };
-            Pomp.Features.AgentRunHistory? history; string? runId; string? team; bool fromHook;
+            Pomp.Features.AgentRunHistory? history; string? runId; string? team; bool fromHook; bool announced;
+            List<InboundRelay>? relays = null; string? answer = null;
             lock (_stateLock)
             {
                 if (!_turns.TryGetValue(promptId, out var turn))
@@ -596,19 +622,23 @@ namespace Pomp.Hosting
                 team = turn.Team; fromHook = IsHookTurn(turn);
                 RememberHookTurnLocked(turn);
                 // Pause before releasing the state lock: an idle refresh must not dispatch behind a failed turn.
-                if (status != "completed") _queuePaused = true;
+                if (status != "completed") { _queuePaused = true; _queueReason = status == "aborted" ? PompLanguage.Pick("응답이 중지됐어요.", "Turn aborted.") : PompLanguage.Pick("응답에 오류가 발생했어요.", "Turn failed."); }
                 history = turn.History; runId = turn.RunId;
+                if (turn.Relays.Count > 0) { relays = turn.Relays.ToList(); answer = turn.FinalText; }
                 _backgroundAgents.SetCurrentTurnTeam(null);
                 _backgroundAgents.SetCurrentTurnPrompt(null);
                 _metrics.Count("turn." + status);
                 _metrics.Time("turn", turn.Elapsed.Elapsed);
-                if (!turn.StartPosted)
-                {
-                    // The sender has not announced this turn yet (e.g. omp exited meanwhile): it posts this end after the start,
-                    // so the page never sees an end before its start.
-                    turn.PendingEnd = end;
-                    return;
-                }
+                announced = turn.StartPosted;
+                // The sender has not announced this turn yet (e.g. omp exited meanwhile): it posts this end after the start,
+                // so the page never sees an end before its start.
+                if (!announced) turn.PendingEnd = end;
+            }
+
+            if (!announced)
+            {
+                EndRelayedTurn(relays, status, error, answer);
+                return;
             }
 
             _ui.Post(UiMessageTypes.ChatTurnEnd, end);
@@ -620,11 +650,25 @@ namespace Pomp.Hosting
                 try { history.End(runId, status); PublishRunHistory(); }
                 catch (Exception ex) { _logger.Warn("Run history could not be saved: " + ex.Message); }
             }
-            if (status != "completed") PauseChatQueue(status == "aborted"
-                ? PompLanguage.Pick("응답이 중지됐어요.", "Turn aborted.")
-                : PompLanguage.Pick("응답에 오류가 발생했어요.", "Turn failed."));
+            if (status != "completed")
+            {
+                // The pause and its reason were set with the turn's removal above: an explicit resume right after the end must not be undone here.
+                PublishChatQueue();
+                // The run is over however it ended: what this conversation sent to other tabs meanwhile can be kept now.
+                ScheduleRelayFlush();
+            }
             else ScheduleQueueDispatch();
-            if (team != null) RaiseHookEvent(status == "completed" ? "team.completed" : "team.failed", "team", team, "Team run " + status + ".", promptId, fromHook);
+            EndRelayedTurn(relays, status, error, answer);
+            // A run another conversation asked for ends for that conversation's event rules (ApplyRelayUpdate), not for this tab's.
+            if (team != null && relays == null) RaiseHookEvent(status == "completed" ? "team.completed" : "team.failed", "team", team, "Team run " + status + ".", promptId, fromHook);
+        }
+
+        /// <summary>The turn of a message another conversation sent here ended: that conversation gets the outcome and the final answer only.</summary>
+        private void EndRelayedTurn(List<InboundRelay>? relays, string status, UiErrorInfo? error, string? answer)
+        {
+            if (relays == null) return;
+            foreach (var relay in relays)
+                FinishInboundRelay(relay, status == "completed" ? "done" : status == "aborted" ? "stopped" : "failed", error?.Message, status == "completed" ? answer : null);
         }
 
         private void EndAllTurns(string status, UiErrorInfo? error)
@@ -654,6 +698,7 @@ namespace Pomp.Hosting
                 _assistantMessages.Clear();
                 _toolStarts.Clear();
                 _currentAssistantId = null;
+                _chatEngineSettled = true;
             }
 
             foreach (var id in assistantIds)
@@ -702,6 +747,7 @@ namespace Pomp.Hosting
                 }
 
                 _streamingRevision++;
+                if (streaming) _chatEngineSettled = false;
                 // The run is over: a steer it took was delivered (or taken back by SteerAsync), so Stop needs no withdrawal any more.
                 if (!streaming) _steersSent.Clear();
                 if (_info.IsStreaming == streaming)
@@ -724,9 +770,9 @@ namespace Pomp.Hosting
 
         /// <summary>
         /// Applies a <c>get_state</c> payload and posts <c>session/info</c> when something changed; false when it was not applied.
-        /// With <paramref name="streamingRevision"/> (taken when the request was sent), its <c>isStreaming</c> is ignored if an
-        /// agent_start/agent_end was handled since: that event is newer than the reply. <paramref name="currentLocked"/> is checked
-        /// under the state lock in the same section that commits the snapshot. <paramref name="confirmSession"/> also ends an
+        /// With <paramref name="streamingRevision"/> (taken when the request was sent), activity flags are ignored if a prompt
+        /// admission/completion or agent_start/agent_end was handled since: that activity is newer than the reply.
+        /// <paramref name="currentLocked"/> is checked under the state lock in the same section that commits the snapshot. <paramref name="confirmSession"/> also ends an
         /// uncertain switch and, with <paramref name="acceptRecovery"/>, records this conversation as the recovered one. Never call
         /// this (or post to the page) while holding the state lock: the page's ready handler takes that lock while holding the hub's.
         /// </summary>
@@ -794,9 +840,8 @@ namespace Pomp.Hosting
                     {
                         if (taskCount >= 200) { planTruncated = true; break; }
                         var status = task.GetString("status");
-                        if (status != "pending" && status != "in_progress" && status != "completed" && status != "abandoned" && status != "blocked") continue;
-                        var blocker = task.GetString("blocker");
-                        shown.Tasks.Add(new AgentPlanTaskPayload { Content = LimitPlanText(task.GetString("content") ?? "", 600), Status = status!, Blocker = blocker == null ? null : LimitPlanText(blocker, MaxPlanBlockerChars) }); taskCount++;
+                        if (status == null || !PlanStatuses.Contains(status)) continue;
+                        shown.Tasks.Add(new AgentPlanTaskPayload { Content = LimitPlanText(task.GetString("content") ?? "", 600), Status = status }); taskCount++;
                     }
                     phases.Add(shown);
                 }
@@ -807,11 +852,14 @@ namespace Pomp.Hosting
             var plan = state["todoPhases"] is JArray wholePlan ? PlanSnapshot.Of(wholePlan, previousPlan) : null;
 
             SessionInfoPayload updated;
-            bool modelChanged, thinkingChanged, changed;
+            bool modelChanged, thinkingChanged, changed, planChanged, settlementChanged;
             lock (_stateLock)
             {
                 if ((!acceptRecovery && _recoveryStatus != "ready") || (currentLocked != null && !currentLocked())) return false;
-                _steerRequiresSeparateTurn = modelObject?.GetString("api") == "openai-codex-responses";
+                var currentActivity = !streamingRevision.HasValue || streamingRevision.Value == _streamingRevision;
+                var settled = currentActivity ? state.GetBool("isSettled") == true : _chatEngineSettled;
+                settlementChanged = settled != _chatEngineSettled;
+                _chatEngineSettled = settled;
                 modelChanged = _info.Model?.Provider != model?.Provider || _info.Model?.Id != model?.Id;
                 thinkingChanged = !string.Equals(_info.ThinkingLevel, state.GetString("thinkingLevel"), StringComparison.Ordinal);
                 _sessionFile = state.GetString("sessionFile");
@@ -836,16 +884,18 @@ namespace Pomp.Hosting
                     ThinkingLevel = state.GetString("thinkingLevel"),
                     SessionId = state.GetString("sessionId"),
                     SessionName = state.GetString("sessionName"),
-                    TodoPhases = phases, PlanTruncated = planTruncated, HasPendingAsyncWork = state.GetBool("hasPendingAsyncWork") ?? false,
+                    TodoPhases = phases, PlanTruncated = planTruncated,
+                    HasPendingAsyncWork = currentActivity ? state.GetBool("hasPendingAsyncWork") ?? false : _info.HasPendingAsyncWork,
                     PlanTaskCount = plan?.TaskCount ?? 0, PlanOpenCount = plan?.OpenCount ?? 0, PlanRevision = plan?.Revision,
                     ContextUsage = usage,
                     ThreeTurnCompaction = state.GetObject("pompCompaction") is JObject policy && policy.GetLong("keepRecentTurns") == 3 && policy.GetString("automaticMethod") == "soft",
-                    IsStreaming = streamingRevision.HasValue && streamingRevision.Value != _streamingRevision
-                        ? _info.IsStreaming
-                        : state.GetBool("isStreaming") ?? _info.IsStreaming,
+                    IsStreaming = currentActivity ? state.GetBool("isStreaming") ?? _info.IsStreaming : _info.IsStreaming,
                     WorkingDirectory = string.IsNullOrEmpty(_workingDirectory) ? null : _workingDirectory,
                     FastMode = fastMode,
                 };
+                planChanged = _info.SessionId != updated.SessionId || _info.SessionName != updated.SessionName ||
+                    _info.PlanRevision != updated.PlanRevision || _info.IsStreaming != updated.IsStreaming ||
+                    _info.HasPendingAsyncWork != updated.HasPendingAsyncWork || _info.RecoveryStatus != updated.RecoveryStatus;
                 // Event-rule forwarding belongs to one conversation: any confirmed change of conversation turns it off.
                 if (!string.IsNullOrEmpty(updated.SessionId)) ResetHooksIfSessionChangedLocked(updated.SessionId!);
                 var json = PompJson.Serialize(updated);
@@ -870,6 +920,7 @@ namespace Pomp.Hosting
             _projectHooks?.SetSession(_workingDirectory, state.GetString("sessionId") ?? "");
             if (!changed)
             {
+                if (settlementChanged) ScheduleQueueDispatch();
                 return true;
             }
 
@@ -883,6 +934,7 @@ namespace Pomp.Hosting
             ResourceSessionObserved(updated.SessionId);
             ConversationObserved(updated.SessionId);
             KnowledgeSessionObserved(updated.SessionId);
+            if (planChanged) NotifyConversationChanged();
             if (!updated.IsStreaming) ScheduleQueueDispatch();
             return true;
         }
@@ -931,15 +983,26 @@ namespace Pomp.Hosting
                     _logger.Debug("Refreshing the session info failed: " + ex.Message);
                 }
 
+                bool waitForSettlement;
+                CancellationToken settleToken;
                 lock (_stateLock)
                 {
-                    if (!_refreshQueued)
+                    waitForSettlement = !_refreshQueued && QueueWaitingForSettlementLocked();
+                    if (!_refreshQueued && !waitForSettlement)
                     {
                         _refreshRunning = false;
                         return;
                     }
 
                     _refreshQueued = false;
+                    settleToken = _epoch.Token;
+                }
+                if (waitForSettlement)
+                {
+                    // Async work can settle without session_settled (for example, cancellation after a yield).
+                    // Poll only while an unpaused ordinary queue is waiting, without blocking the command worker.
+                    try { await Task.Delay(TimeSpan.FromSeconds(1), settleToken).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { } // The next iteration observes the current epoch or exits.
                 }
             }
         }
@@ -1021,6 +1084,7 @@ namespace Pomp.Hosting
             if (!_settings.ComposerPredictions) CancelComposerPrediction();
             _interactiveTerminal.Publish();
             _interactiveTerminal.ProbeAsync(_disposeCts.Token).Forget(_logger, "terminal capability");
+            DictationSettingsChanged();
             PostHelloIfChanged();
         }
 
@@ -1075,6 +1139,7 @@ namespace Pomp.Hosting
                 .Append(new UiMessage(UiMessageTypes.WorkflowsState, WorkflowsView()))
                 .Append(new UiMessage(UiMessageTypes.HooksState, HooksView()))
                 .Append(ComputerStateMessage())
+                .Append(DictationStateMessage())
                 .Append(AgentsStateMessage())
                 .Append(new UiMessage(UiMessageTypes.ConversationTabsState, TabsView()))
                 .Append(new UiMessage(UiMessageTypes.ChatQueueState, QueueView()))
@@ -1312,7 +1377,7 @@ namespace Pomp.Hosting
                     break;
                 case OmpUiMethods.Notify:
                     if (IsEngineHousekeepingNotice(NormalizeLevel(frame.Json.GetString("notifyType")), request.Message ?? "")) break;
-                    if (HandleTaskDetailsNotification(request.Message, origin) || HandleActiveRulesNotification(request.Message, origin) || HandleToolsNotification(request.Message, origin) || HandleInlineNotification(request.Message, origin) || HandleMemberStopNotification(request.Message, origin) || HandleAdvisorNotification(request.Message, origin) || HandleReviewReporterNotification(request.Message, origin) || HandleDiskEditNotification(request.Message, origin)) break;
+                    if (HandleTaskDetailsNotification(request.Message, origin) || HandleActiveRulesNotification(request.Message, origin) || HandleToolsNotification(request.Message, origin) || HandleInlineNotification(request.Message, origin) || HandleMemberStopNotification(request.Message, origin) || HandleAdvisorNotification(request.Message, origin) || HandleReviewReporterNotification(request.Message, origin) || HandleDiskEditNotification(request.Message, origin) || HandleRelayNotification(request.Message, origin)) break;
                     PostNotice(NormalizeLevel(frame.Json.GetString("notifyType")), request.Message ?? string.Empty);
                     break;
                 default:
@@ -1511,6 +1576,10 @@ namespace Pomp.Hosting
             public string? Team { get; set; }
             public HashSet<string>? TeamMembers { get; set; }
             public OmpConnection? TeamConnection { get; set; }
+            /// <summary>The messages of other conversations this turn answers (<see cref="AcceptRelay"/>): its end is reported to them.</summary>
+            public List<InboundRelay> Relays { get; } = new List<InboundRelay>();
+            /// <summary>The last answer text of the turn so far; kept only for a turn with <see cref="Relays"/>.</summary>
+            public string? FinalText { get; set; }
 
             /// <summary>Running since the turn was created (the turn-duration metric).</summary>
             public System.Diagnostics.Stopwatch Elapsed { get; } = System.Diagnostics.Stopwatch.StartNew();

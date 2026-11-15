@@ -208,6 +208,14 @@
     <Delete Condition="'$(_PompOmpNoticesHashOk)' != 'true'" Files="$(_PompOmpNotices)" />
     <Error Code="POMP1011" Condition="'$(_PompOmpHashOk)' != 'true'"
            Text="omp engine '$(_PompOmpEngine)' has SHA-256 $(_PompOmpActualSha256), but engines\omp\engine.props pins omp $(PompOmpVersion) as $(PompOmpSha256). The VSIX must ship exactly the pinned engine." />
+    <!-- The installed extension refuses an engine whose length differs from engine.json (BundledEngine), so the size pin is checked
+         here too. MSBuild property functions cannot read a file's length; the path travels in an environment variable, unquoted. -->
+    <Exec Command="powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;(Get-Item -LiteralPath $env:POMP_OMP_ENGINE_PATH).Length&quot;"
+          EnvironmentVariables="POMP_OMP_ENGINE_PATH=$(_PompOmpEngine)" ConsoleToMSBuild="true" StandardOutputImportance="Low" IgnoreExitCode="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_PompOmpActualSize" />
+    </Exec>
+    <Error Code="POMP1011" Condition="'$(_PompOmpActualSize.Trim())' != '$(PompOmpSize.Trim())'"
+           Text="omp engine '$(_PompOmpEngine)' is $(_PompOmpActualSize.Trim()) bytes, but engines\omp\engine.props pins PompOmpSize as $(PompOmpSize). Update PompOmpSize together with PompOmpSha256 (build\build-omp.ps1 prints both)." />
     <Error Code="POMP1012" Condition="'$(_PompOmpNoticesHashOk)' != 'true'"
            Text="omp's THIRD-PARTY-NOTICES.txt has SHA-256 $(_PompOmpNoticesActualSha256), expected $(PompOmpNoticesSha256) (engines\omp\engine.props)." />
     <WriteLinesToFile File="$(_PompOmpManifest)" Overwrite="true" WriteOnlyWhenDifferent="true"

@@ -427,8 +427,8 @@ const PROVIDER_LABELS: Readonly<Record<string, string>> = {
 };
 
 /** Sign-in methods that store as another provider (the host's StoredUnder): what tells their tile from that provider's. */
-const SIGN_IN_METHODS: Readonly<Record<string, { ko: string; en: string }>> = {
-  'openai-codex-device': { ko: '장치 코드', en: 'Device code' },
+const SIGN_IN_METHODS: Readonly<Record<string, MessageKey>> = {
+  'openai-codex-device': 'login.method.deviceCode',
 };
 
 const PLAN = '(?:plus|pro|max|team|business|enterprise)';
@@ -452,9 +452,9 @@ export function providerLabel(id: string, hostName?: string): string {
 }
 
 /** The sign-in method of a provider entry that stores as another provider, e.g. the device-code sign-in; undefined for the rest. */
-export function providerMethod(id: string, locale: string): string | undefined {
-  const method = SIGN_IN_METHODS[id];
-  return method && (locale.toLowerCase().startsWith('ko') ? method.ko : method.en);
+export function providerMethod(id: string, t: Translate): string | undefined {
+  const key = Object.hasOwn(SIGN_IN_METHODS, id) ? SIGN_IN_METHODS[id] : undefined;
+  return key && t(key);
 }
 
 /** The sign-in URL as a normalised http(s) URL, or undefined for anything else (it must never become a link or be opened). */

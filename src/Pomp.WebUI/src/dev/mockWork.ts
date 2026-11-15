@@ -3,31 +3,39 @@
  * tasks and applied-change records): a plan, a change proposal, an isolated member result, applied-change records, problems and
  * editor changes, all answering their commands the way the real host does (pages, queries, revisions).
  */
-import type { AgentPlanPhase, ComposerAutoState, ComposerWorkflowState, HostToUi, IsolationResult, UiToHost, WorkspaceHistoryState, WorkspaceProblem, WorkspaceReviewState } from '../protocol';
+import type { AgentPlanPhase, ComposerWorkflowState, HostToUi, IsolationResult, UiToHost, WorkspaceHistoryState, WorkspaceProblem, WorkspaceReviewState } from '../protocol';
 
 type Post = <K extends keyof HostToUi>(type: K, payload: HostToUi[K]) => void;
 
-export function createMockWork(post: Post, root: string, session: () => string, onPlanChanged: () => void) {
+export function createMockWork(post: Post, root: string, session: () => string, onPlanChanged: () => void, liveSessions: () => readonly string[]) {
   const mode = new URLSearchParams(window.location.search).get('work') ?? '';
   const many = mode === 'many';
   const enabled = mode === '1' || mode === 'active' || many;
   const ko = !new URLSearchParams(window.location.search).get('locale')?.startsWith('en');
-  let plan: AgentPlanPhase[] = enabled ? [
+  let initialPlan: AgentPlanPhase[] = enabled ? [
     { name: ko ? '할인 규칙 정리' : 'Discount rules', tasks: [
       { content: ko ? '주문 할인 규칙 정리' : 'Collect the order discount rules', status: 'completed' },
       { content: ko ? '할인 계산 테스트 작성' : 'Write discount calculation tests', status: 'completed' },
       { content: ko ? 'CalculateTotal 수정' : 'Fix CalculateTotal', status: 'in_progress' },
     ] },
     { name: ko ? '확인' : 'Verify', tasks: [
-      { content: ko ? '회원 할인 경계값 처리' : 'Member discount boundaries', status: 'blocked', blocker: ko ? '대량 할인 규칙 확인' : 'Bulk discount rule' },
+      { content: ko ? '회원 할인 경계값 처리' : 'Member discount boundaries', status: 'pending' },
       { content: ko ? '빌드와 테스트 실행' : 'Build and run the tests', status: 'pending' },
     ] },
   ] : [];
-  if (many) plan = Array.from({ length: 12 }, (_, p) => ({ name: (ko ? '단계 ' : 'Phase ') + (p + 1), tasks: Array.from({ length: 250 }, (_, t) => ({
-    content: (ko ? '작업 ' : 'Task ') + (p * 250 + t + 1) + (t % 7 === 0 ? (ko ? ' 테스트 보강' : ' strengthen tests') : ''), status: p < 4 ? 'completed' : p === 4 && t < 30 ? 'in_progress' : t % 41 === 0 ? 'blocked' : 'pending',
-    ...(t % 41 === 0 && p >= 4 ? { blocker: ko ? '리뷰 대기' : 'Waiting for review' } : {}) })) }));
-  let planRevision = 1;
-  const planInfo = () => {
+  if (many) initialPlan = Array.from({ length: 12 }, (_, p) => ({ name: (ko ? '단계 ' : 'Phase ') + (p + 1), tasks: Array.from({ length: 250 }, (_, t) => ({
+    content: (ko ? '작업 ' : 'Task ') + (p * 250 + t + 1) + (t % 7 === 0 ? (ko ? ' 테스트 보강' : ' strengthen tests') : ''), status: p < 4 ? 'completed' : p === 4 && t < 30 ? 'in_progress' : 'pending' })) }));
+  const plans = new Map<string, { phases: AgentPlanPhase[]; revision: number; running: boolean }>();
+  const planFor = (id: string) => {
+    let value = plans.get(id);
+    if (!value) {
+      value = { phases: plans.size === 0 ? initialPlan : [], revision: 1, running: false };
+      plans.set(id, value);
+    }
+    return value;
+  };
+  const planInfo = (id = session()) => {
+    const { phases: plan, revision: planRevision } = planFor(id);
     const tasks = plan.flatMap(phase => phase.tasks); let left = 200;
     const first = plan.slice(0, 20).map(phase => { const taken = phase.tasks.slice(0, Math.max(0, left)); left -= taken.length; return { name: phase.name, tasks: taken }; }).filter(phase => phase.tasks.length);
     return { todoPhases: first, planTruncated: tasks.length > 200, planTaskCount: tasks.length, planOpenCount: tasks.filter(task => !['completed', 'abandoned'].includes(task.status)).length, planRevision: tasks.length ? 'r' + planRevision : undefined };
@@ -64,7 +72,6 @@ export function createMockWork(post: Post, root: string, session: () => string, 
   ] : [];
   let workflow: ComposerWorkflowState = { root, sessionId: '', id: '', revision: 0, phase: 'empty', paused: false, task: '', steps: [], message: '', proposalId: '', outcomes: [], discoveryObserved: false, applied: false, verificationObserved: false };
   if (mode === 'active') workflow = { ...workflow, id: 'wf-1', revision: 3, phase: 'editing', task: ko ? '주문 할인 계산을 회원·대량 구매 규칙에 맞게 고치고 테스트를 추가한다.' : 'Fix the order discount for member and bulk rules and add tests.', steps: ko ? ['규칙 정리', '테스트 작성', '코드 수정', '빌드와 테스트 실행'] : ['Collect rules', 'Write tests', 'Change code', 'Build and test'], outcomes: [{ path: 'Services/OrderService.cs', state: 'pending' }] };
-  let auto: ComposerAutoState = { root, sessionId: '', id: workflow.id, enabled: mode === 'active', remaining: 4, dispatching: false, message: '', ...(mode === 'active' ? { tokenBudget: 200_000, tokensUsed: 44_120 } : {}) };
 
   const postReview = () => { if (review) post('workspace/reviewState', review); };
   const postIsolation = (requestId?: string) => post('workspace/isolationState', { requestId: requestId ?? null, items: isolation });
@@ -75,12 +82,27 @@ export function createMockWork(post: Post, root: string, session: () => string, 
     post('workspace/historyState', { root, entries: matching.slice(page * historyView.size, page * historyView.size + historyView.size), total: matching.length, page, size: historyView.size, query: historyView.query });
   };
   const postProblems = () => post('workspace/problemsState', { root, items: problems, truncated: false, updatedUtc: new Date().toISOString() });
-  const postWorkflow = (controlRequestId?: string, controlError?: string) => post('workspace/composerState', { ...workflow, sessionId: session(), ...(controlRequestId ? { controlRequestId, controlError: controlError ?? null } : {}) });
-  const postAuto = (requestId?: string) => post('workspace/composerAutoState', { ...auto, sessionId: session(), id: workflow.id, ...(requestId ? { requestId } : {}) });
+  // Like the host, a workflow keeps the conversation that owns it: the first conversation to see a preset run, then whoever saves, starts or resumes it.
+  const postWorkflow = (controlRequestId?: string, controlError?: string) => {
+    if (workflow.id && !workflow.sessionId) workflow = { ...workflow, sessionId: session() };
+    post('workspace/composerState', { ...workflow, ...(controlRequestId ? { controlRequestId, controlError: controlError ?? null } : {}) });
+  };
   const bump = () => { if (review) review = { ...review, revision: ++revision }; };
 
   function handle(type: string, payload: unknown): boolean {
-    if (!enabled) return false;
+    const planCommand = type.startsWith('workspace/agentPlan');
+    if (!enabled && !planCommand) return false;
+    if (planCommand) {
+      const fields = payload && typeof payload === 'object' ? payload : {};
+      const id = 'sessionId' in fields && typeof fields.sessionId === 'string' ? fields.sessionId : '';
+      const requestId = 'requestId' in fields && typeof fields.requestId === 'string' ? fields.requestId : '';
+      if (!('root' in fields) || fields.root !== root || !liveSessions().includes(id)) {
+        const error = ko ? '작업 계획의 대화나 작업 영역이 바뀌었어요.' : 'The plan conversation or workspace changed.';
+        if (type === 'workspace/agentPlanPage') post('workspace/agentPlanPageResult', { requestId, ok: false, error, page: 0, size: 20, total: 0, completedCount: 0, phases: [], rows: [] });
+        else post('workspace/agentPlanResult', { requestId, ok: false, error });
+        return true;
+      }
+    }
     switch (type) {
       case 'workspace/review': {
         const command = payload as UiToHost['workspace/review'];
@@ -89,7 +111,8 @@ export function createMockWork(post: Post, root: string, session: () => string, 
           if (review && !['done', 'empty', 'discarded', 'cancelled'].includes(review.status)) { post('workspace/editorChanges', { requestId: command.requestId ?? '', action: 'fromEditor', ok: false, error: ko ? '검토 중인 제안이 있어요.' : 'A proposal is already awaiting review.' }); return true; }
           review = { id: 'editor-' + (++revision), revision, status: 'ready', origin: 'editor', message: '', canApply: true, nativeDiffAvailable: true, diagnostics: [], outcomes: [],
             files: (command.paths ?? []).map(path => ({ path, coarse: false, hunks: [{ id: 0, oldLine: 12, newLine: 12, before: '        return items.Count;\n', after: '        return items.Count(i => i.IsActive);\n', selected: true }, { id: 1, oldLine: 40, newLine: 40, before: '', after: '        // TODO: cache\n', selected: true }] })) };
-          post('workspace/editorChanges', { requestId: command.requestId ?? '', action: 'fromEditor', ok: true }); window.setTimeout(postReview, 120); return true;
+          // The host publishes the staged proposal first and answers the request after it.
+          postReview(); window.setTimeout(() => post('workspace/editorChanges', { requestId: command.requestId ?? '', action: 'fromEditor', ok: true }), 120); return true;
         }
         if (!review) return true;
         if (command.action === 'select') { review = { ...review, files: review.files.map(f => f.path === command.path ? { ...f, hunks: f.hunks.map(h => ({ ...h, selected: (command.selected ?? []).includes(h.id) })) } : f) }; bump(); }
@@ -122,38 +145,34 @@ export function createMockWork(post: Post, root: string, session: () => string, 
       }
       case 'workspace/composer': {
         const command = payload as UiToHost['workspace/composer'];
-        if (command.action === 'save' || command.action === 'start') workflow = { ...workflow, id: workflow.id || 'wf-new', revision: workflow.revision + 1, phase: command.action === 'start' ? 'discovery' : 'planning', task: command.task ?? workflow.task, steps: command.steps ?? workflow.steps };
-        else if (command.action === 'pause' || command.action === 'resume') workflow = { ...workflow, revision: workflow.revision + 1, paused: command.action === 'pause' };
+        if (command.action === 'save' || command.action === 'start') workflow = { ...workflow, sessionId: session(), id: workflow.id || 'wf-new', revision: workflow.revision + 1, phase: command.action === 'start' ? 'discovery' : 'planning', task: command.task ?? workflow.task, steps: command.steps ?? workflow.steps };
+        else if (command.action === 'pause') workflow = { ...workflow, revision: workflow.revision + 1, paused: true };
+        else if (command.action === 'resume') workflow = { ...workflow, sessionId: session(), revision: workflow.revision + 1, paused: false };
         else if (command.action === 'cancel') workflow = { ...workflow, revision: workflow.revision + 1, phase: 'cancelled' };
         window.setTimeout(() => postWorkflow(command.requestId), 100); return true;
       }
-      case 'workspace/composerAuto': {
-        const command = payload as UiToHost['workspace/composerAuto'];
-        if (command.action === 'enable') auto = { ...auto, enabled: true, tokenBudget: command.tokenBudget, tokensUsed: command.tokenBudget ? 0 : undefined };
-        if (command.action === 'disable') auto = { ...auto, enabled: false, tokenBudget: undefined, tokensUsed: undefined };
-        window.setTimeout(() => postAuto(command.requestId), 80); return true;
-      }
       case 'workspace/agentPlanPage': {
         const command = payload as UiToHost['workspace/agentPlanPage']; const q = (command.query ?? '').toLowerCase();
-        const rows = plan.flatMap((phase, p) => phase.tasks.map((task, t) => ({ phase: p, task: t, content: task.content, status: task.status, ...(task.blocker ? { blocker: task.blocker } : {}) })))
-          .filter(row => !q || row.content.toLowerCase().includes(q) || (row.blocker ?? '').toLowerCase().includes(q) || plan[row.phase].name.toLowerCase().includes(q));
+        const { phases: plan, revision: planRevision, running } = planFor(command.sessionId);
+        const rows = plan.flatMap((phase, p) => phase.tasks.map((task, t) => ({ phase: p, task: t, content: task.content, status: task.status })))
+          .filter(row => !q || row.content.toLowerCase().includes(q) || plan[row.phase].name.toLowerCase().includes(q));
         const size = Math.min(100, Math.max(1, command.size)); const page = Math.min(Math.max(0, command.page), Math.max(0, Math.ceil(rows.length / size) - 1));
-        window.setTimeout(() => post('workspace/agentPlanPageResult', { requestId: command.requestId, ok: true, revision: 'r' + planRevision, editable: true, editableWhileWorking: true, page, size, total: rows.length,
+        window.setTimeout(() => post('workspace/agentPlanPageResult', { requestId: command.requestId, ok: true, revision: 'r' + planRevision, editable: !running, editableWhileWorking: true, page, size, total: rows.length,
           completedCount: plan.reduce((count, phase) => count + phase.tasks.filter(task => task.status === 'completed').length, 0),
           phases: plan.map((phase, index) => ({ index, name: phase.name, taskCount: phase.tasks.length })), rows: rows.slice(page * size, page * size + size) }), 60);
         return true;
       }
       case 'workspace/agentPlanEdit': {
         const command = payload as UiToHost['workspace/agentPlanEdit'];
+        const model = planFor(command.sessionId);
+        const { phases: plan, revision: planRevision } = model;
         const fail = (error: string) => window.setTimeout(() => post('workspace/agentPlanResult', { requestId: command.requestId, ok: false, error }), 80);
         if (command.revision !== 'r' + planRevision) { fail(ko ? '그 사이 계획이 바뀌었어요.' : 'The plan changed meanwhile.'); return true; }
         const next = plan.map(phase => ({ name: phase.name, tasks: phase.tasks.map(task => ({ ...task })) }));
-        if (command.op === 'addTask') next[command.phase]?.tasks.push({ content: command.content, status: command.status ?? 'pending', ...(command.blocker ? { blocker: command.blocker } : {}) });
-        else if (command.op === 'updateTask') { const task = next[command.phase]?.tasks[command.task]; if (task) { if (command.content !== undefined) task.content = command.content; if (command.status) task.status = command.status; if (command.blocker !== undefined) { if (command.blocker) task.blocker = command.blocker; else delete task.blocker; } } }
+        if (command.op === 'addTask') next[command.phase]?.tasks.push({ content: command.content, status: command.status ?? 'pending' });
+        else if (command.op === 'updateTask') { const task = next[command.phase]?.tasks[command.task]; if (task) { if (command.content !== undefined) task.content = command.content; if (command.status) task.status = command.status; } }
         else if (command.op === 'deleteTask') { next[command.phase]?.tasks.splice(command.task, 1); if (next[command.phase] && !next[command.phase].tasks.length) next.splice(command.phase, 1); }
         else if (command.op === 'addPhase') next.push({ name: command.name, tasks: [{ content: command.content, status: command.status ?? 'pending' }] });
-        else if (command.op === 'renamePhase') { if (next[command.phase]) next[command.phase].name = command.name; }
-        else if (command.op === 'deletePhase') next.splice(command.phase, 1);
         else if (command.op === 'clearCompleted') {
           if (!next.some(phase => phase.tasks.some(task => task.status === 'completed'))) { fail(ko ? '완료된 작업이 없어요.' : 'There are no completed tasks.'); return true; }
           const cleared = next.filter(phase => phase.tasks.some(task => task.status === 'completed'));
@@ -170,22 +189,35 @@ export function createMockWork(post: Post, root: string, session: () => string, 
           const task = next[command.phase]?.tasks[command.task];
           if (!task || task.status === 'completed') { fail(ko ? '이미 완료된 작업이에요.' : 'That task is already completed.'); return true; }
           for (const other of next.flatMap(phase => phase.tasks)) if (other.status === 'in_progress') other.status = 'pending';
-          task.status = 'in_progress'; delete task.blocker;
+          task.status = 'in_progress';
         }
-        plan = next; planRevision++; onPlanChanged();
+        model.phases = next; model.revision++; onPlanChanged();
         window.setTimeout(() => post('workspace/agentPlanResult', { requestId: command.requestId, ok: true }), 120); return true;
       }
       case 'workspace/agentPlan': {
         const command = payload as UiToHost['workspace/agentPlan'];
-        plan = command.phases; planRevision++; onPlanChanged();
+        const model = planFor(command.sessionId);
+        model.phases = command.phases; model.revision++; onPlanChanged();
         window.setTimeout(() => post('workspace/agentPlanResult', { requestId: command.requestId, ok: true }), 120); return true;
+      }
+      case 'workspace/agentPlanAction': {
+        // In-process mock envelopes have already passed the root/session guard; validate action-specific fields here.
+        const command = payload as Record<string, unknown>;
+        const model = planFor(String(command.sessionId));
+        if (command.action !== 'stop' && command.action !== 'continue' && (command.action !== 'run' || typeof command.task !== 'string' || !command.task.trim())) {
+          post('workspace/agentPlanResult', { requestId: String(command.requestId), ok: false, error: 'Invalid plan action.' }); return true;
+        }
+        model.running = command.action !== 'stop';
+        onPlanChanged();
+        post('workspace/agentPlanResult', { requestId: String(command.requestId), ok: true });
+        return true;
       }
       default: return false;
     }
   }
   function snapshot(): void {
     if (!enabled) return;
-    postReview(); postIsolation(); postHistory(); postProblems(); postWorkflow(); postAuto();
+    postReview(); postIsolation(); postHistory(); postProblems(); postWorkflow();
   }
-  return { enabled, handle, snapshot, sessionInfo: () => (enabled ? planInfo() : {}) };
+  return { enabled, handle, snapshot, sessionInfo: planInfo, isPlanRunning: (id: string) => planFor(id).running };
 }

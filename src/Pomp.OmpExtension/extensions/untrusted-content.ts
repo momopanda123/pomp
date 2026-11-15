@@ -7,16 +7,18 @@
  * never altered). omp drops repeats within a batch, so one line per call is enough.
  *
  * Which tools count: omp's network tools (`web_search`, `fetch`, `web_fetch`, `browser`,
- * `github` — the same list as the host's `OmpNetworkTools.Names`), `read` of an http(s)
- * URL, and any tool whose registry `sourceInfo.source` is `mcp` (looked up once per
- * session through `pi.getAllTools()`; a lookup failure labels by name only).
+ * `github` — the same list as the host's `OmpNetworkTools.Names`), `read` of a web
+ * address or a remote internal URL, and any MCP tool: a name starting with `mcp__` or a
+ * tool whose registry `sourceInfo.source` is `mcp`. The registry is asked for each result
+ * (`pi.getAllTools()` is not available yet while the module loads; a lookup failure
+ * labels by name only). A `write xd://<tool>` that carries such a call counts the same.
  *
  * Fail-open: the handler never throws, never blocks, and touches nothing else, so
  * existing features that read tool results (case cards, the composer workflow) see
  * exactly what they saw before.
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { networkTarget, NETWORK_TOOLS } from "../lib/tool-targets.ts";
+import { networkTarget, NETWORK_TOOLS, xdDevice } from "../lib/tool-targets.ts";
 import { isPompHost } from "../lib/vs-state.ts";
 
 export const UNTRUSTED_LABEL =
@@ -44,10 +46,20 @@ export function mcpToolNames(getAllTools: () => readonly unknown[]): ReadonlySet
 /** True when the result of this call is external content that must be labelled. */
 export function needsLabel(toolName: string, input: unknown, mcpNames: ReadonlySet<string>): boolean {
 	if (typeof toolName !== "string") return false;
-	if (mcpNames.has(toolName)) return true;
+	if (mcpNames.has(toolName) || toolName.startsWith("mcp__")) return true;
 	if (toolName === "computer") return true;
 	if (NETWORK_TOOLS.has(toolName)) return true;
 	return toolName === "read" && networkTarget(toolName, input) !== undefined;
+}
+
+/** The arguments a `write xd://<tool>` carries for the mounted tool (its `content` is their JSON); undefined when unreadable. */
+function mountedInput(input: unknown): unknown {
+	try {
+		const content = (input as { content?: unknown } | undefined)?.content;
+		return typeof content === "string" ? JSON.parse(content) : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 export default function untrustedContent(pi: ExtensionAPI): void {
@@ -55,7 +67,6 @@ export default function untrustedContent(pi: ExtensionAPI): void {
 
 	let loggedOnce = false;
 	let available: boolean | undefined;
-	let mcpNames: ReadonlySet<string> = new Set();
 
 	const logOnce = (message: string): void => {
 		if (loggedOnce) return;
@@ -69,11 +80,6 @@ export default function untrustedContent(pi: ExtensionAPI): void {
 
 	try {
 		available = typeof (pi as { on?: unknown }).on === "function";
-		try {
-			mcpNames = mcpToolNames(() => pi.getAllTools());
-		} catch {
-			mcpNames = new Set();
-		}
 		if (!available) {
 			logOnce("pomp untrusted-content: extension event API unavailable, labelling off");
 			return;
@@ -85,7 +91,10 @@ export default function untrustedContent(pi: ExtensionAPI): void {
 
 	pi.on("tool_result", event => {
 		try {
+			const mcpNames = mcpToolNames(() => pi.getAllTools());
 			if (needsLabel(event.toolName, event.input, mcpNames)) return { additionalContext: UNTRUSTED_LABEL };
+			const device = xdDevice(event.toolName, event.input);
+			if (device !== undefined && needsLabel(device, mountedInput(event.input), mcpNames)) return { additionalContext: UNTRUSTED_LABEL };
 			return undefined;
 		} catch (error) {
 			try {

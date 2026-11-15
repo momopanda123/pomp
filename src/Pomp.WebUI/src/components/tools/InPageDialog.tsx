@@ -46,12 +46,12 @@ export function ScopeChoice({ t, label, value, onChange, testId, disabled = fals
     options={[{ id: 'project', label: t('skills.source.project'), testId: `${testId}-project` }, { id: 'user', label: t('skills.source.user'), testId: `${testId}-user` }]} />;
 }
 
-/** The delete question of a list row: Cancel starts focused, the destructive button sits on the right. */
-export function ConfirmDelete({ t, testId, yesTestId, fallback, question, locked, pending, onCancel, onConfirm }: {
-  t: ToolsTranslate; testId: string; yesTestId: string; fallback?: string; question: string; locked: boolean; pending: boolean; onCancel: () => void; onConfirm: () => void;
+/** The delete question of a list row: Cancel starts focused, the destructive button sits on the right. `children`: lines under the question (a refusal, a guard). */
+export function ConfirmDelete({ t, testId, yesTestId, fallback, question, locked, pending, onCancel, onConfirm, children }: {
+  t: ToolsTranslate; testId: string; yesTestId: string; fallback?: string; question: string; locked: boolean; pending: boolean; onCancel: () => void; onConfirm: () => void; children?: ReactNode;
 }) {
   return <InPageDialog title={t('tools.confirmDelete')} testId={testId} fallback={fallback} onClose={onCancel} pending={pending}>
-    <div className="ui-form tools-form"><p className="tools-question">{question}</p>
+    <div className="ui-form tools-form"><p className="tools-question">{question}</p>{children}
       <FormActions><button type="button" className="btn" data-autofocus disabled={pending} onClick={onCancel}>{t('tools.cancel')}</button>
         <button type="button" className="btn danger" data-testid={yesTestId} disabled={locked} onClick={onConfirm}>{t('tools.delete')}</button></FormActions></div>
   </InPageDialog>;

@@ -240,10 +240,10 @@ namespace Pomp.VisualStudio.Adapters
             ThreadHelper.ThrowIfNotOnUIThread();
 
             var projects = EnumerateProjects(cancellationToken);
-            var matches = projects.Where(p =>
-                string.Equals(p.Name, selector, StringComparison.OrdinalIgnoreCase)
-                || (p.Path != null && (VsAdapterContext.SamePath(p.Path, selector)
-                    || string.Equals(Path.GetFileNameWithoutExtension(p.Path), selector, StringComparison.OrdinalIgnoreCase))))
+            var matches = projects.Where(p => !p.IsSolutionFolder
+                && (string.Equals(p.Name, selector, StringComparison.OrdinalIgnoreCase)
+                    || (p.Path != null && (VsAdapterContext.SamePath(p.Path, selector)
+                        || string.Equals(Path.GetFileNameWithoutExtension(p.Path), selector, StringComparison.OrdinalIgnoreCase)))))
                 .ToList();
             if (matches.Count == 0)
             {

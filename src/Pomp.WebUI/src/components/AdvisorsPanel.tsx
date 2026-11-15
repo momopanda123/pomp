@@ -239,11 +239,11 @@ export function AdvisorsPanel({ controller, setup, connected, selected, inert, r
         <Toolbar>
           <strong className="advisor-history-name" data-testid="advisors-history-name">{revealControls(historyFor)}</strong>
           <SearchBox value={noteQuery} onChange={setNoteQuery} testId="advisors-notes-search" />
-          <IconButton icon="restart" label={t('agents.reload')} testId="advisors-history-reload" disabled={locked} onClick={() => { void loadHistory(historyFor); }} />
+          <IconButton icon="restart" label={t('tools.refresh')} testId="advisors-history-reload" disabled={locked} onClick={() => { void loadHistory(historyFor); }} />
           <IconButton icon="external" label={t('advisors.openTranscript')} testId="advisors-history-transcript" disabled={locked || !transcriptOpen(historyFor)} onClick={() => { void openTranscript(historyFor); }} />
           <IconButton icon="x" label={t('agents.close')} testId="advisors-history-close" onClick={closeHistory} />
         </Toolbar>
-        <DataTable className="advisor-notes-table" testId="advisors-notes" label={t('advisors.notesTitle')} columns="minmax(0, 1fr) auto" empty={!notesShown.length} emptyRows={2} head={[t('advisors.note'), t('advisors.time')]}>
+        <DataTable testId="advisors-notes" label={t('advisors.notesTitle')} columns="minmax(0, 1fr) auto" empty={!notesShown.length} emptyRows={2} head={[t('advisors.note'), t('advisors.time')]}>
           {notesPaged.slice.map(({ note, index }) => {
             const shown = openNotes.has(index); const time = noteTime(note.at);
             return <Row key={index} testId={`advisor-note-${index}`}>
@@ -259,8 +259,8 @@ export function AdvisorsPanel({ controller, setup, connected, selected, inert, r
     </ViewSection>
     <ViewSection sectionKey="advisors-roster" title={t('advisors.title')} status={advisorCount(state)} bodyClassName="ui-flush"
       actions={<>
-        <SectionRefresh testId="advisors-reload" disabled={locked} onClick={() => { void reload(); }} label={t('agents.reload')} />
         <button type="button" className="btn small" data-testid="advisor-new" disabled={!canSave || !!editor || deleting !== null} onClick={() => { setError(''); setEditor({ index: -1, entry: { name: '' }, keepDefault: state?.implicitDefault === true && !document?.advisors.length }); }}><Icon name="plus" size={12} />{t('advisors.new')}</button>
+        <SectionRefresh testId="advisors-reload" disabled={locked} onClick={() => { void reload(); }} />
       </>}>
       {state?.supported === false && <p className="ui-note" role="alert">{t('advisors.unsupported')}</p>}
       {error && <div className="ui-note advisor-error" role="alert" data-testid="advisors-error"><span>{revealControls(error)}</span>{conflict && <button type="button" className="btn small subtle" data-testid="advisors-conflict-reload" disabled={locked} onClick={() => { void reload(); }}><Icon name="restart" size={12} />{t('agents.reload')}</button>}</div>}
@@ -303,7 +303,7 @@ export function AdvisorsPanel({ controller, setup, connected, selected, inert, r
       </div>)}
     </ViewSection>
     {document && <ViewSection sectionKey="advisors-shared" title={t('advisors.sharedInstructions')} bodyClassName="ui-flush" actions={<Badge tone={scope === 'project' ? 'accent' : 'neutral'}>{t(scope === 'user' ? 'advisors.scope.user' : 'advisors.scope.project')}</Badge>}>
-      <Form className="advisor-shared">
+      <Form>
         <Field label={t('advisors.instructions')}>{id => <textarea id={id} data-testid="advisors-shared-instructions" rows={4} maxLength={16000} disabled={locked} value={sharedInstructions} onChange={event => setSharedInstructions(event.target.value)} />}</Field>
         <div className="ui-field-row">
           <Field label={t('advisors.sharedNotes')}>{id => <input id={id} data-testid="advisors-shared-notes" type="number" min={1} max={32} step={1} disabled={locked} value={sharedNotes} onChange={event => setSharedNotes(event.target.value)} />}</Field>

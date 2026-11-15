@@ -25,6 +25,7 @@ This is the contract between the chat page and the host.
 - The host keeps a bounded log of the current session's transcript: the `chat/*` messages, reset by `session/new`.
 - After every `ui/ready` the host sends `chat/replayBegin`, that log and `chat/replayEnd`.
   A reloaded page therefore shows the conversation again.
+- After every `ui/ready` the host also sends the state messages outside the transcript again (setup, tools, skills, MCP, agents and the work states), also when the same page reloads on its existing channel.
 
 ### Inbound limits
 
@@ -155,6 +156,28 @@ Payload: `{ requestId, action: "set", live?, bookmarks? }`.
 - The page renders only acknowledged values, and reports failed delivery or a missing reply.
 - Before forwarding authoritative `session/info` to the page, the VS channel passes `workingDirectory`, `sessionId`, and `isStreaming` to the editor follow service on the UI thread.
 - Session switches do not issue an extra model request or unconditionally erase other sessions' records.
+
+## Draft-only voice input
+
+### `dictation/set`, `dictation/reply`
+
+- UI → host: `{ requestId, on }`. Each request has a fresh, nonblank ID of at most 128 characters. For `on: true`, that ID is also the engine capture ID.
+- Host → UI: `{ requestId, ok, error? }`. A successful start reply means startup was requested, not that the microphone is ready.
+- The host dispatches `dictation_start { captureId }` and `dictation_stop` outside the chat command queue; speech never creates a prompt.
+- Repeated stops for one capture issue only one engine stop. Cancelling preparation is not a startup failure. The engine stop waits up to 120 seconds for its final text.
+- With an ACP conversation selected there is no engine dictation: `on: false` is ignored without an error, and `on: true` is answered with a failed `dictation/reply`.
+
+### `dictation/state`
+
+Host → UI: `{ state: \"idle\"|\"starting\"|\"recording\"|\"transcribing\", captureId, text, error? }`.
+`captureId` is null before the first capture; idle retains the last capture's final text/error. `text` is the entire cumulative preview, bounded to 24,000 characters, not a delta.
+
+- The page anchors the draft/selection at the start request, so a terminal state batched with startup still applies once.
+- It replaces only that capture's span and restores selection after React commits the textarea value, not in a speculative animation frame.
+- A different conversation, replacement draft, stale capture, or replayed terminal state must not receive/duplicate speech. Host frames also match their originating engine connection.
+- Capture locks typing/sending. Escape or the configured send key stops capture without sending the draft.
+- Leaving Chat, hiding the page/control/window, UI detachment, or engine shutdown ends capture. Startup cancellation preserves the original selection and draft.
+- Recognition uses the native default microphone and local STT; WebView microphone permissions are not enabled.
 
 ## Structured case feedback
 
@@ -565,6 +588,8 @@ It comes from the code editor's POMP menu: explain, review, ask, add file, and "
 
 - Exactly one answer per `session/new`.
 - The page clears its transcript only on `completed`. Otherwise it shows `message`.
+- A fresh `session/new` is confirmed only after the engine settles and reports a different session id; a reused known session-file path is also rejected. An unconfirmed result preserves the old transcript.
+- The page latches new/switch requests synchronously, including the interval before React renders. Unrelated engine errors cannot release a pending request; its correlated result or disconnection does.
 - `cancelled`: an omp extension vetoed it.
 - A non-null `requestId` that is not the page's pending `session/new` is ignored: late, duplicate or abandoned.
 - An absent/null id keeps the legacy meaning: a new session started outside the page, for example by a VS command.
@@ -653,9 +678,10 @@ A host-level error not tied to a turn. It is sent when:
 | `session/history` | `{ requestId, action }` plus action fields | Session list, switch, preview, rename, compact; see "Sessions". |
 | `agents/command` | see [`agents/command`](#agentscommand) | Agent role and team management; see "Agents and teams". |
 | `computer/set` | `{ requestId, desktop }` | Switch computer use of this conversation on or off. |
-| `workspace/agentPlan` | `{ requestId, sessionId, base: [{ name, tasks: [{ content, status, blocker? }] }], phases }` | Replace the agent work plan. |
-| `workspace/agentPlanPage` | `{ requestId, sessionId, page, size, query? }` | Read one page of the whole plan. |
+| `workspace/agentPlan` | `{ requestId, root, sessionId, base: [{ name, tasks: [{ content, status }] }], phases }` | Replace the selected conversation's agent work plan. |
+| `workspace/agentPlanPage` | `{ requestId, root, sessionId, page, size, query? }` | Read one page of that conversation's whole plan. |
 | `workspace/agentPlanEdit` | see [`workspace/agentPlanEdit`](#workspaceagentplanedit) | One change to the whole plan. |
+| `workspace/agentPlanAction` | `{ requestId, root, sessionId, action: "continue"\|"run"\|"stop", task?, marked? }` | Continue, run a task, or stop the selected plan's engine without selecting its chat. |
 
 ### Message details
 
@@ -691,7 +717,7 @@ Payload:
 **Targets**
 
 - `team` is an optional team id. When set, the message is dispatched to that team through `/pomp-team`.
-- `agent` is a role name. It makes the message a new assignment run by exactly that agent (`/pomp-agent`).
+- `agent` is a role name. A message with a team or agent target other than the sending tab's own partner is not run by the sending conversation: the host delivers it to that partner's own tab (opened in the background if needed) as an ordinary message, and the sender gets `chat/relaySent`, `chat/relayStatus` and `chat/relayResult` (below). A first token that is a known slash command is refused with `queue_rejected`.
 - `agentInstance` is a running subagent id from this conversation's `workspace/backgroundState` jobs.
 - `agentInstance` sends the message through omp `steer_subagent`, not a main-model relay; the child may reject it, particularly with native Codex in-flight restrictions.
 - At most one of `team`/`agent`/`agentInstance` may be set.
@@ -752,14 +778,15 @@ Payload:
 
 - The host saves the option Tools > Options > Pomp > General > Agent > Approval mode.
 - When the mode changed, the host restarts omp with the new `--approval-mode`.
-- Refused while a reply is in progress.
+- Refused while a reply is in progress, in the shown conversation or in any other conversation tab (the change restarts every engine).
 - Refused when the host cannot write settings.
 - Answered by `permission/modeResult`.
 - The host's own gate applies the mode at once.
 - `write` answers file, project, breakpoint and bookmark changes of VS tools without asking.
 - Under `write`, process runs, tests, debugger, Git and package changes still ask.
-- `yolo` answers everything except omp's forced prompts: a `Reason:` line and provider safety checks.
-- omp's computer and browser helpers always ask, also under `yolo`.
+- `yolo` answers everything, including omp's forced prompts (a `Reason:` line), except omp's computer and browser helpers.
+- omp's computer and browser helpers always ask, also under `yolo`; so do their provider safety checks.
+- Under `write` and `alwaysAsk`, forced prompts always ask; remembered rules never answer them.
 
 #### `permission/respond`
 
@@ -843,11 +870,11 @@ Payload:
 ```
 { requestId, ok, error?, revision, editable, editableWhileWorking, page, size, total, completedCount,
   phases: [{ index, name, taskCount }],
-  rows: [{ phase, task, content, status, blocker? }] }
+  rows: [{ phase, task, content, status }] }
 ```
 
 - `phase`/`task` index the whole plan.
-- `query` filters task content, blocker and phase name.
+- `query` filters task content and phase name.
 - `total` counts the matches; `completedCount` counts the `completed` tasks of the whole plan.
 - `page` is clamped.
 
@@ -856,24 +883,33 @@ Payload:
 Payload:
 
 ```
-{ requestId, sessionId, revision,
-  op: "addTask"|"updateTask"|"deleteTask"|"addPhase"|"renamePhase"|"deletePhase"|"clearCompleted"|"moveTask"|"startTask",
-  phase?, task?, toPhase?, toTask?, name?, content?, status?, blocker? }
+{ requestId, root, sessionId, revision,
+  op: "addTask"|"updateTask"|"deleteTask"|"addPhase"|"clearCompleted"|"moveTask"|"startTask",
+  phase?, task?, toPhase?, toTask?, name?, content?, status? }
 ```
 
 - Refused unless `revision` is the plan omp holds now.
 - Answered by `workspace/agentPlanResult`.
 - See "Agent work plan editing".
 
+#### `workspace/agentPlanAction`
+
+- `root` and `sessionId` select a live conversation engine; no fallback to the foreground chat.
+- `continue` sends the existing continuation instruction to that engine. `run` sends `task` with the run instruction; `marked: true` means an idle `startTask` edit has already succeeded.
+- Model requests use that engine's normal queue and omit the foreground editor context. `stop` pauses that engine's queue and aborts only its work.
+- Answered by `workspace/agentPlanResult` `{ requestId, ok, error? }`. Acceptance can mean queued, not completed.
+- Plan commands never change the selected chat. Replies go directly to the requesting page even while the selected engine's chat UI is detached. Replies from a previous workspace/page are discarded.
+- The plan selector sits in the card header above its action buttons, without a visible label but with an accessible name. It stays usable while actions are pending. Busy Continue queues normally. Stop supersedes a pending action and retires pending start-task callbacks; late replies cannot restart work.
+
 ### Agent work plan editing
 
 **Guards**
 
-- The host handles `workspace/agentPlan` in order with the chat commands.
+- The conversation host routes all plan requests by required `root` and `sessionId`. Edits and run/continue actions use the owning engine's serial command queue; stop uses its normal immediate queue-pause path.
 - So no prompt starts between its checks and the edit.
 - Refused while any of these is active: a turn, an engine run, background work, a host tool, an approval/question, an unpaused queue item.
 - Refused while the conversation is recovering or switching.
-- Refused when `sessionId` is not the current conversation.
+- Refused when the workspace differs, the requested engine is unavailable, or its current `sessionId` has changed. The foreground conversation does not need to match.
 
 **`base`**
 
@@ -881,42 +917,42 @@ Payload:
 - The host re-reads it with `get_state` just before the edit.
 - Otherwise the edit is refused and nothing changes.
 - These plans are not editable through `workspace/agentPlan`:
-  - a plan beyond the display limits: 20 phases, 200 tasks, names ≤ 200, content ≤ 600, blocker ≤ 300 characters;
+  - a plan beyond the display limits: 20 phases, 200 tasks, names ≤ 200, content ≤ 600 characters;
   - a plan with control characters;
   - a plan with an unknown status.
 
 **`phases`**
 
-- Statuses: `pending`, `in_progress`, `completed`, `blocked`, `abandoned`.
+- Tasks contain only `content` and `status`. Statuses: `pending`, `in_progress`, `completed`, `abandoned`.
 - Name and content must be non-blank and one line.
 - Each phase needs at least one task.
-- An empty blocker is dropped.
 - omp (18.4.3 through 18.12.1) does not validate `set_todos`, so the host does.
 
 **Paged editing in the Work tab**
 
-- The Work tab shows the whole plan page by page.
-- `session/info` carries `planTaskCount`, `planOpenCount` and `planRevision` next to `todoPhases`.
+- The Work tab selects a plan independently of the foreground chat and shows its whole plan page by page.
+- `conversation/tabsState.plans` carries identity, readiness, activity, `planTaskCount`, `planOpenCount` and `planRevision` for all live conversation engines in the current workspace, including empty plans. Closed/replaced engines are removed. Background updates refresh these summaries without selecting their chat.
+- `session/info` still carries these plan counts, revision and `todoPhases` for the foreground conversation.
 - `planRevision` is a hash of the whole plan.
 - `todoPhases` holds the first 20 phases / 200 tasks.
 - The page asks `workspace/agentPlanPage` again whenever the revision changes.
 - Each row is edited or deleted with `workspace/agentPlanEdit`, under the same guards as above, except while the agent works:
   - `editable` says the guards above pass; `editableWhileWorking` says only the conversation and the connection are right.
-  - While a turn, a tool, an approval/question or background work is active, or queued messages are about to run, an edit is taken only when it leaves the task in progress alone: changing, deleting or moving a task that is not in progress, adding a task, adding or renaming a phase, clearing the completed tasks. No edit may set `in_progress` (so `startTask` is refused). A phase holding the task in progress is not deleted.
+  - While a turn, a tool, an approval/question or background work is active, or queued messages are about to run, an edit is taken only when it leaves the task in progress alone: changing, deleting or moving a task that is not in progress, adding a task (or its initial internal phase), clearing completed tasks. No edit may set `in_progress` (so `startTask` is refused).
   - The reason: the model names its tasks by their text in its todo calls; the task it works on must stay as it knows it.
   - The host reads the plan once more just before `set_todos` and refuses the edit when the model changed it meanwhile.
   - The page asks for the page again when the work starts or ends, so both flags are current.
 - After every saved edit the host sends `/pomp-plan-note` (extension `plan-edits.ts`) with the change in words. The model gets it once: with its next tool result while it works, else before its next run. It says the plan as it is now is the user's, so the model does not write back the plan it remembers.
-- Tasks and phases are added, and phases renamed or deleted, the same way.
+- The UI shows one task list with content/status editing, not a phase-management tab. New tasks append to the final existing group; an empty plan uses `addPhase` to create its first localized Tasks group. Engine phase indexes remain internal to task editing and reordering.
 - There is no limit on the number of phases or tasks.
-- Text limits still apply: names ≤ 200, content ≤ 600, blocker ≤ 300 characters.
+- Text limits still apply: names ≤ 200, content ≤ 600 characters.
 - Only a plan whose `set_todos` frame would exceed about 1 MiB is refused.
 - Deleting the last task of a phase removes the phase.
 - `clearCompleted` (no `phase`/`task`) removes every `completed` task of the whole plan, and each phase it leaves empty; it is refused when there is none. The page result's `completedCount` counts them over the whole plan (not only the query's matches), so the UI disables the button at 0.
 - `moveTask` takes the task at `phase`/`task` out and inserts it at index `toTask` of phase `toPhase` (`toTask` counts the destination's tasks once the task has left; `toTask` equal to that count appends). The same place is refused as "Nothing to change". A phase the move leaves empty is removed. The note tells the model the new place and that the plan's order is the order to work in.
-- Order matters to omp, not to POMP: omp's `todo` tool starts the earliest `pending` task in plan order whenever a mutation leaves no task `in_progress`, keeps only the earliest of several `in_progress` tasks, and never starts a `blocked` one (omp 18.12.1 `src/tools/todo.ts`; `set_todos` itself stores the plan as given). Moving a pending task ahead therefore changes what the agent does next.
-- `startTask` makes the task at `phase`/`task` the task in progress, like the todo tool's `start`: every other `in_progress` task goes back to `pending`, and the task's blocker is dropped. A `completed` task is refused. It is idle-only. While idle, the Work tab's per-row run button sends it and, once it is saved, sends an ordinary `chat/send` that asks for that task.
-- While the agent works, the run button sends no plan edit: the plan must not change under the running turn. It sends only an ordinary `chat/send`, which the host queues like any message sent while busy (`chat/queued`, `chat/queueState`), asking the agent to switch to the task once the current step is done and to mark it `in_progress` itself with the todo tool's `start` (which takes a task of any status by its text). The item can be sent into the running turn with the queue's Send now (`chat/queue` `steer`), like any other queued message. The button is disabled on `completed` tasks and, while the agent works, on the task in progress.
+- Order matters to omp, not to POMP: omp's `todo` tool starts the earliest `pending` task in plan order whenever a mutation leaves no task `in_progress` and keeps only the earliest of several `in_progress` tasks (`set_todos` itself stores the plan as given). Moving a pending task ahead therefore changes what the agent does next.
+- `startTask` makes the task at `phase`/`task` the task in progress, like the todo tool's `start`: every other `in_progress` task goes back to `pending`. A `completed` task is refused. It is idle-only. While idle, the Work tab's per-row run button sends it and, once it is saved, sends `workspace/agentPlanAction` with `action: "run"`, the task text and `marked: true` to the same owner.
+- While the selected agent works, the run button sends no plan edit: the plan must not change under the running turn. It sends `workspace/agentPlanAction` with `action: "run"` and `marked: false`. The host queues it on that engine like any busy chat message, asking the agent to switch to the task after the current step and mark it `in_progress` with its todo tool. That conversation's queue still supports Send now (`chat/queue` `steer`). The button is disabled on `completed` tasks and, while that agent works, on the task in progress.
 - An empty plan takes edits without a revision.
 
 **Persistence**
@@ -941,21 +977,21 @@ Each open chat tab owns a separate omp process and conversation: the Default (PO
 |---|---|---|
 | `conversation/tab` | UI → host | `{ requestId, action: "open"\|"activate"\|"close", partner?: { kind: "agent"\|"team", id }, sessionId? }` |
 | `conversation/tabReply` | host → UI | `{ requestId, ok, error? }`: only for `close` of a tab that is not the current conversation. |
-| `conversation/tabsState` | host → UI | `{ sessionId?, partner: { kind, id? }, title?, message?, main?, mainRunning?, pendingAction?, pendingRequestId?, pendingPartner?, pendingSessionId?, tabs: [{ sessionId, partner, title?, isRunning? }] }` |
+| `conversation/tabsState` | host → UI | `{ root, sessionId?, partner: { kind, id? }, title?, message?, main?, mainRunning?, pendingAction?, pendingRequestId?, pendingPartner?, pendingSessionId?, tabs: [{ sessionId, partner, title?, isRunning? }], plans: [{ sessionId, title, partner, ready, isStreaming, hasPendingAsyncWork, planTaskCount, planOpenCount, planRevision? }] }` |
 
 **Actions**
 
 - `open` with `partner`: switches to that partner's open tab. With no open tab, it switches to the partner's most recently changed conversation (the list's newest), or starts a new, empty conversation for it (`new_session`) when it has none. A partner never has two open tabs.
 - `activate` with `sessionId`: switches to that open tab's conversation. Without `sessionId`: the Default tab's conversation (`main`), or a new POMP conversation when it has none.
 - `close` with `sessionId`: closes the tab; the conversation stays in the conversation list. Closing the current tab then activates the Default tab.
-- `session/new` makes a new conversation in the current tab: a new agent or team conversation in that tab (a POMP conversation in the Default tab, or when the role or team no longer exists). Deleting the current conversation does the same.
+- `session/new` makes a new conversation in the current tab: a new agent or team conversation in that tab (a POMP conversation in the Default tab, or when the role or team no longer exists). Deleting the current conversation does the same unless it is already empty and unnamed.
 - A `session/history` `switch` to a listed agent or team conversation makes it the current conversation of that partner's tab; the tab keeps its place and the conversation it had stays listed. A POMP conversation becomes the Default tab's.
 - A tab whose conversation the engine never wrote (no message was sent) starts a new conversation for its partner instead of switching.
 - `open`, `activate` and `close` of the current tab answer with exactly one `session/newResult { requestId, status, message? }`;
   switching replays that tab's transcript. Other tabs keep responding and awaiting approvals independently.
   A close of a running tab explicitly stops its engine after confirmation. Opening an inactive tab may take time to start or restore its engine,
   but never waits for the current tab's turn. A second tab switch while one is starting is refused by the page.
-  `session/new` and history switches **within the same tab** still wait for that tab's busy engine to settle.
+  `session/new` and history switches **within the same tab** wait for full engine settlement (`isSettled`), including admitted or scheduled work after the visible turn ends. Deferred changes recheck state even without a settlement event.
 
 **State**
 
@@ -965,13 +1001,25 @@ Each open chat tab owns a separate omp process and conversation: the Default (PO
 - `message`: a team conversation's note that its previous members are gone.
 - `mainRunning` and `tabs[].isRunning` report each open tab's own active work. `pendingAction`, `pendingRequestId`,
   `pendingPartner` and `pendingSessionId` describe same-tab new/history changes that wait for the current engine.
+- Drafts and attachments stay with their conversation tab. Early tab metadata cannot move a draft before the matching session snapshot; changing workspaces clears the previous workspace's drafts and pending work.
+- A workspace replacement binds to the UI page attached when startup commits, including a page opened or reloaded during engine startup.
 
 **Routing**
 
 - With no explicit `team`, `agent`, `agentInstance` or `main`, `chat/send` uses the current conversation's partner.
-- An agent conversation sends the message as typed: the engine extension (`extensions/partner.ts`) gives that conversation the role's instructions, model, thinking level and tools. No `/pomp-agent` and no subagent.
+- An agent conversation sends the message as typed: the engine extension (`extensions/partner.ts`) gives that conversation the role's instructions, model, thinking level and tools. No subagent. A relayed message from another tab is handled the same way.
 - A team conversation sends every message with `/pomp-team`, as before, inside its own conversation.
-- A one-message target (the composer's send-target chip) overrides the partner for that message.
+- A one-message target (the composer's send-target chip) is relayed to that partner's tab; it never runs in the sending conversation.
+
+**Relayed sends**
+
+- `chat/relaySent { relayId, clientMessageId?, text, attachments?, target, status, detail?, sessionId? }` shows the sent message with its recipient. `status` is `sending`, `delivered`, `working` or `waiting`.
+- `chat/relayStatus { relayId, status, detail?, sessionId? }` updates it; `waiting` means the recipient tab has a pending approval or question or a paused queue.
+- `chat/relayResult { relayId, target, status: "done"|"failed"|"stopped", text?, truncated?, error?, sessionId? }` is sent once when the recipient's turn ends: the final answer only, at most 8,000 characters.
+- All three are transcript messages (logged, replayed on `ui/ready`). They are stored in the sending conversation as engine custom messages `pomp-relay` and restored when it is opened again. A result whose sending conversation is not shown waits in memory for this Visual Studio session.
+- `conversation/tabsState` carries `tabs[].waiting` and `mainWaiting` for tabs with a pending approval or question.
+- Event rules `team.completed` and `agent.completed` fire in the sending conversation when the relay ends.
+- User sends and steering are bound to the session and engine connection present at receipt. A command delayed across a conversation change is rejected, never redirected to the replacement conversation.
 
 **Persistence**
 
@@ -979,6 +1027,7 @@ Each open chat tab owns a separate omp process and conversation: the Default (PO
 - A conversation that is not listed is a POMP conversation. The engine extension reads the partners from this file.
 - There is no entry count limit. Past 1 MiB, closed conversations listed first are removed first. Damaged files reset with a log warning.
 - Session-list `entries[].partner` is `{ kind, id }` for an agent or team conversation, or `null` for a POMP conversation. The page lists only the entries whose partner is the current tab's.
+- Reconnection restores picker-selected model/thinking settings even when the engine already reopened the correct session. Interrupted or failed initial transcript loading remains retryable rather than being marked complete.
 
 ### Host command queue
 
@@ -1008,6 +1057,7 @@ Each open chat tab owns a separate omp process and conversation: the Default (PO
 - `clear` removes all items but does not implicitly resume a paused queue.
 - `steer` (the item's 지금 보내기 / Send now button) takes the item out of the queue and steers it into the running agent, see "Steering".
   With nothing running it is sent at once as an ordinary message, also from a paused queue.
+  When there is nothing to steer but the engine has not settled (only background work is still running), the item stays in the queue as its first item.
   `canSteer` is false for an item with a chosen recipient (team, agent or running member) or a slash command; the host refuses `steer` for it.
   When the steer fails, the item goes back to the front of the queue.
 
@@ -1017,7 +1067,9 @@ Each open chat tab owns a separate omp process and conversation: the Default (PO
 - It retains typed text, attachments, editor-context choice and captured routing target.
 - Agent-partner continuation is resolved at dispatch.
 - So successive queued messages can continue the remembered instance.
-- Normal completion dispatches the first item through normal `chat/send` handling, with a fresh client message id.
+- Normal completion dispatches the first item through normal `chat/send` handling, with a fresh client message id, only after full engine settlement (`prompt_result.sessionSettled` or a current `get_state.isSettled`).
+- A completed prompt or stopped stream alone does not release ordinary input: background, admitted, engine-queued or scheduled work must also finish. Ordinary queued messages do not join that work as steering or follow-ups.
+- State snapshots predating prompt admission/completion or streaming lifecycle events cannot clear newer activity. After the tracked prompt ends, an unpaused queue rechecks state once per second even when the last snapshot still says `isStreaming: true`: a background continuation can yield nonterminally and its remaining work can drain without a `session_settled` event. The cached streaming bit must not stop polling; only confirmed full settlement releases the next item, and a user-paused queue stays paused.
 
 **Pausing**
 
@@ -1034,13 +1086,14 @@ Each open chat tab owns a separate omp process and conversation: the Default (PO
 - There is no item count limit.
 - Each text must fit the normal prompt frame limit.
 - The complete queue state has a 1,800 KiB UTF-8 budget, to fit the outbound envelope.
-- Rejection is a host `error` with `code: "queue_rejected"`, `retryable: false`.
+- Rejection is a host `error` with `code: "queue_rejected"`, `retryable: false`, and `clientMessageId` when known. The page restores only that pending input; a late rejection cannot remove a newer conversation's submission.
 - On rejection no turn starts.
+- A `chat/send` that arrives while a changed permission mode is being applied (the engine is about to restart) is rejected the same way; an item that is already queued stays queued.
 
 ### Steering
 
-For non-Codex models, a steer is a message for the agent that is working now. omp delivers it at the agent's next step (`steer`,
-interrupt mode `immediate`); the running turn goes on with it and ends as usual.
+A steer is a message for the agent that is working now, including native Codex (`openai-codex-responses`). The host sends RPC `steer`, not another `prompt`.
+omp delivers it in flight when the model and transport support live steering, otherwise at the next supported step of the current agent run (interrupt mode `immediate`). The running turn continues with it.
 
 - `/steer <text>` (page command, also accepted as `/stear <text>`) and the queue's `steer` action send one. Without text (and without attachments) `/steer` is refused with a chat warning.
 - A queued `/steer` or `/stear` wrapper remains steerable; the host removes the command prefix before delivery. Other engine slash commands remain ineligible.
@@ -1050,9 +1103,9 @@ interrupt mode `immediate`); the running turn goes on with it and ends as usual.
   text. It goes to this conversation itself: a message with a chosen recipient or a slash command is sent normally instead.
 - On the chat command queue, right before the command, the host checks under its state lock that a turn is open or omp is streaming
   and that Stop has not been pressed since. If not, the message is an ordinary send (queued while busy, like `chat/send`).
-- A non-Codex steer never registers a turn: no `chat/turnStarted`, no `chat/turnEnd`, no second prompt id.
-- For native Codex (`openai-codex-responses`), omp rejects stateful in-flight steering. The host instead admits `/steer` or Send now to its own queue as the next independent turn; this is not an immediate edit to the running model's context.
-- After omp accepts a non-Codex steer, `chat/steered` shows the user's bubble where it was sent, marked 작업 중 전달 / Steered. `chat/steered` is part
+- A steer never registers an independent host turn: no `chat/turnStarted`, no `chat/turnEnd`, no second host prompt id.
+- Provider selection does not turn explicit steering into an ordinary queued request. Admission confirms the engine accepted the message, not that the remote provider has consumed it; provider failures can still surface during the run.
+- After omp accepts a steer, `chat/steered` shows the user's bubble where it was sent, marked 작업 중 전달 / Steered. `chat/steered` is part
   of the replayed transcript. After a conversation switch, the restored transcript shows the steered message once, as a user message
   of its own.
 - When the run ended before omp took the steer, the host takes it back with `remove_queued_message` (queue `steering`) and sends it
@@ -1064,8 +1117,8 @@ interrupt mode `immediate`); the running turn goes on with it and ends as usual.
   that many steered bubbles of the run 전달 안 됨 / Not delivered (omp delivers steers in order, so the ones it still held are the newest).
 - Failures (omp refused it, too large, connection lost) are a `chat/notice`; nothing is resent.
 Messages targeting an existing `agentInstance` use omp `steer_subagent` directly, not a main-model relay. `chat/subagentAccepted`
-confirms the child RPC took the message, not its completion; a refused message has a paired failed turn. The bundled RPC steers the
-child as an in-flight message, so a native Codex child may still reject it: omp does not expose a follow-up mode for that command.
+confirms child admission, not completion; a refused message has a paired failed turn. A running child receives steering at a supported step;
+between turns, the message starts a new child turn. Codex children use the same provider capability and recovery rules, not a blanket rejection of steering.
 
 ### Side questions (/btw)
 
@@ -1173,7 +1226,7 @@ child as an in-flight message, so a native Codex child may still reject it: omp 
 - Conversation settings hold the tools to use and the screen-input control.
 - A skill row's **채팅에서 사용** action puts the command into the chat input. It does not send it.
 - Rules are ordered **지금 적용 중 → 규칙**. The first section holds the rules that apply to the next prompt.
-- MCP is ordered **MCP 서버 → 추가할 수 있는 서버**. The second section is the catalog.
+- MCP is ordered **Antigravity · POMP 도구 → MCP 서버 → 추가할 수 있는 서버**. The first section configures an external official client; the last is the native server catalog.
 - The code search index handles lexical refresh automatically.
 - It also rebuilds or stops the vector index automatically when the local embedding option changes.
 - Sub-screen chips show the item count. A count of 0 is dimmed but still clickable.
@@ -1193,7 +1246,7 @@ child as an in-flight message, so a native Codex child may still reject it: omp 
 - Commands use the host serial queue shared with chat submissions.
 - Tool selection is refused while any of these is active: a reply, an inline request, a pending approval or question,
   or an uncertain session switch.
-- Skill and MCP changes are refused in the same situations. Metadata refresh is still allowed.
+- Native skill and MCP changes are refused in the same situations. Metadata refresh is still allowed. Independent Antigravity setup is allowed while streaming or before engine/provider login, without restarting the engine.
 - A change that arrives while busy is refused. It does not wait for idle and then apply silently.
 
 ### Main-conversation tools
@@ -1338,7 +1391,7 @@ What a chosen file brings:
 
 Name and checks:
 
-- The name is the frontmatter `name`, else the folder name (`SKILL.md`) or the file name.
+- The name is the frontmatter `name`, else the folder name (`SKILL.md`) or the file name. A frontmatter name that does not match the pattern below is ignored in favour of the folder or file name; it never becomes part of a path.
 - It must match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`.
 - The `SKILL.md` text must be UTF-8 of at most 32 KiB with a nonempty body.
 - A readable frontmatter needs a nonempty `description`.
@@ -1623,6 +1676,8 @@ savePolicy { policy: { requireReviewedEdits, requireSandbox,
 - It uses the same guards as a new saved task, but the run is not paused.
 - The run starts with discovery when steps are given, otherwise with planning.
 - It sends no model request.
+- A run belongs to the conversation tab whose engine started it. The Default tab keeps its unfinished run in `.pomp/local/composer-workflows.json`; an agent or team tab keeps its own in `.pomp/local/composer-workflows-<hash>.json`. Another tab's engine never shows, blocks on, resumes or cancels it.
+- Inside one tab, a run left behind by a new conversation is published as paused with its own `sessionId`; the page offers Resume and Cancel for it and disables editing.
 - `agents/command` `openRole { scope, name }` opens a project or user role file in the VS editor.
   It is used for a role file the form cannot edit.
 
@@ -1647,20 +1702,46 @@ savePolicy { policy: { requireReviewedEdits, requireSandbox,
 
 | type | payload | meaning |
 | --- | --- | --- |
-| `mcp/state` | `{ servers, restartRequired, message? }` | Native writable MCP server definitions. |
-| `mcp/command` | see below | Manage, switch, test or restart MCP servers. |
+| `mcp/state` | `{ servers, restartRequired, message?, antigravity? }` | Native writable definitions and separate external-client setup status. |
+| `mcp/command` | see below | Manage native MCP servers or configure Antigravity's use of POMP tools. |
 | `mcp/reply` | `{ requestId, ok, error?, output? }` | Result of one `mcp/command`. |
 
 ```
 mcp/state:   { servers: [{ name, scope: "project"|"user", type: "stdio"|"http"|"sse",
                            command?, args?, env?: { [name]: "••••" }, url?,
                            enabled, error?, hash? }],
-               restartRequired, message? }
-mcp/command: { requestId, action: "refresh"|"save"|"delete"|"enable"|"disable"|"test"|"restart",
+               restartRequired, message?, antigravity? }
+mcp/command: { requestId, action: "refresh"|"save"|"delete"|"enable"|"disable"|"test"|"restart"|"antigravity-refresh"|"antigravity-setup",
                scope?, name?, server?, expectedHash? }
 ```
 
-**Listing and paths**
+**External Antigravity setup**
+
+- `antigravity` contains `{ installed, configured, canConfigure, applicationPath?, configPath?, workspaceRoot?, serverName?, configHash?, message? }`.
+- `antigravity-refresh` probes the official desktop app or `agy` CLI, the actual IDE workspace, the verified bundled engine and the shared `~/.gemini/config/mcp_config.json`. It never starts an application or reads OAuth credentials.
+- `antigravity-setup` sends `name: serverName` and `expectedHash: configHash` from that snapshot. The host re-resolves the actual workspace, rejects stale identity/revision or foreign entries, and atomically merges only that workspace's `pomp_<hash>` server. Empty config files are accepted; malformed/duplicate-key files remain unchanged.
+- Other servers, unknown fields and existing user controls are preserved. An identical setup is a byte-preserving no-op. The registered arguments are `mcp-server --cwd <workspace> --allow-write --allow-exec`; the UI discloses file/shell permissions and that cwd is not a sandbox.
+- These two actions bypass the inference command queue and engine-offline/busy gates, but retain UI inert/hidden/transition/pending guards. They do not set native `restartRequired`, restart the engine or alter provider settings.
+- Tools remains available before provider setup. The MCP section probes once when shown; it never automatically runs setup.
+- `configured` means the file matches the bundled command and arguments, not that the official client is logged in or connected. The client must reload MCP or restart as needed.
+
+**Official ACP conversation backend**
+
+- `conversation/backend { requestId, backend: "omp" | "antigravity-acp" }` selects an independent backend. `session/new` accepts the optional backend; absence preserves the selected backend. Existing native provider configuration is unchanged.
+- `backend/state { active, antigravity: { installed, canStart, executablePath?, workspaceRoot?, ompToolsAvailable, message? } }` precedes the selected child snapshot. Selection remains reachable before native login. An ACP authentication/startup failure keeps its owner selected so offered login methods remain accessible. The no-solution fallback folder is not a workspace for ACP (`canStart: false`); the backend the user last selected in a real workspace is selected again when a workspace returns. `message` is localized; the page derives its own wording from the flags.
+- `bridge/restart` with an ACP conversation selected reconnects that same conversation (`session/load` or `session/resume` with its id, never a new one); its queue stays paused. The page offers it as Reconnect after a startup failure or a CLI exit.
+- ACP image input is limited to 5 MiB of raw image bytes per prompt, and the encoded prompt size is checked before the turn is shown.
+- Public ACP conversation IDs are `antigravity-acp:<opaque agent ID>`. Only the unprefixed ID is sent to ACP. There is no fake native transcript file. Workspace metadata keeps ACP entries separate from the native main conversation.
+- `session/info.backend` and `capabilities` gate native UI, queue/steer/stop, images/editor context, plan read/edit/actions and history list/preview/resume/rename/delete/compact. Absent native capabilities preserve legacy behavior; absent ACP capabilities fail closed.
+- `acp/state { sessionId?, connected, authRequired, error?, authMethods, configOptions, permissions, commands?, ompTools? }` preserves official select groups/boolean options and opaque permission IDs/options. `ompTools.state: "configured"` confirms descriptor submission, not tool execution.
+- `acp/command { requestId, sessionId?, action: "set-config" | "permission" | "authenticate", configId?, value?, permissionRequestId?, optionId?, methodId? }` returns `acp/reply { requestId, ok, error? }`. Values must have been offered by the CLI; approvals require the exact selected session and still-pending request. Native remembered permission rules never authorize ACP requests.
+- The host launches only official `agy acp`, identifies as POMP, and passes the verified model-free OMP MCP descriptor to each new/load/resume operation. It does not change global MCP settings, extract OAuth tokens, automate a desktop, impersonate an IDE or invoke `agy -p`.
+- Ordinary busy sends remain local queue entries. Explicit steering sends additional `session/prompt` requests; all outstanding responses must settle before queue drain. `session/cancel` is a notification, not assumed completion. Stop cancels pending approvals, invalidates earlier admissions and pauses the queue. EOF/error never implicitly retries a prompt; failed preparation preserves queued input.
+- Transcript/tool/plan/config updates are scoped to the actual agent session ID. ACP drafts are keyed by backend plus conversation ID, including one-time null-ID startup migration. ACP plans are read-only and retain their own paging/search/stop scope even while another backend is selected.
+- History uses advertised list/load capabilities and host-issued workspace-bound IDs. Failed restoration reports a correlated history error and never silently creates a replacement. Current Antigravity ACP offers no delete/rename/compact API; tab close does not delete provider history.
+- Model names/configuration availability are not proof of authorized or successful inference. Live metadata verification and user-approved real-model verification are separate.
+
+**Listing and paths (native MCP management)**
 
 - Only native writable project and user definitions are listed.
 - There is no count limit.
@@ -1710,7 +1791,7 @@ mcp/command: { requestId, action: "refresh"|"save"|"delete"|"enable"|"disable"|"
 
 **Restart**
 
-- Any successful or partial edit sets `restartRequired`.
+- Any successful or partial edit sets `restartRequired`, also in the other running conversations of the window that use the same project or user file.
 - Stock RPC `/mcp reload` cannot reconnect the live session.
 - `restart` uses the normal host restart path and must actually reach running.
 - A successful new engine start clears the banner.
@@ -1734,6 +1815,8 @@ mcp/command: { requestId, action: "refresh"|"save"|"delete"|"enable"|"disable"|"
 - Skills can be switched off without deleting them.
 - `skills/state` rows carry `enabled`. Absent means on.
 - `skills/command` `enable` and `disable` take `name`. They work on any source, including engine and plugin rows.
+- `enable` is refused, and nothing is stored, when the user's omp configuration disables that skill.
+- A switch change also reaches the other running conversations of the window: their engine overlay is rewritten and their `skills/state` is published again.
 - `skills/command` `reset` takes `name` and clears the explicit on/off of that skill, back to its default.
 - `reset` on a skill without overrides is idempotent.
 - POMP keeps its own per-skill on/off overrides in its data folder.
@@ -1930,7 +2013,7 @@ The palette lists the plain name; the host sends the registered one.
 - A short name the user defined is kept; the POMP counterpart is then not listed under that name.
 - The registered names, such as `/pomp-workflow`, keep working when typed, and are not listed.
 - POMP's plumbing commands are never listed; typing them still sends them.
-  They include `pomp-tools`, `pomp-inline`, `pomp-stop`, `pomp-feedback-guard`, `pomp-agent`, `pomp-team` and `pomp-plan-note`.
+  They include `pomp-tools`, `pomp-inline`, `pomp-stop`, `pomp-feedback-guard`, `pomp-relay`, `pomp-team` and `pomp-plan-note`.
 - `/pomp-compact` no longer exists.
   - The engine's `compact` is dispatchable over RPC.
   - POMP's compaction hook (`session.compacting`) already adds the Visual Studio facts to every compaction.
@@ -2000,58 +2083,10 @@ It is typed; the palette lists it when the engine lists `pomp-plan`.
   It takes no arguments ("just plan it").
 - It is an engine-side filter, not an OS sandbox; the host's approvals and the project policy apply on top.
 
-## Automatic continuation
-
-Automatic continuation ("자동 계속", Work › 진행) sends the follow-up prompt of an active POMP Workflow by itself.
-
-- It runs up to six times.
-- It runs only after the user turned it on for that workflow.
-- Two limits end it, whichever is hit first: the six runs, and an optional **token budget**.
-
-| type | direction | payload |
-|---|---|---|
-| `workspace/composerAuto` | UI → host | `{ action: "status"\|"enable"\|"disable", requestId, root, sessionId, id, revision, tokenBudget? }` |
-| `workspace/composerAutoState` | host → UI | `{ root, sessionId, id, enabled, remaining, dispatching, message, requestId?, tokenBudget?, tokensUsed? }` |
-
-**`tokenBudget`**
-
-- `enable` takes `tokenBudget`, a whole number from 10,000 to 50,000,000.
-- Absent or empty means none.
-- A string of digits with thousands commas is accepted.
-- Anything else is refused with the reason in `message`; nothing is armed.
-- In the answer, `tokenBudget` and `tokensUsed` are present while armed with a budget.
-
-**What is counted**
-
-- The model calls of the conversation since the moment of enabling.
-- Per finished assistant message (`message_end`, `message.usage`): `input + output + cacheWrite`; cache reads are left out.
-- When a provider reports only `totalTokens`, that value is used.
-- This is the engine's own definition of the "tokens" of an agent run.
-- Reason: with prompt caching, every call reads the whole cached context again.
-  Summing cache reads says nothing about work done.
-- Subagent (member) runs are not counted.
-- Their progress metrics remain in `workspace/backgroundState`, linked to the chat task card.
-
-**When it stops**
-
-- While armed, the host looks at the budget on every tick, once a second.
-- A run that finished past the budget, or is still running past it, ends the continuation there.
-- The message is "Token budget (N) used up." (Korean "토큰 예산(N)을 모두 썼어요.").
-- A run is never started over budget.
-- A run that was planned just before the budget ran out is not current anymore and is dropped.
-- A running turn is not aborted.
-- The six-run cap still applies independently ("Six follow-up agent runs were used.").
-
-**Panel**
-
-- While the continuation is off, the panel shows a labelled "토큰 예산" field.
-- The page validates it too: an inline error, and nothing is sent.
-- While armed with a budget, the status reads "남은 실행 N회 · 토큰 x / y".
-
 ## Goal runs
 
 A **goal run** (`/goal <text>`) starts a POMP Workflow on the text.
-It arms automatic continuation for the workflow that start creates, optionally within a token budget.
+Only the user's explicit confirmation authorizes its goal-only runner, with at most six follow-up runs and an optional token budget. Ordinary chats and workflows do not start that runner.
 The count starts at the start of the goal; its first run belongs to the goal.
 
 | type | direction | payload |
@@ -2059,6 +2094,14 @@ The count starts at the start of the goal; its first run belongs to the goal.
 | `workspace/goal` | UI → host | `{ requestId, action: "start"\|"cancel", root?, sessionId?, text?, tokenBudget?, fromRequest? }` |
 | `workspace/goalState` | host → UI | `{ requestId, ok, stage: "started"\|"cancelled"\|"refused", error? }` |
 | `workspace/goalRequest` | host → UI | `{ requestId, root, sessionId, text, tokenBudget? }` |
+
+**Budget and follow-ups**
+
+- `tokenBudget` is an optional whole number from 10,000 to 50,000,000; digit strings with thousands commas are accepted. Invalid budgets are refused.
+- Usage starts before the initial goal prompt. Finished assistant messages contribute `input + output + cacheWrite`, excluding cache reads; `totalTokens` is used when the provider supplies only that total. Subagent usage is not included.
+- The runner checks once per second while a confirmed goal is pending or active. The six-follow-up cap and optional budget stop new dispatches, not an already-running turn.
+- Review waits, pause, cancellation, changed workflow identity, conversation changes and recovery guards remain enforced. There is no standalone continuation toggle, status panel or enable command.
+
 
 **The goal card**
 
@@ -2094,13 +2137,13 @@ The count starts at the start of the goal; its first run belongs to the goal.
 **Binding**
 
 - The first active workflow of this conversation that appears after the start, with a new id, is the bound one.
-- The goal arms automatic continuation for it: `tokenBudget`, six runs, the first follow-up as soon as the first run is over.
+- The goal-only runner binds to it: `tokenBudget`, at most six follow-ups, the first only after the initial turn is over.
 - Nothing is armed when:
   - no workflow appears within ten minutes;
   - the goal's turn ended without one;
   - the workflow is paused or belongs to another conversation.
-- In that case the reason is the state message and a chat notice.
-- These cancel a goal that is still waiting, like they end an armed continuation:
+- In that case the reason is reported as a chat notice.
+- These cancel a goal that is still waiting or running:
   a manual chat message, Stop, a conversation switch, a new conversation, an engine restart.
 
 **Model request: `request_goal_run`**
@@ -2173,7 +2216,7 @@ Word completion has no messages of its own: the page completes words locally whi
 | `messages` | `sessionId`, `cursor?` | A page (40) of the current session's user/assistant texts. |
 | `preview` | `id` | Read-only preview of any listed entry, without switching. |
 | `rename` | `name` | `set_session_name` on the current session. |
-| `delete` | `id` | Moves that listed session file to the Recycle Bin. |
+| `delete` | `root`, `id`, `sessionId` | Recycles the selected listed file only if its session identity still matches. |
 | `compact` | `instructions?` | omp `compact` of the current session. |
 
 **`switch`**
@@ -2199,10 +2242,11 @@ Word completion has no messages of its own: the page completes words locally whi
 
 **`delete`**
 
-- It moves that listed session file of this workspace, and its artifacts folder, to the Recycle Bin.
-- It is never a permanent delete.
-- The current conversation is replaced by a new one first. The engine keeps the current file open for appending, so the host
-  reads its header with shared access and measures the file again after leaving it, just before recycling.
+- The confirmation captures the selected row's opaque `id`, `sessionId` and workspace `root`, not its position or the current conversation.
+- The host checks the workspace, listed identity and actual file header before changing sessions or recycling. Missing or changed identities are refused; refreshing the list never retargets a pending confirmation.
+- It moves only that session file and its artifacts folder to the Recycle Bin, never permanently deletes them.
+- Deleting noncurrent history leaves the active conversation unchanged. An empty, unnamed current conversation is kept as-is (the UI disables its delete action); no replacement session is created.
+- Otherwise the current conversation is replaced by a new one first. The engine keeps its file open for appending, so the host reads the header with shared access and resolves the same selection again after leaving it, checking its identity and measuring the file again before recycling.
 - A finished subagent stays live (idle) for follow-up messages and keeps its transcript in the artifacts folder open until the
   engine parks it (`task.agentIdleTtlMs`, 7 minutes by default). So that a conversation can be recycled right after it is left,
   the omp extension (`conversation-leave.ts`) parks the leaving conversation's idle subagents when the main conversation switches
@@ -2722,7 +2766,7 @@ The page's own chords come from `host/hello.shortcuts`, set in Tools > Options >
 - **대기 중** (pending) holds proposals and isolated results.
 - **적용됨** (applied) holds apply records whose revert can be reviewed.
 - The chip counts pending items only.
-- Progress holds the plan, the workflow and automatic continuation.
+- Progress holds each connected conversation's task plan and the workflow. The plan selector is inside its card; phase-management and standalone continuation controls are not exposed.
 - The interactive terminal card at the bottom shows only when both the option and engine support are present.
 - The bundled engine does not support it.
 - An approved command job attaches to its tool card in the chat via `origin.sessionId` and `origin.toolCallId`.

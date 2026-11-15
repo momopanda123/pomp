@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react';
-import { useLocale } from '../../i18n';
-import { toolsTranslate, type ToolsTranslate } from '../../i18n/toolsStrings';
+import { useT } from '../../i18n';
+import type { ToolsTranslate } from '../../i18n/toolsStrings';
 import type { ConversationTool } from '../../toolsProtocol';
 import type { ToolsController } from '../../toolsState';
 import { Icon } from '../Icon';
@@ -55,10 +55,10 @@ function ToolGroup({ id, label, entries, selected, disabled, t, onChange }: {
     </div>
   </div>;
 }
-export function ConversationTools({ controller, locale, disabled, busy }: {
+export function ConversationTools({ controller, disabled, busy }: {
   controller: ToolsController; locale: string; disabled: boolean; busy: boolean;
 }) {
-  const { tools } = controller; const t = toolsTranslate(locale); const ko = useLocale() === 'ko';
+  const { tools } = controller; const t = useT();
   const selected = controller.selectedTools;
   const changes = tools.tools.filter(tool => selected.has(tool.name) !== tool.active).length;
   // Reset restores the defaults, so it stays available after a custom set was applied.
@@ -83,14 +83,14 @@ export function ConversationTools({ controller, locale, disabled, busy }: {
       {!tools.available && <p className="ui-note ui-muted" role="status">{t('tools.unavailable')}</p>}
       {tools.message && <p className="ui-note ui-muted" role="status">{tools.message}</p>}
       <DataTable columns="minmax(0, 1fr) 48px 40px" label={t('tools.title')} testId="tools-table" empty={!tools.tools.length} emptyRows={3}
-        head={[ko ? '도구' : 'Tool', ko ? '켜짐' : 'On', '']}>
+        head={[t('perm.tool'), t('ui.on'), '']}>
         {ordered.map(([key, entries]) => <ToolGroup key={key} id={key} label={entries[0].group === 'mcp' ? t('tools.group.mcp', { server: entries[0].server ?? '' }) : t(`tools.group.${entries[0].group}`)}
           entries={entries} selected={selected} disabled={locked} t={t} onChange={toggle} />)}
       </DataTable>
       {controller.errors('tools').map((error, index) => <p className="ui-note" role="alert" key={index}>{error}</p>)}
       <div className="ui-card-foot conv-foot" data-testid="tools-action-bar">
         <span className="ui-grow ui-muted" data-testid="tools-change-count" role="status" aria-live="polite">{t('tools.changes', { count: changes })}</span>
-        <button type="button" className="btn small subtle" data-testid="tools-reset" disabled={locked || !resettable} onClick={() => { if (!locked && resettable) void controller.command('tools', { action: 'reset' }); }}>{ko ? '기본값' : 'Defaults'}</button>
+        <button type="button" className="btn small subtle" data-testid="tools-reset" disabled={locked || !resettable} onClick={() => { if (!locked && resettable) void controller.command('tools', { action: 'reset' }); }}>{t('tools.defaults')}</button>
         <button type="button" className="btn small primary" data-testid="tools-apply" disabled={locked || changes === 0} onClick={() => { if (!locked && changes) void controller.command('tools', { action: 'set', active: [...selected].sort() }); }}>{t('tools.apply')}</button>
       </div>
     </ViewSection>

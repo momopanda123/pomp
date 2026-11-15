@@ -52,6 +52,7 @@ export function useToolsState({ locale, connected, busy, active, workspaceKey, s
   const snapshots = useRef({ tools, mcp }); snapshots.current = { tools, mcp };
   const scope = useRef(draftKey); scope.current = draftKey;
   const requests = useRef(new Map<string, Request>());
+  const antigravityProbed = useRef(false);
   const toggleTools = useCallback((names: string[], checked: boolean) => {
     const key = scope.current; const available = snapshots.current.tools.tools;
     setToolDrafts(previous => {
@@ -64,7 +65,7 @@ export function useToolsState({ locale, connected, busy, active, workspaceKey, s
       return { ...previous, [key]: next };
     });
   }, []);
-  const settings = useRef({ locale, connected, busy, disabled, active }); settings.current = { locale, connected, busy, disabled, active };
+  const settings = useRef({ locale, connected, busy, disabled, active, view }); settings.current = { locale, connected, busy, disabled, active, view };
   const owned = useRef<ReadonlySet<string>>(new Set()); owned.current = new Set(domains);
 
   const command = useCallback(<D extends ToolsDomain,>(domain: D, payload: ToolsCommandFor<D>): Promise<ToolsReply> => {
@@ -72,14 +73,20 @@ export function useToolsState({ locale, connected, busy, active, workspaceKey, s
     const key = `${domain}.${payload.action}`;
     const t = toolsTranslate(current.locale);
     const inFlight = [...requests.current.values()].some(request => request.domain === domain);
+    const external = domain === 'mcp' && (payload.action === 'antigravity-refresh' || payload.action === 'antigravity-setup');
     // One text per refusal. `disabled` is a new conversation starting or another dialog open (the shell folds both into it).
-    const refusal = !current.connected ? 'tools.hostUnavailable' : !current.active ? 'tools.inactive'
-      : current.disabled && payload.action !== 'refresh' ? 'tools.sessionPending'
-      : current.busy && (domain === 'tools' || payload.action !== 'refresh') ? 'tools.busy' : inFlight ? 'tools.inFlight' : undefined;
+    const refusal = !current.connected && !external ? 'tools.hostUnavailable' : !current.active || (external && current.view !== 'mcp') ? 'tools.inactive'
+      : current.disabled && (external || payload.action !== 'refresh') ? 'tools.sessionPending'
+      : !external && current.busy && (domain === 'tools' || payload.action !== 'refresh') ? 'tools.busy' : inFlight ? 'tools.inFlight' : undefined;
     if (refusal) {
       const error = t(refusal);
       // The domain's request in flight owns its pending state (keyed by action): a refused request never overwrites it.
-      if (!inFlight) setActions(previous => ({ ...previous, [key]: { pending: false, ok: false, error } }));
+      if (!inFlight) setActions(previous => {
+        const next = { ...previous };
+        if (external) { delete next['mcp.antigravity-refresh']; delete next['mcp.antigravity-setup']; }
+        next[key] = { pending: false, ok: false, error };
+        return next;
+      });
       return Promise.resolve({ requestId: '', ok: false, error });
     }
     const requestId = newId(); const requestScope = scope.current;
@@ -88,6 +95,10 @@ export function useToolsState({ locale, connected, busy, active, workspaceKey, s
     const testServer = tested ? { name: tested.name, scope: tested.scope, configuration: mcpConfiguration(tested) } : undefined;
     setActions(previous => {
       const next: Record<string, ToolsActionState> = { ...previous, [key]: { requestId, pending: true, testServer } };
+      if (external) {
+        delete next['mcp.antigravity-refresh']; delete next['mcp.antigravity-setup'];
+        next[key] = { requestId, pending: true };
+      }
       const test = previous['mcp.test'];
       if (mcpPayload && test?.testServer && (mcpPayload.action === 'restart' ||
         (['save', 'enable', 'disable'].includes(mcpPayload.action) && test.testServer.name === mcpPayload.name && test.testServer.scope === mcpPayload.scope))) {
@@ -127,6 +138,7 @@ export function useToolsState({ locale, connected, busy, active, workspaceKey, s
 
   useEffect(() => {
     setTools(emptyTools()); setSkills(emptySkills()); setMcp(emptyMcp()); setCatalog(emptyCatalog()); setRules(emptyRules()); setWorkflows(emptyWorkflows()); setHooks(emptyHooks()); setActions({});
+    antigravityProbed.current = false;
     // The shell extends protocol.ts's typed maps and HOST_TYPES with the types in toolsProtocol.ts.
     const off = onMessage(raw => {
       const message = raw as unknown as ToolsHostMessage;
@@ -154,7 +166,15 @@ export function useToolsState({ locale, connected, busy, active, workspaceKey, s
           break;
         case 'mcp/state':
           if (Array.isArray(message.payload.servers)) {
-            const snapshot = { ...message.payload, servers: message.payload.servers.map(server => ({ ...server,
+            const snapshot = { ...message.payload,
+              antigravity: message.payload.antigravity ? {
+                installed: message.payload.antigravity.installed === true,
+                configured: message.payload.antigravity.configured === true,
+                canConfigure: message.payload.antigravity.canConfigure === true,
+                ...Object.fromEntries(Object.entries(message.payload.antigravity).filter(([key, value]) =>
+                  ['applicationPath', 'configPath', 'workspaceRoot', 'serverName', 'configHash', 'message'].includes(key) && typeof value === 'string')),
+              } : undefined,
+              servers: message.payload.servers.map(server => ({ ...server,
               // Even a defective/older host may not cause an existing secret to appear in the DOM.
               env: server.env ? Object.fromEntries(Object.keys(server.env).map(name => [name, MASKED_ENV])) : undefined,
               headers: server.headers ? Object.fromEntries(Object.keys(server.headers).map(name => [name, MASKED_ENV])) : undefined })) };
@@ -243,9 +263,24 @@ export function useToolsState({ locale, connected, busy, active, workspaceKey, s
     }
   }, [view, active, connected, busy, command]);
 
+  const mcpPending = Object.entries(actions).some(([key, state]) => key.startsWith('mcp.') && state.pending);
+  useEffect(() => {
+    // Wait for a native MCP refresh, but probe once even when the engine is stopped. Never auto-run setup or retry failures in a loop.
+    if (!active || disabled || view !== 'mcp' || !owned.current.has('mcp') || mcpPending || antigravityProbed.current) return;
+    let cancelled = false;
+    // Showing the tab queues its list refresh in a microtask (useRefreshOnShow, declared above): the probe queues behind it, so the
+    // server list is asked first and the probe follows that answer instead of making the refresh wait.
+    queueMicrotask(() => {
+      if (cancelled || antigravityProbed.current || [...requests.current.values()].some(request => request.domain === 'mcp')) return;
+      antigravityProbed.current = true;
+      void command('mcp', { action: 'antigravity-refresh' });
+    });
+    return () => { cancelled = true; };
+  }, [workspaceKey, sessionId, connected, active, disabled, view, mcpPending, command]);
+
   const pending = (domain: ToolsDomain) => Object.entries(actions).some(([key, state]) => key.startsWith(`${domain}.`) && state.pending);
   const feedback = (domain: ToolsDomain, action: string): ToolsActionState => actions[`${domain}.${action}`] ?? { pending: false };
-  const errors = (domain: ToolsDomain) => Object.entries(actions).filter(([key, state]) => key.startsWith(`${domain}.`) && state.error).map(([, state]) => state.error!);
+  const errors = (domain: ToolsDomain) => Object.entries(actions).filter(([key, state]) => key.startsWith(`${domain}.`) && !key.startsWith('mcp.antigravity-') && state.error).map(([, state]) => state.error!);
   const draft = toolDrafts[draftKey] ?? {};
   const selectedTools = new Set(tools.tools.filter(tool => Object.hasOwn(draft, tool.name) ? draft[tool.name] : tool.active).map(tool => tool.name));
   return { tools, skills, mcp, catalog, rules, workflows, hooks, actions, command, pending, feedback, errors, selectedTools, toggleTools };

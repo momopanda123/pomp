@@ -61,6 +61,7 @@ namespace Pomp.VisualStudio.Editor
             private readonly IAdornmentLayer layer;
             private readonly DispatcherTimer refresh, relocate;
             private IKnowledgeEditor? editor;
+            private PompServices? boundServices;
             private PompOptionsPage? settings;
             private ITextDocument? document;
             private List<Entry> entries = new List<Entry>();
@@ -112,6 +113,12 @@ namespace Pomp.VisualStudio.Editor
             /// <summary>Follows the services of the moment: they appear when the package loads.</summary>
             private void Bind(PompServices? services)
             {
+                if (!ReferenceEquals(boundServices, services))
+                {
+                    if (boundServices != null) boundServices.ActiveSessionChanged -= OnSourceChanged;
+                    boundServices = services;
+                    if (boundServices != null) boundServices.ActiveSessionChanged += OnSourceChanged;
+                }
                 var nextEditor = services?.KnowledgeEditor;
                 var nextSettings = services?.Settings;
                 if (!ReferenceEquals(editor, nextEditor))
@@ -291,9 +298,10 @@ namespace Pomp.VisualStudio.Editor
                 refresh.Stop(); relocate.Stop(); refresh.Tick -= OnRefresh; relocate.Tick -= OnRelocate;
                 view.LayoutChanged -= OnLayout; view.ViewportWidthChanged -= OnViewport; view.TextBuffer.Changed -= OnTextChanged; view.GotAggregateFocus -= OnFocus; view.Closed -= OnClosed;
                 if (editor != null) editor.KnowledgeChanged -= OnSourceChanged;
+                if (boundServices != null) boundServices.ActiveSessionChanged -= OnSourceChanged;
                 if (settings != null) settings.Changed -= OnSourceChanged;
                 if (document != null) document.FileActionOccurred -= OnFileAction;
-                editor = null; settings = null; document = null;
+                editor = null; boundServices = null; settings = null; document = null;
                 entries = new List<Entry>(); layer.RemoveAllAdornments();
             }
 

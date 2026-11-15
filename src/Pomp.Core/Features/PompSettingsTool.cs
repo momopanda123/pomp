@@ -102,6 +102,7 @@ namespace Pomp.Features
                     ["editorContext"] = EditorContext((settings as IEditorContextSettings)?.EditorContextLimits ?? EditorContextLimits.Default),
                     ["composerPredictions"] = settings.ComposerPredictions,
                     ["wordCompletion"] = settings.WordCompletion,
+                    ["voiceInput"] = VoiceInput((settings as IDictationSettings)?.Dictation ?? DictationOptions.Default),
                     ["loadPompExtensions"] = settings.LoadOmpExtensions,
                     ["loadDiscoveredExtensions"] = settings.LoadDiscoveredOmpExtensions,
                     ["blockNetworkTools"] = settings.BlockOmpNetworkTools,
@@ -114,6 +115,7 @@ namespace Pomp.Features
                     ["accounts"] = "Accounts tab: sign in, API keys, editor model",
                     ["permissions"] = "Tools tab > Permissions: always-allowed entries and the project policy",
                     ["computerUse"] = "Chat composer: the screen & input control button after Live (one conversation on the PC at a time)",
+                    ["voiceInput"] = "Chat composer: the microphone button left of Send dictates into the draft (transcribed on this PC; nothing is sent until the user sends)",
                     ["rulesSkillsHooksWorkflowsMcp"] = "Tools tab",
                     ["agentsAndTeams"] = "Agents tab",
                 },
@@ -122,6 +124,13 @@ namespace Pomp.Features
         }
 
         private static string Key(string? chord) => string.IsNullOrEmpty(chord) ? "none" : chord!;
+
+        /// <summary>The speech model and spoken language of the composer's microphone button (Chat page of the options).</summary>
+        private static JObject VoiceInput(DictationOptions options) => new JObject
+        {
+            ["model"] = Dictation.EngineModel(options.Model).Substring("local/".Length),
+            ["language"] = options.Language ?? "POMP display language",
+        };
 
         /// <summary>What the editor context of a message carries (Chat page of the options).</summary>
         private static JObject EditorContext(EditorContextLimits limits) => new JObject

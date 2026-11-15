@@ -458,30 +458,29 @@ export interface AgentHooksState {
   requestId?: string | null; root: string; sessionId?: string | null; autoForward: boolean; forwards: number; maxForwards: number;
   log: { at: string; rule: string; event: string; source: string; outcome: string }[]; rules: AgentHookRule[]; error?: string;
 }
-export interface AgentPlanTask { content: string; status: string; blocker?: string }
+/** Supported statuses: pending, in_progress, completed, abandoned. */
+export interface AgentPlanTask { content: string; status: string }
 export interface AgentPlanPhase { name: string; tasks: AgentPlanTask[] }
 /** One page of the whole plan; phase/task are indexes into the whole plan. */
 export interface AgentPlanPage {
   requestId: string; ok: boolean; error?: string; revision?: string; editable?: boolean;
-  /** While the agent works: the tasks not in progress may be edited (added, changed, deleted) and phases renamed. */
+  /** While the agent works, tasks not in progress may be added, changed, deleted or reordered. */
   editableWhileWorking?: boolean; page: number; size: number; total: number;
   /** Completed tasks of the whole plan (not only the matching ones): what clearCompleted removes. */
   completedCount?: number;
   phases: { index: number; name: string; taskCount: number }[];
-  rows: { phase: number; task: number; content: string; status: string; blocker?: string }[];
+  rows: { phase: number; task: number; content: string; status: string }[];
 }
-export type AgentPlanEdit = { requestId: string; sessionId: string; revision: string } & (
-  | { op: 'addTask'; phase: number; content: string; status?: string; blocker?: string }
-  | { op: 'updateTask'; phase: number; task: number; content?: string; status?: string; blocker?: string }
+export type AgentPlanEdit = { requestId: string; root: string; sessionId: string; revision: string } & (
+  | { op: 'addTask'; phase: number; content: string; status?: string }
+  | { op: 'updateTask'; phase: number; task: number; content?: string; status?: string }
   | { op: 'deleteTask'; phase: number; task: number }
   | { op: 'addPhase'; name: string; content: string; status?: string }
-  | { op: 'renamePhase'; phase: number; name: string }
-  | { op: 'deletePhase'; phase: number }
   /** Removes every completed task of the whole plan, and a phase it leaves empty. */
   | { op: 'clearCompleted' }
   /** Moves the task to index `toTask` of phase `toPhase` (counted once it has left its place); a phase it leaves empty is removed. */
   | { op: 'moveTask'; phase: number; task: number; toPhase: number; toTask: number }
-  /** Makes the task the one in progress (any other goes back to pending, its blocker is dropped); refused while the agent works. */
+  /** Makes the task the one in progress (any other goes back to pending); refused while the agent works. */
   | { op: 'startTask'; phase: number; task: number });
 /** Answer to workspace/review editorChanges (the candidate files) and fromEditor (staging). */
 export interface EditorChangesReply { requestId: string; action: 'editorChanges' | 'fromEditor'; ok: boolean; error?: string; files?: { path: string; unsaved: boolean }[] }
@@ -494,7 +493,11 @@ export interface EditorFollowState {
   error?: string;
 }
 
+import { normalizeAcpState, normalizeBackendState, type BackendId, type BackendState, type SessionCapabilities, type AcpState, type AcpCommand, type AcpReply } from './backend';
+
 export interface SessionInfoPayload {
+  backend?: BackendId;
+  capabilities?: SessionCapabilities;
   recoveryStatus?: 'ready' | 'restoring' | 'failed';
   recoveryMessage?: string;
   todoPhases?: AgentPlanPhase[];
@@ -598,6 +601,31 @@ export interface SubagentAcceptedPayload {
   attachments?: { path: string }[];
   editorContext?: TurnStartedPayload['editorContext'];
 }
+/** Where a message sent to another agent or team stands in that partner's tab; `unknown`: restored without a recorded outcome. */
+export type RelayStatus = 'sending' | 'delivered' | 'working' | 'waiting' | 'done' | 'failed' | 'stopped' | 'unknown';
+/** A message the user sent to another agent or team: it runs in that partner's own conversation tab, never in this conversation. */
+export interface RelaySentPayload {
+  relayId: string;
+  clientMessageId?: string;
+  text: string;
+  attachments?: { path: string }[];
+  target: { kind: 'agent' | 'team'; id: string };
+  status: RelayStatus;
+  detail?: string;
+  /** The recipient's conversation, once the message reached it. */
+  sessionId?: string;
+}
+export interface RelayStatusPayload { relayId: string; status: RelayStatus; detail?: string; sessionId?: string }
+/** How the message ended there: the outcome and that turn's final answer only. */
+export interface RelayResultPayload {
+  relayId: string;
+  target: { kind: 'agent' | 'team'; id: string };
+  status: 'done' | 'failed' | 'stopped';
+  text?: string;
+  truncated?: boolean;
+  error?: string;
+  sessionId?: string;
+}
 
 
 /** omp's side question (`/btw`) lifecycle; `interrupted`: the process ended while it ran. */
@@ -668,6 +696,7 @@ export interface UiErrorInfo {
   code: string;
   message: string;
   retryable: boolean;
+  clientMessageId?: string;
 }
 
 export interface TurnEndPayload {
@@ -798,6 +827,7 @@ export type SlashCommand = CommandInfo;
 export interface CommandsState { commands: SlashCommand[]; hidden?: number }
 
 export interface SessionEntry {
+  backend?: BackendId;
   /** Opaque host handle, not a file path supplied by the page. */
   id: string;
   sessionId?: string;
@@ -833,7 +863,7 @@ export type SessionHistoryCommand = { requestId: string } & (
   | { action: 'switch'; root: string; id: string }
   | { action: 'messages'; sessionId: string; cursor?: string }
   | { action: 'preview'; id: string }
-  | { action: 'delete'; id: string }
+  | { action: 'delete'; root: string; id: string; sessionId: string }
   | { action: 'rename'; name: string }
   | { action: 'compact'; instructions?: string }
 );
@@ -948,6 +978,7 @@ export function normalizeSessionHistory(payload: unknown): SessionHistoryState {
       const entrySessionId = protocolId(row.sessionId);
       const messageCount = protocolCount(row.messageCount);
       if (entrySessionId !== undefined) entry.sessionId = entrySessionId;
+      if (row.backend === 'omp' || row.backend === 'antigravity-acp') entry.backend = row.backend;
       if (name !== undefined) entry.name = name;
       if (modifiedUtc !== undefined) entry.modifiedUtc = modifiedUtc;
       if (visitedUtc !== undefined) entry.visitedUtc = visitedUtc;
@@ -1216,6 +1247,32 @@ export interface ComputerReplyPayload {
   ok: boolean;
   error?: string;
 }
+
+// ---- Voice input (docs/architecture.md "음성 입력") -------------------------------------------------
+
+export type DictationPhase = 'idle' | 'starting' | 'recording' | 'transcribing';
+
+export interface DictationStatePayload {
+  state: DictationPhase;
+  /** The running capture, or the one that ended last; null before the first. */
+  captureId: string | null;
+  /** The capture's whole text so far; its final text once idle. */
+  text: string;
+  /** Why the capture failed, once idle. */
+  error?: string | null;
+}
+
+export interface DictationSetCommand {
+  /** A fresh ID for every request; on start it is also the captureId in dictation/state. */
+  requestId: string;
+  on: boolean;
+}
+
+export interface DictationReplyPayload {
+  requestId: string;
+  ok: boolean;
+  error?: string | null;
+}
 export interface ProjectHookState { root: string; sessionId: string; enabled: boolean; running: boolean; attempts: number; skipped: number; message: string; history: { name: string; event: string; path: string; status: string; createdUtc: string; jobId?: string; error?: string }[] }
 export interface ComposerWorkflowState {
   root: string; sessionId: string; id: string; revision: number; phase: string; paused: boolean;
@@ -1227,8 +1284,6 @@ export interface InteractiveTerminalState {
   state: string; terminalId?: string; generation?: string; shell?: string; command?: string; output?: string;
   outputStart?: number; totalCharacters?: number; sequence?: number; truncated?: boolean; exitCode?: number; error?: string;
 }
-/** `tokenBudget`/`tokensUsed`: only while a token budget is set — the conversation's model tokens since enabling (docs/ui-protocol.md "Automatic continuation"). */
-export interface ComposerAutoState { root: string; sessionId: string; id: string; enabled: boolean; remaining: number; dispatching: boolean; message: string; requestId?: string; tokenBudget?: number; tokensUsed?: number }
 /** Answer to `workspace/goal` (docs/ui-protocol.md "Goal runs"): `started` once the engine took the goal's first message, `refused` with the reason in `error`. */
 export interface GoalState { requestId: string; ok: boolean; stage: 'started' | 'cancelled' | 'refused'; error?: string | null }
 /** The model asked for a goal run (`request_goal_run`): the page shows the same confirmation card as a typed /goal. */
@@ -1248,9 +1303,11 @@ export interface CaseFeedbackState {
   proposal?: CaseFeedbackProposal | null; error?: string; notice?: string;
 }
 export interface HostToUi extends ConversationHostToUi, ToolsHostToUi {
+  'backend/state': BackendState;
+  'acp/state': AcpState;
+  'acp/reply': AcpReply;
   'feedback/state': CaseFeedbackState;
   'feedback/imageResult': { requestId: string; proposalId: string; caseId: string; dataUrl?: string; error?: string };
-  'workspace/composerAutoState': ComposerAutoState;
   'workspace/goalState': GoalState;
   'workspace/goalRequest': GoalRequest;
   'workspace/interactiveState': InteractiveTerminalState;
@@ -1301,6 +1358,9 @@ export interface HostToUi extends ConversationHostToUi, ToolsHostToUi {
   'chat/replayEnd': Record<string, never>;
   'chat/steered': SteeredPayload;
   'chat/subagentAccepted': SubagentAcceptedPayload;
+  'chat/relaySent': RelaySentPayload;
+  'chat/relayStatus': RelayStatusPayload;
+  'chat/relayResult': RelayResultPayload;
   /** Stop took these steered messages back before the agent read them: their bubbles show "not delivered". */
   'chat/steerWithdrawn': { steerIds: string[] };
   'btw/record': { record: BtwRecord };
@@ -1320,6 +1380,8 @@ export interface HostToUi extends ConversationHostToUi, ToolsHostToUi {
   'advisors/reply': AdvisorsReplyPayload;
   'computer/state': ComputerStatePayload;
   'computer/reply': ComputerReplyPayload;
+  'dictation/state': DictationStatePayload;
+  'dictation/reply': DictationReplyPayload;
   'permission/request': PermissionRequestPayload;
   'permission/dismiss': DismissPayload;
   'dialog/request': DialogRequestPayload;
@@ -1340,6 +1402,8 @@ type Empty = Record<string, never>;
 
 /** UI -> Host message types with their payloads. */
 export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
+  'conversation/backend': { requestId: string; backend: BackendId };
+  'acp/command': AcpCommand;
   'composer/predict': { requestId: string; sessionId: string; text: string };
   'feedback/image': { requestId: string; root: string; sessionId: string; proposalId: string; caseId: string };
   'feedback/command': { action: 'refresh' | 'open' | 'draft' | 'submit' | 'delete'; requestId: string; root: string; sessionId?: string; proposalId?: string; revision?: number; draftRevision?: number; selections?: CaseFeedbackSelection[] };
@@ -1347,9 +1411,7 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   /** deleteRun: remove one previous run (runId) from the history; never the run being shown as latest. */
   'workspace/problems': { requestId: string; action: 'refresh' | 'open' | 'dismiss'; id?: string };
   'workspace/codeReview': { action: 'refresh' | 'scan' | 'cancel' | 'auto' | 'open' | 'acknowledge' | 'openRun' | 'deleteRun'; reviewId?: string; findingId?: string; runId?: string; enabled?: boolean; value?: boolean };
-  /** `tokenBudget` (enable only): optional whole number of tokens, 10,000 to 50,000,000; the continuation also ends when the conversation has used that many since enabling. */
-  'workspace/composerAuto': { action: 'status' | 'enable' | 'disable'; requestId?: string; root?: string; sessionId?: string; id?: string; revision?: number; tokenBudget?: number };
-  /** start: the goal card was confirmed (the host starts the workflow command and arms automatic continuation); cancel: it was declined. `fromRequest`: the `workspace/goalRequest` the card came from. */
+  /** start: the user confirmed a bounded goal run; cancel: it was declined. `fromRequest`: the `workspace/goalRequest` the card came from. */
   'workspace/goal': { requestId: string; action: 'start' | 'cancel'; root?: string; sessionId?: string; text?: string; tokenBudget?: number; fromRequest?: string };
   'workspace/interactive': { action: 'status' | 'start' | 'input' | 'resize' | 'stop'; requestId?: string; root?: string; sessionId?: string; terminalId?: string; generation?: string; command?: string; data?: string; cols?: number; rows?: number; timeoutSeconds?: number };
   /** clear: drop finished jobs from the list; cancelAll: cancel every unfinished job. */
@@ -1369,6 +1431,7 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'agents/command': AgentsCommand;
   'advisors/command': AdvisorsCommand;
   'computer/set': ComputerSetCommand;
+  'dictation/set': DictationSetCommand;
   'chat/send': {
     clientMessageId: string;
     text: string;
@@ -1389,9 +1452,10 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'btw/cancel': { recordId?: string };
   /** start: begin a new run from a saved workflow's task/steps (no active run; unpaused; sends no model request — the page sends the chat message). */
   'workspace/composer': { action: 'refresh' | 'pause' | 'resume' | 'cancel' | 'save' | 'start'; requestId: string; root?: string; sessionId?: string; id?: string; revision?: number; task?: string; steps?: string[] };
-  'workspace/agentPlan': { requestId: string; sessionId: string; base: AgentPlanPhase[]; phases: AgentPlanPhase[] };
-  'workspace/agentPlanPage': { requestId: string; sessionId: string; page: number; size: number; query?: string };
+  'workspace/agentPlan': { requestId: string; root: string; sessionId: string; base: AgentPlanPhase[]; phases: AgentPlanPhase[] };
+  'workspace/agentPlanPage': { requestId: string; root: string; sessionId: string; page: number; size: number; query?: string };
   'workspace/agentPlanEdit': AgentPlanEdit;
+  'workspace/agentPlanAction': { requestId: string; root: string; sessionId: string; action: 'continue' | 'run' | 'stop'; task?: string; marked?: boolean };
   'knowledge/command': { requestId: string; root: string } & KnowledgeCommand;
   'agentHooks/command': { requestId: string; root: string; sessionId: string; action: 'refresh' | 'save' | 'delete' | 'autoForward'; id?: string; revision?: number; rule?: Omit<AgentHookRule, 'id' | 'revision'>; enabled?: boolean };
   /** The basket's token count: the draft, the attachment list as a send writes it and the conversation's knowledge; answered by `workspace/tokenCount`. */
@@ -1419,7 +1483,7 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'permission/mode': { requestId: string; mode: ApprovalMode };
   'dialog/respond': { requestId: string; value?: string; confirmed?: boolean; cancelled?: boolean };
   /** `requestId` comes back in `session/newResult`. */
-  'session/new': { requestId: string };
+  'session/new': { requestId: string; backend?: BackendId };
   'session/recover': Record<string, never>;
   /** savePolicy: write `policy` (expectedHash null = the file must not exist yet); deletePolicy: remove the file (expectedHash required). */
   'permission/rules': { requestId: string; action: 'refresh' | 'revoke' | 'openPolicy' | 'createPolicy' | 'savePolicy' | 'deletePolicy' | 'untrust'; root?: string; sessionId?: string; scope?: 'session' | 'persistent'; key?: string; policy?: ProjectPolicyDraft; expectedHash?: string | null; workspace?: string };
@@ -1453,6 +1517,7 @@ declare global {
 
 /** Every known host message type; anything else is ignored (forward compatibility). */
 const HOST_TYPES: Record<HostMessageType, true> = {
+  'backend/state': true, 'acp/state': true, 'acp/reply': true,
   'tools/state': true, 'tools/reply': true,
   'skills/state': true, 'skills/reply': true,
   'mcp/state': true, 'mcp/reply': true,
@@ -1478,7 +1543,6 @@ const HOST_TYPES: Record<HostMessageType, true> = {
   'workspace/historyReply': true,
   'workspace/terminalState': true,
   'workspace/interactiveState': true,
-  'workspace/composerAutoState': true,
   'workspace/goalState': true,
   'workspace/goalRequest': true,
   'feedback/state': true,
@@ -1520,10 +1584,15 @@ const HOST_TYPES: Record<HostMessageType, true> = {
   'advisors/reply': true,
   'computer/state': true,
   'computer/reply': true,
+  'dictation/state': true,
+  'dictation/reply': true,
   'chat/replayBegin': true,
   'chat/replayEnd': true,
   'chat/steered': true,
   'chat/subagentAccepted': true,
+  'chat/relaySent': true,
+  'chat/relayStatus': true,
+  'chat/relayResult': true,
   'chat/steerWithdrawn': true,
   'btw/record': true,
   'btw/delta': true,
@@ -1564,6 +1633,12 @@ function normalize(data: unknown): HostMessage | null {
   if (typeof type !== 'string' || !Object.hasOwn(HOST_TYPES, type)) return null;
   if (type === 'commands/state') return { type, id: protocolId(id, 256), payload: normalizeCommandsState(payload) };
   if (type === 'session/historyState') return { type, id: protocolId(id, 256), payload: normalizeSessionHistory(payload) };
+  if (type === 'backend/state') return { type, id: protocolId(id, 256), payload: normalizeBackendState(payload) };
+  if (type === 'acp/state') return { type, id: protocolId(id, 256), payload: normalizeAcpState(payload) };
+  if (type === 'acp/reply') {
+    const reply = protocolRecord(payload), requestId = protocolId(reply.requestId, 256);
+    return requestId ? { type, id: protocolId(id, 256), payload: { requestId, ok: reply.ok === true, error: protocolText(reply.error, 4000) } } : null;
+  }
   return {
     type,
     id: typeof id === 'string' ? id : undefined,

@@ -3,7 +3,7 @@ import { useT } from '../i18n';
 import { send, type ModelInfo } from '../protocol';
 import { EditorModelSection } from './EditorModelSection';
 import { isProviderId, type SetupReply, type SetupState } from '../setup';
-import { useSetupCommands } from '../setupCommands';
+import { useRetireSeenOnLeave, type SetupCommands, type Slot } from '../setupCommands';
 import { claimUsageRequest } from '../usage';
 import { AccountsSection, type ListState } from './AccountsSection';
 import { ApiKeySection } from './ApiKeySection';
@@ -17,8 +17,10 @@ import { useRefreshOnShow } from '../useRefreshOnShow';
 interface SetupPanelProps {
   /** Latest `setup/state` of the host; null until the first one arrives. */
   setup: SetupState | null;
-  /** Answers to this page's commands (see `AppState.setupReplies`). */
+  /** Answers to setup commands (see `AppState.setupReplies`): the editor-model section matches its own with them. */
   replies: SetupReply[];
+  /** The setup commands of the Accounts, Remote and Agents pages (one for all, created in `App`). */
+  cmd: SetupCommands;
   sessionModel?: ModelInfo;
   /** The engine failed because omp has no model provider: this panel is the main content and cannot be closed. */
   required: boolean;
@@ -32,6 +34,9 @@ interface SetupPanelProps {
   onOpenRemote?: () => void;
 }
 
+/** What this page posts through the shared commands: an answer the user has seen here is forgotten when the page goes off screen. */
+const ACCOUNT_SLOTS: readonly Slot[] = ['refresh', 'providers', 'usage', 'login', 'cancel', 'answer', 'saveKey', 'removeKey', 'saveLocalServer', 'removeLocalServer', 'refreshModels', 'logout'];
+
 /**
  * Accounts: connected accounts with their usage, adding an account (sign-in in the browser, no terminal), connecting
  * with an API key, and the editor-only model preference (chat model/thinking stay in the composer). It is the main content while omp cannot start for lack of a model provider
@@ -41,11 +46,10 @@ interface SetupPanelProps {
  * carries them; they are cleared as soon as that is posted and are never put into reducer state, storage, a log message or an
  * error text.
  */
-export function SetupPanel({ setup, replies, sessionModel, required, connected, locale, inert, onOpenRemote }: SetupPanelProps) {
+export function SetupPanel({ setup, replies, cmd, sessionModel, required, connected, locale, inert, onOpenRemote }: SetupPanelProps) {
   const t = useT();
   const id = useId();
   const panelRef = useRef<HTMLElement>(null);
-  const cmd = useSetupCommands(replies);
   const { post, feedback } = cmd;
 
   const loadProviders = (): void => {
@@ -94,6 +98,8 @@ export function SetupPanel({ setup, replies, sessionModel, required, connected, 
   const signInConsole = (provider?: string): void => {
     post('login', (requestId) => (provider ? { requestId, action: 'loginConsole', provider } : { requestId, action: 'loginConsole' }), CONSOLE_TAG);
   };
+  // A sign-in that is still running when the page goes off screen keeps its command: its result is shown on return.
+  useRetireSeenOnLeave(cmd, ACCOUNT_SLOTS, (slot) => slot === 'login' && login?.state === 'running');
 
   const refreshAnswer = feedback('refresh');
   const showAccounts = !required || hasAccount;
@@ -133,7 +139,7 @@ export function SetupPanel({ setup, replies, sessionModel, required, connected, 
           )}
 
           {!setup && (
-            <div className="setup-loading" role="status">
+            <div className="setup-loading" role={refreshAnswer.error ? 'alert' : 'status'}>
               {refreshAnswer.error ? <Icon name="error" size={12} /> : <span className="spinner" aria-hidden="true" />}
               <span className="setup-running-text">{refreshAnswer.error ? revealControls(refreshAnswer.error) : t('setup.loading')}</span>
               {!refreshAnswer.pending && (
@@ -153,7 +159,6 @@ export function SetupPanel({ setup, replies, sessionModel, required, connected, 
                 state={listState}
                 providersError={providersError}
                 required={required}
-                locale={locale}
                 busy={loginBusy}
                 inert={inert}
                 onSignIn={signIn}

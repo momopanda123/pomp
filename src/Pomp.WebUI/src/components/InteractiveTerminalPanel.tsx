@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Terminal } from '@xterm/xterm';
+import { useT, type MessageKey } from '../i18n';
 import { onMessage, send } from '../protocol';
 import { terminalDelta, type TerminalCursor } from '../interactiveOutput';
 import { revealControls } from './RevealControls';
@@ -13,17 +14,14 @@ import { matchesWorkScope, useWorkState } from '../work/store';
 import { useRefreshOnShow } from '../useRefreshOnShow';
 
 /** The host's terminal state ids (InteractiveTerminal.cs view.state) as words; unknown ids are shown as sent. */
-function terminalStateLabel(state: string, ko: boolean): string {
-  const labels: Record<string, [string, string]> = {
-    empty: ['없음', 'none'], starting: ['시작 중', 'starting'], running: ['실행 중', 'running'], closing: ['종료 중', 'closing'],
-    exited: ['종료됨', 'exited'], failed: ['실패', 'failed'], stopped: ['중지됨', 'stopped'], disconnected: ['연결 끊김', 'disconnected'],
-  };
-  const label = labels[state];
-  return label ? label[ko ? 0 : 1] : state;
-}
+const terminalStates: Record<string, MessageKey> = {
+  empty: 'work.terminal.state.empty', starting: 'work.terminal.state.starting', running: 'work.terminal.state.running', closing: 'work.terminal.state.closing',
+  exited: 'work.terminal.state.exited', failed: 'work.terminal.state.failed', stopped: 'work.terminal.state.stopped', disconnected: 'work.terminal.state.disconnected',
+};
 
-export function InteractiveTerminalPanel({ locale, inert, connected = true }: { locale: string; inert: boolean; connected?: boolean; layout?: WorkLayout }) {
-  const ko = locale.toLowerCase().startsWith('ko');
+export function InteractiveTerminalPanel({ inert, connected = true }: { locale: string; inert: boolean; connected?: boolean; layout?: WorkLayout }) {
+  // Long-lived terminal callbacks read the current language through the ref.
+  const t = useT(); const translate = useRef(t); translate.current = t;
   const state = useWorkState('interactive');
   const current = useRef(state); current.current = state;
   const blocked = useRef(inert); blocked.current = inert;
@@ -43,8 +41,8 @@ export function InteractiveTerminalPanel({ locale, inert, connected = true }: { 
     if (action === 'stop') clearInput();
     const id = `pty-${++serial.current}-${Date.now()}`; pending.current = id; setBusy(true);
     const ok = send('workspace/interactive', { action, requestId: id, ...owner(), ...(action === 'start' ? { command, timeoutSeconds: 600 } : action === 'input' ? { data } : {}) });
-    if (!ok) { clearInput(); inputUncertain.current = true; setError(ko ? '전송되지 않았어요' : 'Not sent'); return; }
-    timeout.current = setTimeout(() => { if (pending.current !== id) return; clearInput(); inputUncertain.current = true; setError(ko ? '응답이 확인되지 않았어요' : 'Response unconfirmed'); }, action === 'start' ? 120000 : 15000);
+    if (!ok) { clearInput(); inputUncertain.current = true; setError(t('work.terminal.notSent')); return; }
+    timeout.current = setTimeout(() => { if (pending.current !== id) return; clearInput(); inputUncertain.current = true; setError(translate.current('work.terminal.unconfirmed')); }, action === 'start' ? 120000 : 15000);
   }
   flush.current = () => {
     if (pending.current || !queued.current || blocked.current || inputUncertain.current) return;
@@ -88,7 +86,7 @@ export function InteractiveTerminalPanel({ locale, inert, connected = true }: { 
     const input = term.onData(data => {
       const latest = current.current;
       if (blocked.current || inputUncertain.current || !latest.enabled || !latest.supported || !latest.connected || latest.uncertain || latest.state !== 'running') return;
-      if (queued.current.length + data.length > 4096 || data.includes('\0')) { queued.current = ''; setError(ko ? '입력이 너무 길어요' : 'Input too long'); return; }
+      if (queued.current.length + data.length > 4096 || data.includes('\0')) { queued.current = ''; setError(translate.current('work.terminal.inputTooLong')); return; }
       queued.current += data; clearTimeout(timer.current); timer.current = setTimeout(() => flush.current(), 25);
     });
     let resizeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -100,35 +98,36 @@ export function InteractiveTerminalPanel({ locale, inert, connected = true }: { 
     release = () => { clearTimeout(resizeTimer); observer?.disconnect(); input.dispose(); handlers.forEach(h => h.dispose()); term.dispose(); terminal.current = null; clearInput(); };
     const delta = terminalDelta(cursor.current, current.current); cursor.current = delta.cursor; setPartial(delta.partial); if (delta.text) term.write(delta.text);
     term.options.disableStdin = blocked.current || !current.current.enabled || current.current.uncertain === true || current.current.state !== 'running' || inputUncertain.current;
-    }).catch(() => { if (!disposed) setError(ko ? '터미널 화면을 불러오지 못했어요' : 'Could not load terminal renderer'); });
+    }).catch(() => { if (!disposed) setError(translate.current('work.terminal.loadFailed')); });
     return () => { disposed = true; release?.(); };
   }, [identity, state.connected]);
   useEffect(() => {
     const term = terminal.current; if (!term) return;
     term.options.disableStdin = inert || !state.enabled || state.uncertain === true || state.state !== 'running' || inputUncertain.current;
     try { const delta = terminalDelta(cursor.current, state); cursor.current = delta.cursor; if (delta.reset) { term.reset(); setPartial(delta.partial); } if (delta.text) term.write(delta.text); }
-    catch { setError(ko ? '터미널 출력 형식이 잘못됐어요' : 'Invalid terminal output'); }
+    catch { setError(translate.current('work.terminal.invalidOutput')); }
   }, [state, inert]);
-  const stateText = terminalStateLabel(state.state, ko);
+  const stateKey = terminalStates[state.state];
+  const stateText = stateKey ? t(stateKey) : state.state;
   const live = ['starting', 'running', 'closing'].includes(state.state);
   const tone: BadgeTone = state.state === 'running' ? 'ok' : state.state === 'starting' || state.state === 'closing' ? 'info' : state.state === 'failed' || state.state === 'disconnected' ? 'error' : 'neutral';
   const unavailable = inert || !state.connected || !state.enabled || !state.supported;
-  return <ViewSection sectionKey="work-interactive" className="terminal-panel work-interactive" headingLevel="h2" bodyClassName="ui-flush" inert={inert || undefined}
-    active={['starting', 'running'].includes(state.state)} title={ko ? '대화형 터미널' : 'Interactive terminal'} status={<Badge tone={tone} title={state.state}>{revealControls(stateText)}</Badge>}>
+  return <ViewSection sectionKey="work-interactive" className="work-interactive" headingLevel="h2" bodyClassName="ui-flush" inert={inert || undefined}
+    active={['starting', 'running'].includes(state.state)} title={t('work.terminal.title')} status={<Badge tone={tone} title={state.state}>{revealControls(stateText)}</Badge>}>
     <Toolbar>
-      <input className="ui-input ui-mono interactive-command" data-testid="interactive-command" aria-label={ko ? '명령' : 'Command'} placeholder={ko ? '명령' : 'Command'} value={command} maxLength={8000}
+      <input className="ui-input ui-mono" data-testid="interactive-command" aria-label={t('work.terminal.command')} placeholder={t('work.terminal.command')} value={command} maxLength={8000}
         spellCheck={false} onChange={e => setCommand(e.target.value)} disabled={unavailable || busy}
         onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && command.trim() && !busy && !live) { e.preventDefault(); issue('start'); } }} />
-      <button type="button" className="btn small primary" data-testid="interactive-start" disabled={unavailable || busy || !command.trim() || live} onClick={() => issue('start')}><Icon name="play" size={12} />{ko ? '실행' : 'Run'}</button>
-      <button type="button" className="btn small subtle" data-testid="interactive-stop" disabled={unavailable || !state.terminalId || !live} onClick={() => issue('stop')}><Icon name="stop" size={11} />{ko ? '종료' : 'Stop'}</button>
+      <button type="button" className="btn small primary" data-testid="interactive-start" disabled={unavailable || busy || !command.trim() || live} onClick={() => issue('start')}><Icon name="play" size={12} />{t('work.terminal.run')}</button>
+      <button type="button" className="btn small subtle" data-testid="interactive-stop" disabled={unavailable || !state.terminalId || !live} onClick={() => issue('stop')}><Icon name="stop" size={11} />{t('work.terminal.stop')}</button>
     </Toolbar>
     {(state.shell || state.exitCode !== undefined || partial) && <div className="ui-note interactive-meta">
       {state.shell && <Badge mono title={state.root}>{revealControls(state.shell)}</Badge>}
       {state.exitCode !== undefined && <Badge tone={state.exitCode === 0 ? 'ok' : 'error'} mono>exit {state.exitCode}</Badge>}
-      {partial && <Badge tone="warn">{ko ? '출력 일부' : 'Partial output'}</Badge>}
+      {partial && <Badge tone="warn">{t('work.terminal.partial')}</Badge>}
     </div>}
     {state.command && <pre className="interactive-command-echo ui-mono">{revealControls(state.command)}</pre>}
     {(error || state.warning || state.error) && <p className="ui-note" role="alert">{revealControls(error || state.warning || state.error || '')}</p>}
-    <div ref={container} className={state.terminalId ? 'work-terminal-screen' : undefined} style={{ height: state.terminalId ? undefined : 0, overflow: 'hidden' }} onKeyDown={e => e.stopPropagation()} />
+    <div ref={container} className={state.terminalId ? 'work-terminal-screen' : 'work-terminal-idle'} onKeyDown={e => e.stopPropagation()} />
   </ViewSection>;
 }

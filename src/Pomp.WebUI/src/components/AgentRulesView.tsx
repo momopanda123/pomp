@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import type { AgentHookRule, AgentsStatePayload } from '../protocol';
 import type { HookInfo } from '../toolsProtocol';
 import { useT } from '../i18n';
-import { toolsTranslate } from '../i18n/toolsStrings';
 import { hookDefinitionDomains, useToolsState } from '../toolsState';
 import { stateLabel } from '../stateLabels';
 import { emptyRuleDraft, ruleDraftOf, ruleInput, RuleFields, RULE_NAME_LIMIT, useAgentHookRules, useRuleNames, validateRule, type RuleDraft, type RuleEvent } from './AgentHooksPanel';
@@ -48,7 +47,7 @@ const when = (value: string, locale: string) => {
 
 /** Agents › Automation: one list of everything that reacts to an event — event rules (notify, chat) and PowerShell hooks (script) — and one run history. */
 export function AgentRulesView({ locale, workspaceKey, sessionId, agents, connected, busy, newSessionPending, inert, selected, onShowPermissions, onCount }: AgentRulesViewProps) {
-  const t = useT(); const tt = toolsTranslate(locale); const ko = locale.toLowerCase().startsWith('ko');
+  const t = useT();
   const shown = !inert && selected;
   const [editing, setEditing] = useState<Editing | null>(null);
   const [validation, setValidation] = useState('');
@@ -79,7 +78,7 @@ export function AgentRulesView({ locale, workspaceKey, sessionId, agents, connec
   const using = rules.autoForward && runtimeOn;
   const setUsing = (next: boolean) => { if (rules.run({ action: 'autoForward', enabled: next })) runtime.command('enable', next); };
 
-  const kindLabel = (kind: Kind) => kind === 'notify' ? (ko ? '알림' : 'Notify') : kind === 'forward' ? (ko ? '채팅' : 'Chat') : (ko ? '스크립트' : 'Script');
+  const kindLabel = (kind: Kind) => t(`hooks.kind.${kind}`);
   const kindIcon = (kind: Kind): IconName => kind === 'notify' ? 'bell' : kind === 'forward' ? 'send' : 'terminal';
   const kindTone = (kind: Kind): BadgeTone => kind === 'notify' ? 'warn' : kind === 'forward' ? 'info' : 'accent';
   const actionBadge = (item: Item) => {
@@ -94,8 +93,8 @@ export function AgentRulesView({ locale, workspaceKey, sessionId, agents, connec
       return <Badge tone={rule.event.endsWith('.failed') ? 'error' : 'neutral'} icon={ruleSignalIcon(rule.event)} title={source || undefined}>{t(`agentHooks.event.${rule.event}`)}</Badge>;
     }
     const hook = item.hook;
-    if (hook.note || hook.unreadable || !hook.event) return <Badge tone="warn" icon="warning" title={hook.note}>{ko ? '파일 오류' : 'File error'}</Badge>;
-    return <Badge icon={hook.event === 'onBuild' ? 'zap' : 'file'} title={hook.event === 'onFileSave' ? hook.glob : undefined}>{hook.event === 'onBuild' ? tt('hooks.eventBuild') : tt('hooks.eventSave')}</Badge>;
+    if (hook.note || hook.unreadable || !hook.event) return <Badge tone="warn" icon="warning" title={hook.note}>{t('hooks.fileError')}</Badge>;
+    return <Badge icon={hook.event === 'onBuild' ? 'zap' : 'file'} title={hook.event === 'onFileSave' ? hook.glob : undefined}>{hook.event === 'onBuild' ? t('hooks.eventBuild') : t('hooks.eventSave')}</Badge>;
   };
 
   function openNew() { setValidation(''); setDeleting(null); setEditing({ kind: 'notify', name: '', enabled: true, rule: emptyRuleDraft(), hook: emptyHookDraft() }); }
@@ -157,40 +156,40 @@ export function AgentRulesView({ locale, workspaceKey, sessionId, agents, connec
   const kindLocked = kinds.every(kind => kind === 'script' ? hooksLocked : rulesLocked);
   const policyWarning = hooks.length > 0 && controller.hooks.policy !== 'valid';
   return <div className="automation" data-testid="automation-view">
-    <ViewSection sectionKey="agents-automation" className="automation-rules" title={ko ? '자동화 규칙' : 'Automation rules'} status={items.length} bodyClassName="ui-flush"
+    <ViewSection sectionKey="agents-automation" title={t('hooks.rulesTitle')} status={items.length} bodyClassName="ui-flush"
       actions={<>
-        {using && rules.maxForwards > 0 && rules.forwards >= rules.maxForwards && <Badge tone="warn" testId="hooks-forwards" title={`${rules.forwards}/${rules.maxForwards}`}>{ko ? '전달 한도 도달' : 'Forward limit reached'}</Badge>}
-        <Switch label={ko ? '이 대화에서 사용' : 'Use in this conversation'} testId="automation-use" checked={using} disabled={rulesLocked || newSessionPending} onChange={setUsing} />
+        {using && rules.maxForwards > 0 && rules.forwards >= rules.maxForwards && <Badge tone="warn" testId="hooks-forwards" title={`${rules.forwards}/${rules.maxForwards}`}>{t('hooks.forwardLimit')}</Badge>}
+        <Switch label={t('hooks.useInConversation')} testId="automation-use" checked={using} disabled={rulesLocked || newSessionPending} onChange={setUsing} />
+        <button type="button" className="btn small" data-testid="hooks-create" disabled={!connected || !shown || !!editing || !sessionId} onClick={openNew}><Icon name="plus" size={12} />{t('hooks.newRule')}</button>
         <SectionRefresh onClick={refresh} disabled={!connected || !shown || rules.pending} testId="hooks-refresh" />
-        <button type="button" className="btn small" data-testid="hooks-create" disabled={!connected || !shown || !!editing || !sessionId} onClick={openNew}><Icon name="plus" size={12} />{ko ? '새 규칙' : 'New rule'}</button>
       </>}>
       {editing ? <Form testId={isScript ? 'pshooks-editor' : 'hooks-editor'} className="automation-form" onKeyDown={event => {
         if (event.key === 'Escape' && !event.defaultPrevented && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); event.stopPropagation(); cancelEdit(); }
       }}>
         <fieldset disabled={formLocked} className="automation-fieldset">
-          <Field label={ko ? '이름' : 'Name'}>{id => <input id={id} data-testid={isScript ? 'pshooks-name' : 'hooks-name'} autoFocus value={editing.name} maxLength={isScript ? 40 : RULE_NAME_LIMIT}
+          <Field label={t('hooks.name')}>{id => <input id={id} data-testid={isScript ? 'pshooks-name' : 'hooks-name'} autoFocus value={editing.name} maxLength={isScript ? 40 : RULE_NAME_LIMIT}
             disabled={!!editing.originalHook} className={isScript ? 'ui-mono' : undefined} spellCheck={!isScript} onChange={event => setEditing({ ...editing, name: event.target.value })} />}</Field>
         </fieldset>
-        <Field label={ko ? '할 일' : 'Action'}>{() => <Segmented<Kind> label={ko ? '할 일' : 'Action'} testId="automation-kind" value={editing.kind} onChange={kind => { setValidation(''); setEditing({ ...editing, kind }); }}
+        <Field label={t('hooks.action')}>{() => <Segmented<Kind> label={t('hooks.action')} testId="automation-kind" value={editing.kind} onChange={kind => { setValidation(''); setEditing({ ...editing, kind }); }}
           options={kinds.map(kind => ({ id: kind, label: kindLabel(kind), icon: kindIcon(kind), testId: `automation-kind-${kind}` }))}
           disabled={kindLocked} />}</Field>
         <fieldset disabled={formLocked} className="automation-fieldset">
           {isScript ? <HookFields draft={editing.hook} locale={locale} onChange={patch => setEditing({ ...editing, hook: { ...editing.hook, ...patch } })} />
             : <RuleFields draft={editing.rule} action={editing.kind === 'forward' ? 'forward' : 'notify'} agents={agents} onChange={patch => setEditing({ ...editing, rule: { ...editing.rule, ...patch } })} />}
-          <Switch label={ko ? '사용' : 'Enabled'} testId={isScript ? 'pshooks-enabled' : 'hooks-enabled'} checked={editing.enabled} onChange={enabled => setEditing({ ...editing, enabled })} />
+          <Switch label={t('hooks.enabled')} testId={isScript ? 'pshooks-enabled' : 'hooks-enabled'} checked={editing.enabled} onChange={enabled => setEditing({ ...editing, enabled })} />
         </fieldset>
         {validation && <span className="ui-field-error" role="alert" data-testid={isScript ? 'pshooks-validation' : 'hooks-validation'}>{validation}</span>}
         {(isScript ? controller.errors('hooks') : rules.error ? [rules.error] : []).map((error, index) => <span key={index} className="ui-field-error" role="alert">{revealControls(error)}</span>)}
         <FormActions>
-          <button type="button" className="btn" data-testid="automation-cancel" onClick={cancelEdit}>{ko ? '취소' : 'Cancel'}</button>
-          <button type="button" className="btn primary" data-testid={isScript ? 'pshooks-save' : 'hooks-save'} disabled={formLocked} onClick={() => { void save(); }}>{ko ? '저장' : 'Save'}</button>
+          <button type="button" className="btn" data-testid="automation-cancel" onClick={cancelEdit}>{t('ui.cancel')}</button>
+          <button type="button" className="btn primary" data-testid={isScript ? 'pshooks-save' : 'hooks-save'} disabled={formLocked} onClick={() => { void save(); }}>{t('ui.save')}</button>
         </FormActions>
       </Form> : <>
-        {policyWarning && <div className="automation-policy" data-testid="pshooks-policy-note"><Icon name="warning" size={13} className="ui-warn" /><span className="ui-grow">{tt('hooks.policyNote')}</span>
-          <button type="button" className="btn small subtle" data-testid="pshooks-show-permissions" disabled={!connected} onClick={onShowPermissions}><Icon name="shield" size={12} />{tt('hooks.goPermissions')}</button></div>}
+        {policyWarning && <div className="automation-policy" data-testid="pshooks-policy-note"><Icon name="warning" size={13} className="ui-warn" /><span className="ui-grow" role="status">{t('hooks.policyNote')}</span>
+          <button type="button" className="btn small subtle" data-testid="pshooks-show-permissions" disabled={!connected} onClick={onShowPermissions}><Icon name="shield" size={12} />{t('hooks.goPermissions')}</button></div>}
         <Toolbar><SearchBox value={query} onChange={setQuery} testId="automation-search" /></Toolbar>
-        <div className="automation-list-wrap"><DataTable className="automation-list" testId="automation-table" label={ko ? '자동화 규칙' : 'Automation rules'} columns="minmax(0, 1fr) 96px 84px 34px 88px" empty={!visible.length}
-          head={[ko ? '이름' : 'Name', <span className="automation-col">{ko ? '신호' : 'Signal'}</span>, <span className="automation-col">{ko ? '할 일' : 'Action'}</span>, ko ? '사용' : 'On', '']}>
+        <div className="automation-list-wrap"><DataTable className="automation-list" testId="automation-table" label={t('hooks.rulesTitle')} columns="minmax(0, 1fr) 96px 84px 34px 88px" empty={!visible.length}
+          head={[t('hooks.name'), <span className="automation-col">{t('hooks.signal')}</span>, <span className="automation-col">{t('hooks.action')}</span>, t('hooks.col.on'), '']}>
           {paged.slice.map(item => {
             const broken = item.type === 'hook' && (!!item.hook.note || !!item.hook.unreadable);
             const id = item.type === 'rule' ? item.rule.id : item.hook.id;
@@ -200,42 +199,43 @@ export function AgentRulesView({ locale, workspaceKey, sessionId, agents, connec
               <Cell title={item.type === 'hook' ? item.hook.description || item.hook.note : undefined}>
                 <strong>{revealControls(item.name)}</strong>
                 <span className="automation-badges">{signalBadge(item)}{actionBadge(item)}</span>
-                {broken && item.type === 'hook' && <span role="note" className="ui-sub ui-warn" title={item.hook.note || tt('tools.unreadable')}>{revealControls(item.hook.note || tt('tools.unreadable'))}</span>}
+                {broken && item.type === 'hook' && <span role="note" className="ui-sub ui-warn" title={item.hook.note || t('tools.unreadable')}>{revealControls(item.hook.note || t('tools.unreadable'))}</span>}
               </Cell>
               <Cell className="automation-col">{signalBadge(item)}</Cell>
               <Cell className="automation-col">{actionBadge(item)}</Cell>
-              <Cell>{!broken && <Switch label={ko ? `${item.name} 사용` : `Enable ${item.name}`} showLabel={false} checked={enabled} disabled={locked || (item.type === 'hook' && !item.hook.hash)}
+              <Cell>{!broken && <Switch label={t('hooks.toggle', { name: item.name })} showLabel={false} checked={enabled} disabled={locked || (item.type === 'hook' && !item.hook.hash)}
                 testId={item.type === 'rule' ? `hooks-toggle-${id}` : `pshooks-toggle-${id}`} onChange={() => toggle(item)} />}</Cell>
               <Actions>
-                {!broken && <IconButton icon="edit" label={ko ? '편집' : 'Edit'} disabled={locked || !!editing || (item.type === 'hook' && !item.hook.hash)} testId={item.type === 'rule' ? `hooks-open-${id}` : `pshooks-edit-${id}`} onClick={() => openEdit(item)} />}
-                {item.type === 'hook' && <IconButton icon="external" label={tt('hooks.open')} disabled={hooksLocked} testId={`pshooks-open-${id}`} onClick={() => { void controller.command('hooks', { action: 'open', id }); }} />}
-                <IconButton icon="trash" tone="danger" label={ko ? '삭제' : 'Delete'} disabled={locked} testId={item.type === 'rule' ? `hooks-remove-${id}` : `pshooks-delete-${id}`} onClick={() => setDeleting(item)} />
+                {!broken && <IconButton icon="edit" label={t('hooks.edit')} disabled={locked || !!editing || (item.type === 'hook' && !item.hook.hash)} testId={item.type === 'rule' ? `hooks-open-${id}` : `pshooks-edit-${id}`} onClick={() => openEdit(item)} />}
+                {item.type === 'hook' && <IconButton icon="external" label={t('hooks.open')} disabled={hooksLocked} testId={`pshooks-open-${id}`} onClick={() => { void controller.command('hooks', { action: 'open', id }); }} />}
+                <IconButton icon="trash" tone="danger" label={t('ui.delete')} disabled={locked} testId={item.type === 'rule' ? `hooks-remove-${id}` : `pshooks-delete-${id}`} onClick={() => setDeleting(item)} />
               </Actions>
             </Row>;
           })}
         </DataTable></div>
         <Pager paged={paged} testId="automation-pager" />
         {deleting && <div className="ui-card-foot automation-confirm" role="group" data-testid={deleting.type === 'rule' ? 'hooks-delete-confirm' : 'pshooks-delete-confirm'} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); keepItem(); } }}>
-          <span className="ui-grow">{deleting.type === 'rule' ? t('agentHooks.deleteBody', { title: deleting.name }) : tt('hooks.deleteQuestion', { name: deleting.name })}</span>
-          <button type="button" className="btn small" autoFocus onClick={keepItem}>{ko ? '취소' : 'Cancel'}</button>
-          <button type="button" className="btn small danger" data-testid={deleting.type === 'rule' ? 'hooks-delete-yes' : 'pshooks-delete-yes'} disabled={deleting.type === 'rule' ? rulesLocked : hooksLocked} onClick={() => { void remove(); }}>{ko ? '삭제' : 'Delete'}</button>
+          <span className="ui-grow">{deleting.type === 'rule' ? t('agentHooks.deleteBody', { title: deleting.name }) : t('hooks.deleteQuestion', { name: deleting.name })}</span>
+          <button type="button" className="btn small" autoFocus onClick={keepItem}>{t('ui.cancel')}</button>
+          <button type="button" className="btn small danger" data-testid={deleting.type === 'rule' ? 'hooks-delete-yes' : 'pshooks-delete-yes'} disabled={deleting.type === 'rule' ? rulesLocked : hooksLocked} onClick={() => { void remove(); }}>{t('ui.delete')}</button>
         </div>}
         {rules.error && <p className="ui-note" role="alert" data-testid="hooks-error">{revealControls(rules.error)}</p>}
         {controller.errors('hooks').map((error, index) => <p className="ui-note" role="alert" key={index}>{revealControls(error)}</p>)}
         {controller.hooks.diagnostics.map((message, index) => <p className="ui-note ui-muted" key={'d' + index}>{revealControls(message)}</p>)}
       </>}
     </ViewSection>
-    <ViewSection sectionKey="agents-automation-runs" className="automation-runs" title={ko ? '실행 기록' : 'Run history'} status={runs.length} bodyClassName="ui-flush" active={runtime.state?.running}
-      actions={runtime.state?.running ? <button type="button" className="btn small" data-testid="project-hooks-cancel" disabled={!connected || !shown} onClick={() => runtime.command('cancel')}><Icon name="stop" size={11} />{ko ? '실행 중지' : 'Stop'}</button> : undefined}>
+    <ViewSection sectionKey="agents-automation-runs" title={t('hooks.runsTitle')} status={runs.length} bodyClassName="ui-flush" active={runtime.state?.running}
+      actions={runtime.state?.running ? <button type="button" className="btn small" data-testid="project-hooks-cancel" disabled={!connected || !shown} onClick={() => runtime.command('cancel')}><Icon name="stop" size={11} />{t('hooks.stop')}</button> : undefined}>
       {runtime.state?.message && <p className="ui-note ui-muted" role="status">{revealControls(runtime.state.message)}</p>}
       {runtime.transportError && <p className="ui-note" role="alert">{t('error.hostUnavailable')}</p>}
-      <DataTable testId="hooks-log" label={ko ? '실행 기록' : 'Run history'} columns="96px minmax(0, 1fr) 84px" empty={!runs.length} head={[ko ? '시각' : 'Time', ko ? '규칙' : 'Rule', ko ? '결과' : 'Result']}>
+      <div className="automation-list-wrap"><DataTable className="automation-log" testId="hooks-log" label={t('hooks.runsTitle')} columns="96px minmax(0, 1fr) 84px" empty={!runs.length}
+        head={[<span className="automation-col">{t('ui.col.time')}</span>, t('hooks.col.rule'), t('hooks.col.result')]}>
         {pagedRuns.slice.map((run, index) => <Row key={run.key} testId={`hooks-firing-${index}`}>
-          <Cell className="ui-muted">{when(run.at, locale)}</Cell>
-          <Cell title={run.error || run.detail}>{revealControls(run.name)}<span className="ui-sub">{run.signal}{run.detail ? <> · {revealControls(run.detail)}</> : null}</span></Cell>
+          <Cell className="ui-muted automation-col">{when(run.at, locale)}</Cell>
+          <Cell title={run.error || run.detail}>{revealControls(run.name)}<span className="ui-sub"><span className="automation-when">{when(run.at, locale)} · </span>{run.signal}{run.detail ? <> · {revealControls(run.detail)}</> : null}</span></Cell>
           <Cell><Badge tone={outcomeTone(run.outcome)} title={run.error || run.outcome}>{revealControls(run.label)}</Badge></Cell>
         </Row>)}
-      </DataTable>
+      </DataTable></div>
       <Pager paged={pagedRuns} testId="hooks-log-pager" />
     </ViewSection>
   </div>;

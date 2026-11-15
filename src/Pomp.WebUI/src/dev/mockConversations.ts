@@ -1,8 +1,9 @@
 import type { HostMessageType, HostToUi, UiToHost } from '../protocol';
-import type { AgentHistoryEntry, ConversationPartner, HistoryFilter, QueueState } from '../conversationProtocol';
+import type { AgentHistoryEntry, ConversationPartner, ConversationPlan, HistoryFilter, QueueState } from '../conversationProtocol';
 
 /** Browser-only chat tabs, queue and bounded history fixtures. Never invokes a provider. */
 export function createMockConversations(post: <K extends HostMessageType>(type: K, payload: HostToUi[K]) => void, options: {
+  root: string; plan: (id: string, partner: ConversationPartner) => ConversationPlan;
   sessionId: () => string; busy: () => boolean; start: (input: UiToHost['chat/send']) => void;
   /** The queue's "send now": to the running agent (`chat/steered`), or a turn when nothing runs. */
   steer: (input: UiToHost['chat/send']) => void;
@@ -12,6 +13,8 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
   const partners = new Map<string, ConversationPartner>();
   let open: string[] = [];
   let main: string | null = options.sessionId();
+  /** Tabs where a relayed message works or waits for an answer (their own engines are not simulated). */
+  const marks = new Map<string, 'running' | 'waiting'>();
   const same = (a?: ConversationPartner, b?: ConversationPartner) => !!a && !!b && a.kind === b.kind && a.id === b.id;
   const titleOf = (partner: ConversationPartner) => partner.kind === 'team' ? '기능 개발팀' : partner.kind === 'agent' ? '설계자' : undefined;
   let queue: QueueState = { sessionId: null, items: [], paused: false };
@@ -24,7 +27,11 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
   const publishHistory = () => post('agents/historyState', { entries: structuredClone(history), truncated: false });
   const publishTabs = () => {
     const partner = partners.get(options.sessionId()) ?? { kind: 'main' as const };
-    post('conversation/tabsState', { sessionId: options.sessionId(), partner, title: titleOf(partner), main, tabs: open.map(id => ({ sessionId: id, partner: partners.get(id)!, title: titleOf(partners.get(id)!) })) });
+    const ids = [...(main ? [main] : []), ...open];
+    const plans = ids.map(id => options.plan(id, partners.get(id) ?? { kind: 'main' }));
+    post('conversation/tabsState', { root: options.root, plans, sessionId: options.sessionId(), partner, title: titleOf(partner), main,
+      mainRunning: plans.some(plan => plan.sessionId === main && (plan.isStreaming || plan.hasPendingAsyncWork)),
+      tabs: open.map(id => ({ sessionId: id, partner: partners.get(id)!, title: titleOf(partners.get(id)!), isRunning: marks.get(id) === 'running' || marks.get(id) === 'waiting' || plans.some(plan => plan.sessionId === id && (plan.isStreaming || plan.hasPendingAsyncWork)), waiting: marks.get(id) === 'waiting' })) });
   };
   const snapshot = () => { publishTabs(); publishQueue(); publishHistory(); };
   const matches = (entry: AgentHistoryEntry, filter?: HistoryFilter) => (!filter?.kind || entry.target.kind === filter.kind) && (!filter?.id || entry.target.id === filter.id) && (!filter?.status || entry.status === filter.status) && (!entry.pinned || filter?.includePinned === true);
@@ -63,8 +70,17 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
     pause('대화가 바뀌어 대기열을 멈췄어요.'); snapshot();
   };
   const tabs = {
+    sessions: () => [...(main ? [main] : []), ...open],
+    publish: publishTabs,
     current: () => partners.get(options.sessionId()),
     seed: (id: string, partner: ConversationPartner) => { if (partner.kind !== 'main') partners.set(id, partner); },
+    /** The tab of a partner, opened in the background when it has none (the current tab stays). */
+    ensure: (partner: ConversationPartner): string => {
+      let id = open.find(other => same(partners.get(other), partner));
+      if (!id) { id = `mock-relay-${++counter}`; partners.set(id, partner); open = [...open, id]; publishTabs(); }
+      return id;
+    },
+    mark: (id: string, state?: 'running' | 'waiting') => { if (state) marks.set(id, state); else marks.delete(id); publishTabs(); },
     openSession: (partner: ConversationPartner) => open.find(id => same(partners.get(id), partner)),
     main: () => main,
     close: (id: string) => { open = open.filter(other => other !== id); publishTabs(); },
@@ -74,6 +90,11 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
     const target = input.team ? { kind: 'team' as const, id: input.team, title: '기능 개발팀' } : input.agent ? { kind: 'agent' as const, id: input.agent, title: input.agent } : input.agentInstance ? { kind: 'dm' as const, id: input.agentInstance, title: input.agentInstance } : undefined;
     if (!target) return;
     history.unshift({ id: `history-${++counter}`, sessionId: options.sessionId(), promptId, target, text: input.text, startedAt: new Date().toISOString(), status: 'running', pinned: false, members: [] }); history = history.slice(0, 200); publishHistory();
+  };
+  /** The run record of a relayed message follows its relay; the queue of this conversation is not involved. */
+  const record = (promptId: string, status: string) => {
+    const entry = history.find(item => item.promptId === promptId);
+    if (entry) { entry.status = status; entry.endedAt = new Date().toISOString(); publishHistory(); }
   };
   const finish = (promptId: string, status: string) => {
     const entry = history.find(item => item.promptId === promptId);
@@ -114,5 +135,5 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
   }
   const mode = new URLSearchParams(window.location.search).get('chatQueue');
   if (mode) queue = { sessionId: mode === 'other' ? 'mock-session-2' : options.sessionId(), paused: true, reason: mode === 'error' ? '응답 오류로 대기열을 멈췄어요.' : '사용자가 대기열을 일시정지했어요.', items: [{ id: 'fixture-queue', text: '완료된 변경과 검증 결과를 정리해 주세요.', includeEditorContext: true, agent: 'architect', createdAt: new Date().toISOString() }] };
-  return { handle, route, tryQueue, snapshot, changedSession, start, finish, pause, tabs };
+  return { handle, route, tryQueue, snapshot, changedSession, start, record, finish, pause, tabs };
 }

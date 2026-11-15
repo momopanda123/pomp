@@ -167,7 +167,77 @@ namespace Pomp.Hosting
         private void PublishCatalog() { lock (_resourcePublishLock) _ui.Post(UiMessageTypes.CatalogState, CatalogView(), UiDelivery.State); }
         private string WorkingRoot() { lock (_stateLock) return _workingDirectory.Length == 0 ? Path.Combine(_environment.DataDirectory, "workspace") : _workingDirectory; }
         private PompCatalog CatalogFiles() => new PompCatalog(WorkingRoot(), _options.UserHome, OmpExtensionArguments.FindPackageDirectory(_environment.ExtensionDirectory), _logger);
-        private SkillSwitchStore SkillSwitches() => new SkillSwitchStore(_environment.DataDirectory);
+        private SkillSwitchStore SkillSwitches() => new SkillSwitchStore(_environment.DataDirectory, this);
+        /// <summary>
+        /// The skill switches and the MCP files are shared by every conversation, each with its own engine: a change made through another
+        /// conversation is applied to this one's engine as well. Called once by the constructor; Dispose calls
+        /// <see cref="UnsubscribeSharedResources"/>.
+        /// </summary>
+        private void SubscribeSharedResources()
+        {
+            SkillSwitchStore.Changed += OnSharedSkillSwitchesChanged;
+            NativeMcpConfig.Saved += OnSharedMcpSaved;
+        }
+        private void UnsubscribeSharedResources()
+        {
+            SkillSwitchStore.Changed -= OnSharedSkillSwitchesChanged;
+            NativeMcpConfig.Saved -= OnSharedMcpSaved;
+        }
+        // Both handlers run on the changing conversation's thread: they only hand over to the pool, so nothing of this session runs under
+        // that conversation's locks (or this one's _stateLock) and nothing is thrown back at it.
+        private void OnSharedSkillSwitchesChanged(string file, object? origin)
+        {
+            try
+            {
+                if (ReferenceEquals(origin, this) || Volatile.Read(ref _disposed) == 1) return;
+                if (!string.Equals(file, SkillSwitchStore.FileOf(_environment.DataDirectory), StringComparison.OrdinalIgnoreCase)) return;
+                Task.Run(() => ApplySharedSkillSwitches()).Forget(_logger, "shared skill switches");
+            }
+            catch (Exception ex) { _logger.Debug("Could not follow another conversation's skill change: " + ex.Message); }
+        }
+        private void ApplySharedSkillSwitches()
+        {
+            try
+            {
+                // A stopped engine reads the switches when it starts; only a running one needs its overlay rewritten and its list sent again.
+                if (Volatile.Read(ref _disposed) == 1 || _bridge.State != BridgeState.Running) return;
+                RewriteLiveOverlay();
+                if (Volatile.Read(ref _disposed) == 1)
+                {
+                    // Dispose removed the overlay while this wrote it again.
+                    File.Delete(LiveOverlayPath());
+                    return;
+                }
+                _commands.Enqueue(RefreshSkillsAsync);
+            }
+            catch (Exception ex) { _logger.Debug("Could not follow another conversation's skill change: " + ex.Message); }
+        }
+        private void OnSharedMcpSaved(IReadOnlyList<string> files, object? origin)
+        {
+            try
+            {
+                if (ReferenceEquals(origin, this) || Volatile.Read(ref _disposed) == 1) return;
+                Task.Run(() => ApplySharedMcpChange(files)).Forget(_logger, "shared MCP change");
+            }
+            catch (Exception ex) { _logger.Debug("Could not follow another conversation's MCP change: " + ex.Message); }
+        }
+        private void ApplySharedMcpChange(IReadOnlyList<string> files)
+        {
+            try
+            {
+                if (Volatile.Read(ref _disposed) == 1) return;
+                // Another workspace's project file is not this engine's; the user file is every engine's.
+                if (!McpFiles().Reads(files)) return;
+                lock (_stateLock)
+                {
+                    // A stopped engine loads the files when it starts; a running one keeps the servers it started with until it restarts.
+                    if (_bridgeState.State != BridgeState.Running) return;
+                    _mcpRestartRequired = true;
+                }
+                if (Volatile.Read(ref _disposed) == 0) RefreshMcp();
+            }
+            catch (Exception ex) { _logger.Debug("Could not follow another conversation's MCP change: " + ex.Message); }
+        }
         /// <summary>The engine profile the extra arguments or the environment select (null = the default one); shared with the MCP file paths.</summary>
         private string? OmpProfile()
         {
@@ -262,7 +332,7 @@ namespace Pomp.Hosting
                 _logger.Warn("Could not add the bundled skills to the overlay: " + ex.Message);
             }
 
-            OmpOverlayWriter.Write(overlayPath, hostTools, deniedTools, computer, yolo, toolUi, directories, worktreeBase, disabled);
+            OmpOverlayWriter.Write(overlayPath, hostTools, deniedTools, computer, yolo, toolUi, directories, worktreeBase, disabled, DictationOptionsForOverlay());
         }
         /// <summary>Switches one skill off or on (any source, including engine rows): stored, then the live overlay is rewritten.</summary>
         private void SetSkillEnabled(string name, bool enabled)
@@ -270,6 +340,9 @@ namespace Pomp.Hosting
             SkillInfoPayload[] rows;
             lock (_stateLock) rows = _skillsView.Skills.Where(s => s.Name == name).ToArray();
             if (rows.Length == 0) throw new InvalidOperationException(PompLanguage.Pick("목록에 없는 스킬이에요.", "This skill is not in the list."));
+            // The user's or the workspace's own omp config wins over POMP's switch: saying "on" here would leave the skill off without a reason.
+            if (enabled && ConfigDisabledSkills().Contains(name))
+                throw new InvalidOperationException(PompLanguage.Pick("omp 설정 파일(config.yml)에서 꺼 둔 스킬이라 여기서는 켤 수 없어요. 그 파일의 disabledExtensions에서 이 스킬을 지워 주세요.", "This skill is switched off in the omp settings file (config.yml), so it cannot be switched on here. Remove it from disabledExtensions in that file."));
             // Switching on also switches on everything the skill requires (transitive closure); switching off never cascades.
             var names = enabled ? RequiresClosure(name) : new HashSet<string>(new[] { name }, StringComparer.Ordinal);
             if (!SkillSwitches().SetMany(names, enabled)) return;
@@ -304,17 +377,23 @@ namespace Pomp.Hosting
 
             return closure;
         }
+        private readonly object _overlayRewriteLock = new object();
+        private string LiveOverlayPath() => Path.Combine(Path.GetFullPath(_environment.DataDirectory), "omp", "pomp-overlay-" + _engineKey + ".yml");
         private void RewriteLiveOverlay()
         {
-            var dataDirectory = Path.GetFullPath(_environment.DataDirectory);
-            var root = WorkingRoot();
-            var hostTools = _registry.GetDefinitions().Select(definition => definition.Name).ToList();
-            var blockNetwork = _settings.BlockOmpNetworkTools;
-            ComputerUseOptions computer;
-            lock (_computerLock) computer = _computerOptions;
-            var extensionArguments = _settings.LoadOmpExtensions ? OmpExtensionArguments.Build(_environment.ExtensionDirectory ?? string.Empty) : Array.Empty<string>();
-            var worktreeBase = extensionArguments.Count > 0 && OmpExtensionArguments.ContainsModule(_environment.ExtensionDirectory, "./extensions/teams.ts") ? ProjectData.Folder(root, "wt") : null;
-            WriteOverlay(Path.Combine(dataDirectory, "omp", "pomp-overlay-" + _engineKey + ".yml"), root, hostTools, blockNetwork ? OmpNetworkTools.Names : null, computer, _settings.ApprovalMode == OmpApprovalMode.Yolo, _settings.UseRpcUiMode, worktreeBase);
+            // One rewrite at a time (the command queue, a settings change and another conversation's change can all ask): each reads the
+            // switches and options inside the lock, so the last file written never holds older values than an earlier one.
+            lock (_overlayRewriteLock)
+            {
+                var root = WorkingRoot();
+                var hostTools = _registry.GetDefinitions().Select(definition => definition.Name).ToList();
+                var blockNetwork = _settings.BlockOmpNetworkTools;
+                ComputerUseOptions computer;
+                lock (_computerLock) computer = _computerOptions;
+                var extensionArguments = _settings.LoadOmpExtensions ? OmpExtensionArguments.Build(_environment.ExtensionDirectory ?? string.Empty) : Array.Empty<string>();
+                var worktreeBase = extensionArguments.Count > 0 && OmpExtensionArguments.ContainsModule(_environment.ExtensionDirectory, "./extensions/teams.ts") ? ProjectData.Folder(root, "wt") : null;
+                WriteOverlay(LiveOverlayPath(), root, hostTools, blockNetwork ? OmpNetworkTools.Names : null, computer, _settings.ApprovalMode == OmpApprovalMode.Yolo, _settings.UseRpcUiMode, worktreeBase);
+            }
         }
         // ui/ready holds the hub lock while taking the session snapshot: never take the hub lock under _stateLock.
         private bool ResourcesBusy() { var pending = _ui.PendingRequestCount > 0; lock (_stateLock) return pending || ResourcesBusyLocked(); }
@@ -327,8 +406,15 @@ namespace Pomp.Hosting
         }
         private void QueueResourceCommand(UiMessage message, string reply, Func<JObject, Task> handler)
         {
+            var payload = message.Payload ?? new JObject();
+            // External-app file setup neither uses the chat engine nor waits behind a prompt held by the serial queue.
+            if (reply == UiMessageTypes.McpReply && payload.GetString("action") is "antigravity-refresh" or "antigravity-setup")
+            {
+                HandleAntigravityMcpAsync(payload).Forget(_logger, "Antigravity MCP configuration");
+                return;
+            }
             // Reading a list or one file for the editor stays allowed while a reply runs; changes wait.
-            var payload = message.Payload ?? new JObject(); var reject = ResourcesBusy() && (reply == UiMessageTypes.ToolsReply || payload.GetString("action") is not ("refresh" or "read" or "get"));
+            var reject = ResourcesBusy() && (reply == UiMessageTypes.ToolsReply || payload.GetString("action") is not ("refresh" or "read" or "get"));
             if (reject) _ui.Post(reply, new UiCommandReplyPayload { RequestId = payload.GetString("requestId") ?? "", Ok = false, Error = ResourceBusyMessage() }, UiDelivery.State);
             else _commands.Enqueue(() => handler(payload));
         }
@@ -653,11 +739,61 @@ namespace Pomp.Hosting
             lock (_stateLock)
             {
                 view.RestartRequired = _mcpRestartRequired;
+                view.Antigravity = _mcpView.Antigravity;
                 if (_mcpRestartRequired) view.Message = PompLanguage.Pick("변경 내용이 아직 적용되지 않았어요.", "The changes are not applied yet.");
                 _mcpView = view;
             }
             PublishMcp();
         }
+        private async Task<AntigravityMcpSetup> AntigravityMcpFilesAsync()
+        {
+            // _workingDirectory is initialized only when omp starts, and may itself be the fallback. Resolve the
+            // actual IDE workspace even before sign-in/start; never send the host's internal data/workspace to an app.
+            var root = await TryGetWorkspaceRootAsync().ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(root) || string.Equals(NormalizePath(root), NormalizePath(Path.Combine(_environment.DataDirectory, "workspace")), StringComparison.OrdinalIgnoreCase)) root = null;
+            return new AntigravityMcpSetup(root, _options.UserHome, _environment.ExtensionDirectory, _options.AntigravityInstallationLocator);
+        }
+
+        // A stopped engine retains its switch flag until its next launch. It must not prevent independent app
+        // setup in the current IDE project; the workspace-specific name still rejects a previous project's click.
+        private bool AntigravityWorkspaceChanging() => Volatile.Read(ref _workspaceSwitching) != 0 && _bridge.State != BridgeState.Stopped;
+
+        private async Task HandleAntigravityMcpAsync(JObject payload)
+        {
+            var id = payload.GetString("requestId") ?? "";
+            string? error = null;
+            AntigravityMcpStatePayload? view = null;
+            try
+            {
+                var command = new UiMessage("", payload).PayloadAs<McpCommandPayload>() ?? throw new ArgumentException();
+                var files = await AntigravityMcpFilesAsync().ConfigureAwait(false);
+                if (command.Action == "antigravity-setup")
+                {
+                    // Resolve again after any asynchronous IDE hop. The snapshot name pins this exact root, while
+                    // the service's opaque revision pins both selected config path and all of its bytes.
+                    files = await AntigravityMcpFilesAsync().ConfigureAwait(false);
+                    if (AntigravityWorkspaceChanging()) throw new InvalidOperationException(WorkspaceSwitchBlock());
+                    _disposeCts.Token.ThrowIfCancellationRequested();
+                    view = files.Setup(command.Name, command.ExpectedHash);
+                }
+                else view = files.Inspect();
+            }
+            catch (Exception ex)
+            {
+                error = ResourceError(ex);
+                try { view = (await AntigravityMcpFilesAsync().ConfigureAwait(false)).Inspect(); }
+                catch (Exception refreshError) { view = new AntigravityMcpStatePayload { Message = ResourceError(refreshError) }; }
+            }
+            if (view != null && AntigravityWorkspaceChanging())
+            {
+                view.CanConfigure = false;
+                view.Message = WorkspaceSwitchBlock();
+            }
+            lock (_stateLock) _mcpView.Antigravity = view;
+            PublishMcp();
+            _ui.Post(UiMessageTypes.McpReply, new McpReplyPayload { RequestId = id, Ok = error == null, Error = error }, UiDelivery.State);
+        }
+
         private async Task HandleMcpAsync(JObject payload)
         {
             var id = payload.GetString("requestId") ?? ""; string? error = null, output = null;
@@ -683,6 +819,7 @@ namespace Pomp.Hosting
                         {
                             lock (_stateLock) _mcpRestartRequired = true;
                             _workspaceTrust.KeepAfterOwnWrite(trusted, ".omp/mcp.json");
+                            store.Announce(this);
                         }
                     }
                 }
@@ -839,6 +976,7 @@ namespace Pomp.Hosting
                         {
                             lock (_stateLock) _mcpRestartRequired = true;
                             _workspaceTrust.KeepAfterOwnWrite(trusted, ".omp/mcp.json");
+                            store.Announce(this);
                         }
                     }
                     RefreshMcp(); await RefreshSkillsAsync().ConfigureAwait(false);

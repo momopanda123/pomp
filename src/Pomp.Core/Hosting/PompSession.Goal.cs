@@ -16,12 +16,24 @@ using Pomp.Ui;
 
 namespace Pomp.Hosting
 {
-    // Goal runs (docs/ui-protocol.md "Goal runs"): /goal starts a POMP Workflow and arms automatic continuation for it, optionally with a
+    // Goal runs (docs/ui-protocol.md "Goal runs"): /goal starts a bounded POMP Workflow run, optionally with a
     // token budget. The page shows a confirmation card first (typed /goal, or the model's request_goal_run); only its answer starts anything.
     public sealed partial class PompSession
     {
         internal const string GoalCommandMessage = "workspace/goal", GoalStateMessage = "workspace/goalState", GoalRequestMessage = "workspace/goalRequest";
         private const int MaxGoalChars = 16000;
+
+        /// <summary>
+        /// Which workflow journal this engine owns (<see cref="ComposerWorkflow"/>): the workspace's for the Default tab's engine (""),
+        /// its own for the engine of an agent or team tab ("kind:id"). Without this every engine of a workspace would take over the one
+        /// journal, and a workflow of the Default tab would pause and block the tools of every other tab.
+        /// The conversation host says which tab an engine is for when it creates it (<see cref="InitializeConversation"/>), and that stays
+        /// through new conversations and engine restarts in the tab. It is never derived from the current conversation's partner: that is
+        /// only known some time after the conversation itself, when a page may already have asked for the workflow. A session without a
+        /// host (one engine for every conversation) has the workspace's journal.
+        /// </summary>
+        private string _workflowJournalScope = "";
+        private string WorkflowJournalScope() { lock (_stateLock) return _workflowJournalScope; }
 
         /// <summary>The conversation's model tokens so far, summed over the finished assistant messages the engine reported (see <see cref="MessageUsage"/>). Only ever grows.</summary>
         private long _usageTokens;
@@ -82,8 +94,8 @@ namespace Pomp.Hosting
         {
             var text = (args.GetString("text") ?? "").Trim();
             if (text.Length == 0 || text.Length > MaxGoalChars) throw new ArgumentException(PompLanguage.Pick("목표가 비어 있거나 너무 길어요.", "The goal is empty or too long."));
-            var budget = ComposerAutoContinue.ReadTokenBudget(args["tokenBudget"]);
-            if (_composerAuto == null || _composerWorkflow == null) throw new InvalidOperationException(PompLanguage.Pick("목표 실행을 쓸 수 없어요.", "Goal runs are not available."));
+            var budget = GoalRunner.ReadTokenBudget(args["tokenBudget"]);
+            if (_goalRunner == null || _composerWorkflow == null) throw new InvalidOperationException(PompLanguage.Pick("목표 실행을 쓸 수 없어요.", "Goal runs are not available."));
             var root = await TryGetWorkspaceRootAsync().ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(root)) throw new InvalidOperationException(PompLanguage.Pick("열린 작업 영역이 없어요.", "No workspace is open."));
             string session; OmpConnection? connection;
@@ -92,10 +104,10 @@ namespace Pomp.Hosting
             var wantedRoot = args.GetString("root"); var wantedSession = args.GetString("sessionId");
             if (!string.IsNullOrEmpty(wantedRoot) && !string.Equals(NormalizePath(wantedRoot), NormalizePath(root), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException(PompLanguage.Pick("작업 영역이 바뀌었어요.", "Workspace changed."));
             if (!string.IsNullOrEmpty(wantedSession) && wantedSession != session) throw new InvalidOperationException(PompLanguage.Pick("대화가 바뀌었어요.", "Conversation changed."));
-            // The same readiness automatic continuation needs before it sends: idle conversation, no pending question, no unfinished terminal work.
-            if (!ComposerContinuationReady()) throw new InvalidOperationException(PompLanguage.Pick("대화가 응답 중이거나 작업이 진행 중이에요.", "A reply or other work is in progress."));
+            // Goal dispatch needs an idle conversation, no pending question and no unfinished terminal work.
+            if (!GoalContinuationReady()) throw new InvalidOperationException(PompLanguage.Pick("대화가 응답 중이거나 작업이 진행 중이에요.", "A reply or other work is in progress."));
             await RequireEngineCommandsAsync(connection, _disposeCts.Token, "pomp-workflow").ConfigureAwait(false);
-            var refusal = _composerAuto.BeginGoal(root!, session, budget);
+            var refusal = _goalRunner.BeginGoal(root!, session, budget);
             if (refusal != null) throw new InvalidOperationException(refusal);
             bool accepted;
             try
@@ -106,16 +118,16 @@ namespace Pomp.Hosting
             }
             catch (Exception ex)
             {
-                _composerAuto.CancelGoal(ex.Message);
+                _goalRunner.CancelGoal(ex.Message);
                 throw;
             }
             if (!accepted)
             {
                 var reason = PompLanguage.Pick("목표를 보내지 못했어요.", "The goal could not be sent.");
-                _composerAuto.CancelGoal(reason);
+                _goalRunner.CancelGoal(reason);
                 throw new InvalidOperationException(reason);
             }
-            _composerAuto.GoalSent();
+            _goalRunner.GoalSent();
         }
 
         /// <summary>The model's request for a goal run: shows the same confirmation card as typing /goal, and starts nothing by itself.</summary>
@@ -139,7 +151,7 @@ namespace Pomp.Hosting
                     if (args.Properties().Any(p => p.Name is not ("goal" or "tokenBudget"))) throw new ArgumentException("Unknown field.");
                     var goal = args["goal"]?.Type == JTokenType.String ? ((string)args["goal"]!).Trim() : "";
                     if (goal.Length == 0 || goal.Length > MaxGoalChars) throw new ArgumentException("The goal must be 1-16,000 characters.");
-                    var budget = ComposerAutoContinue.ReadTokenBudget(args["tokenBudget"]);
+                    var budget = GoalRunner.ReadTokenBudget(args["tokenBudget"]);
                     var connection = invocation.Origin as OmpConnection;
                     string root, session;
                     lock (owner._stateLock)
@@ -152,10 +164,10 @@ namespace Pomp.Hosting
                     }
                     // The engine extension checks that only the main conversation calls this tool; no model-supplied caller field is trusted.
                     await owner.RequireEngineCommandsAsync(connection, token, "pomp-feedback-guard", "pomp-workflow").ConfigureAwait(false);
-                    if (owner._composerWorkflow == null || owner._composerAuto == null) throw new InvalidOperationException("Goal runs are not available.");
+                    if (owner._composerWorkflow == null || owner._goalRunner == null) throw new InvalidOperationException("Goal runs are not available.");
                     var view = owner._composerWorkflow.View();
                     if (!string.IsNullOrEmpty((string?)view["id"]) && !new[] { "empty", "done", "cancelled" }.Contains((string?)view["phase"])) throw new InvalidOperationException("A POMP Workflow is already active; a goal run cannot start now.");
-                    if (owner._composerAuto.GoalPending) throw new InvalidOperationException("A goal run is already starting.");
+                    if (owner._goalRunner.GoalPending) throw new InvalidOperationException("A goal run is already starting.");
                     if (!owner._ui.IsReady) throw new InvalidOperationException("The chat window is not open, so the user cannot be asked.");
                     var request = new JObject { ["requestId"] = "goal-" + Guid.NewGuid().ToString("N"), ["root"] = root, ["sessionId"] = session, ["text"] = goal };
                     if (budget != null) request["tokenBudget"] = budget;

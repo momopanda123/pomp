@@ -9,7 +9,7 @@ import { ColorPicker } from './ColorPicker';
 import { AVATAR_COLORS, Avatar, avatarColor } from './AgentsTables';
 import { Icon } from './Icon';
 import { revealControls } from './RevealControls';
-import { Segmented } from './ui';
+import { IconButton, Segmented } from './ui';
 
 const SHAPES: readonly AvatarShape[] = ['circle', 'rounded', 'square', 'hexagon'];
 /** Pictures are stored as a small square: big enough for every place a picture is shown, small enough to send on demand. */
@@ -89,10 +89,10 @@ export function AvatarEditor({ role, title, returnFocus, disabled, replies, onCl
     catch { setError(t('avatar.imageError')); }
   };
 
-  return <AgentDialog testId="avatar-editor" className="editor-dialog avatar-editor" labelledBy="avatar-editor-title" returnFocus={returnFocus} onClose={() => { if (!saving) onClose(); }}>
+  return <AgentDialog testId="avatar-editor" className="avatar-editor" labelledBy="avatar-editor-title" returnFocus={returnFocus} onClose={() => { if (!saving) onClose(); }}>
     <div className="dialog-head">
       <h4 id="avatar-editor-title">{revealControls(t('avatar.title', { name: title }))}</h4>
-      <button type="button" className="icon-btn" disabled={!!saving} aria-label={t('agents.close')} onClick={onClose}><Icon name="x" size={13} /></button>
+      <IconButton icon="x" label={t('agents.close')} disabled={!!saving} onClick={onClose} />
     </div>
     {error && <div className="dialog-error" role="alert"><Icon name="error" size={12} /><span>{revealControls(error)}</span></div>}
     <div className="dialog-form">

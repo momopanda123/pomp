@@ -13,8 +13,7 @@ using Pomp.Ui;
 
 namespace Pomp.Hosting
 {
-    // Explicit steering reaches a running non-Codex agent at its next step without starting a turn.
-    // A Codex native turn cannot accept in-flight stateful messages: its steer becomes a host-queued next turn.
+    // Explicit steering reaches the running agent without starting an independent turn.
     public sealed partial class PompSession
     {
         private enum SteerOutcome { Sent, NotRunning, Failed }
@@ -24,10 +23,6 @@ namespace Pomp.Hosting
         /// plain abort would run them) and marks the ones it withdrew as not delivered.
         /// </summary>
         private readonly List<string> _steersSent = new List<string>();
-
-        // Codex native WebSocket turns reject stateful mid-turn user messages; admit these as host-queued independent turns.
-        // Read and written under _stateLock alongside the current session's model and connection.
-        private bool _steerRequiresSeparateTurn;
 
         /// <summary>Steering commands are message wrappers, not commands for the running engine to execute.</summary>
         private static string SteerText(string? text)
@@ -49,31 +44,19 @@ namespace Pomp.Hosting
         private bool IsSteerableLocked(long generation) =>
             generation == _chatStopGeneration && (_turns.Count > 0 || _info.IsStreaming) && _bridge.State == BridgeState.Running && !_sessionSwitchUncertain;
 
-        /// <summary>chat/steer: to the running agent when supported, otherwise as an ordinary/queued send.</summary>
+        /// <summary>chat/steer: to the running agent; otherwise use ordinary send/queue handling.</summary>
         private async Task HandleChatSteerAsync(ChatSendPayload send, long generation)
         {
-            send = CopySend(send);
-            bool queueForNativeTurn;
-            lock (_stateLock) queueForNativeTurn = CanSteer(send) && IsSteerableLocked(generation) && _steerRequiresSeparateTurn;
-            if (queueForNativeTurn)
-            {
-                // No in-flight RPC steer or follow-up: the latter also starts an untracked turn in omp.
-                // Host queue admission retains the normal turn lifecycle, Stop and message ordering.
-                send.Main = true;
-                await HandleChatSendAsync(send, generation, forceQueue: true).ConfigureAwait(false);
-                return;
-            }
             if (CanSteer(send) && await SteerAsync(send, generation).ConfigureAwait(false) != SteerOutcome.NotRunning) return;
             await HandleChatSendAsync(send, generation).ConfigureAwait(false);
         }
 
-        /// <summary>Queue's send-now action: a live steer when supported; for Codex, promote to the next host-owned turn.</summary>
+        /// <summary>Queue's send-now action: steer the selected item into the running agent.</summary>
         private async Task SteerQueuedAsync(string requestId, string? id)
         {
             QueuedChat item;
             long generation;
             string? session;
-            bool queuedForNativeTurn = false;
             try
             {
                 lock (_stateLock)
@@ -84,42 +67,42 @@ namespace Pomp.Hosting
                     item.Send.Text = SteerText(item.Send.Text);
                     generation = _chatStopGeneration;
                     session = _queueSession;
-                    if (IsSteerableLocked(generation) && _steerRequiresSeparateTurn)
-                    {
-                        _chatQueue.Remove(item);
-                        item.Send.Main = true;
-                        item.Partner = new ConversationPartnerPayload();
-                        _chatQueue.Insert(0, item);
-                        _queuePaused = false;
-                        _queueReason = null;
-                        // A Codex native turn cannot take a steer. Promote it to the next independent
-                        // turn instead; the queue remains host-owned and can still be stopped/edited.
-                        queuedForNativeTurn = true;
-                    }
-                    else _chatQueue.Remove(item);
+                    _chatQueue.Remove(item);
+                    // Out of the queue but not in a turn yet: its sender must not read that as "removed".
+                    if (item.Relay != null) item.Relay.State = RelayState.Admitting;
                 }
             }
             catch (Exception ex) { Reply(UiMessageTypes.ChatQueueReply, requestId, ex.Message); return; }
 
             PublishChatQueue();
             Reply(UiMessageTypes.ChatQueueReply, requestId, null);
-            if (queuedForNativeTurn) { ScheduleQueueDispatch(); return; }
             var send = CopySend(item.Send);
             send.ClientMessageId = (item.Send.ClientMessageId?.StartsWith(HookMessagePrefix, StringComparison.Ordinal) == true ? HookMessagePrefix : "queue-") + Guid.NewGuid().ToString("N");
             switch (await SteerAsync(send, generation).ConfigureAwait(false))
             {
+                case SteerOutcome.Sent:
+                    // The running turn took it: that turn's end is its end.
+                    if (item.Relay != null) AttachRelayToRunningTurn(item.Relay);
+                    break;
                 case SteerOutcome.NotRunning:
-                    await HandleChatSendAsync(send, generation, expectedSession: session, bypassQueue: true, capturedPartner: item.Partner).ConfigureAwait(false);
+                    // Nothing to steer. While background work still holds the engine the item waits again, first in line.
+                    await HandleChatSendAsync(send, generation, expectedSession: session, bypassQueue: true, capturedPartner: item.Partner, queueFirstWhenBusy: true, relay: item.Relay).ConfigureAwait(false);
+                    if (item.Relay != null) SettleRelayAdmission(item.Relay);
                     break;
                 case SteerOutcome.Failed:
                     // Not delivered: the item goes back to the front of the queue (unless the conversation changed meanwhile).
                     lock (_stateLock)
                     {
                         if (_chatQueue.Count == 0) _queueSession = session;
-                        if (_queueSession == session) _chatQueue.Insert(0, item);
+                        if (_queueSession == session)
+                        {
+                            _chatQueue.Insert(0, item);
+                            if (item.Relay != null) item.Relay.State = RelayState.Queued;
+                        }
                     }
 
                     PublishChatQueue();
+                    if (item.Relay != null) SettleRelayAdmission(item.Relay);
                     break;
             }
         }
@@ -239,7 +222,7 @@ namespace Pomp.Hosting
             CancellationToken epoch;
             lock (_stateLock)
             {
-                if (!IsSteerableLocked(generation) || _steerRequiresSeparateTurn) return SteerOutcome.NotRunning;
+                if (!IsSteerableLocked(generation)) return SteerOutcome.NotRunning;
                 epoch = _epoch.Token;
                 connection = _epochConnection;
             }

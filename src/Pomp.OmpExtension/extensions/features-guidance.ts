@@ -29,7 +29,7 @@ export function featuresText(tools: ReadonlySet<string> | undefined): string {
 				? "When the user asks you to keep working on a larger goal on its own, call `request_goal_run` with the goal (and the budget if they named one), then end your reply; do not begin the goal's work yourself."
 				: "When the user asks you to keep working on a larger goal on its own, suggest /goal; do not begin the goal's work yourself."),
 		"- /workflow <task>: a staged run (plan, discover, edit through change review, verify). Workflows the user saved for repeatable procedures are in Tools > Instructions.",
-		"- Work > Progress shows the todo plan with \"현재 계획 이어가기\" (continue the plan) and \"자동 계속\" (automatic continuation, off by default).",
+		"- Work > Progress shows each connected conversation's task plan. Users can edit tasks and explicitly continue or stop the selected conversation; continuing during a run queues the request.",
 		"",
 		"POMP skills (Tools > Skills). When the user asks you to create a skill, write it in one of these two folders; POMP lists and manages no others, so never use `.omp/skills`, `.claude/skills` or similar:",
 		"- This project: `.pomp/skills/<name>/SKILL.md` under the workspace root (your working directory). The default.",

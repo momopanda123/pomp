@@ -36,7 +36,6 @@ namespace Pomp.Hosting
         {
             public int PhaseIndex, TaskIndex;
             public string PhaseName = "", Content = "", Status = "";
-            public string? Blocker;
         }
 
         private sealed class PlanPhaseRow
@@ -80,12 +79,10 @@ namespace Pomp.Hosting
                         if (!(tasks[t] is JObject task)) continue;
                         var status = task.GetString("status");
                         if (status == null || !PlanStatuses.Contains(status)) continue;
-                        var blocker = task.GetString("blocker");
                         Rows.Add(new PlanRow
                         {
                             PhaseIndex = p, TaskIndex = t, PhaseName = shown.Name, Status = status,
                             Content = LimitPlanText(task.GetString("content") ?? "", MaxPlanContentChars),
-                            Blocker = blocker == null ? null : LimitPlanText(blocker, MaxPlanBlockerChars),
                         });
                         shown.TaskCount++;
                         if (status != "completed" && status != "abandoned") OpenCount++;
@@ -106,13 +103,14 @@ namespace Pomp.Hosting
         }
 
         /// <summary>workspace/agentPlanPage: one page of the whole plan, from the snapshot of the last get_state.</summary>
-        private void HandleAgentPlanPage(JObject args)
+        private void HandleAgentPlanPage(JObject args, Action<UiMessage>? respond = null)
         {
             var requestId = args.GetString("requestId");
             JObject reply;
             try { reply = PlanPage(requestId, args); }
             catch (Exception ex) { reply = new JObject { ["requestId"] = requestId, ["ok"] = false, ["error"] = TextUtil.Truncate(ex.Message, 500) }; }
-            _ui.Post(UiMessageTypes.AgentPlanPageResult, reply, UiDelivery.State);
+            if (respond != null) respond(new UiMessage(UiMessageTypes.AgentPlanPageResult, reply));
+            else _ui.Post(UiMessageTypes.AgentPlanPageResult, reply, UiDelivery.State);
         }
 
         private JObject PlanPage(string? requestId, JObject args)
@@ -129,8 +127,8 @@ namespace Pomp.Hosting
             var size = (int)Math.Max(1, Math.Min(PlanPageMaxSize, args.GetLong("size") ?? PlanPageDefaultSize));
             var query = (args.GetString("query") ?? "").Trim();
             if (query.Length > PlanQueryMaxChars) query = query.Substring(0, PlanQueryMaxChars);
-            // A task matches by its content, its blocker or the name of its phase.
-            var rows = query.Length == 0 ? plan.Rows : plan.Rows.Where(row => PlanHas(row.Content, query) || PlanHas(row.Blocker, query) || PlanHas(row.PhaseName, query)).ToList();
+            // A task matches by its content or the name of its phase.
+            var rows = query.Length == 0 ? plan.Rows : plan.Rows.Where(row => PlanHas(row.Content, query) || PlanHas(row.PhaseName, query)).ToList();
             var page = (int)Math.Max(0, Math.Min(rows.Count == 0 ? 0 : (rows.Count - 1) / size, args.GetLong("page") ?? 0));
             var reply = new JObject
             {
@@ -142,11 +140,7 @@ namespace Pomp.Hosting
                 ["page"] = page, ["size"] = size, ["total"] = rows.Count, ["completedCount"] = plan.CompletedCount,
                 ["phases"] = new JArray(plan.Phases.Select(phase => new JObject { ["index"] = phase.Index, ["name"] = phase.Name, ["taskCount"] = phase.TaskCount })),
                 ["rows"] = new JArray(rows.Skip(page * size).Take(size).Select(row =>
-                {
-                    var item = new JObject { ["phase"] = row.PhaseIndex, ["task"] = row.TaskIndex, ["content"] = row.Content, ["status"] = row.Status };
-                    if (row.Blocker != null) item["blocker"] = row.Blocker;
-                    return item;
-                })),
+                    new JObject { ["phase"] = row.PhaseIndex, ["task"] = row.TaskIndex, ["content"] = row.Content, ["status"] = row.Status })),
             };
             // Only the phase list is unbounded: the page channel drops a message above 2 MiB with everything queued behind it.
             if (plan.Phases.Count > 2000 && Encoding.UTF8.GetByteCount(reply.ToString(Formatting.None)) > 1536 * 1024) throw new InvalidOperationException(PompLanguage.Pick("계획이 너무 커서 표시할 수 없어요.", "The plan is too large to show."));
@@ -163,27 +157,24 @@ namespace Pomp.Hosting
 
             /// <summary>moveTask: the phase the task goes to and its index there once it has left its old place.</summary>
             public int ToPhase, ToTask;
-            public string? Name, Content, Status, Blocker;
-
-            /// <summary>A blocker was sent: <see cref="Blocker"/> is its new text, or null when the empty text removed it.</summary>
-            public bool BlockerGiven;
+            public string? Name, Content, Status;
 
             public static PlanEdit Parse(JObject args)
             {
                 var edit = new PlanEdit { Op = args.GetString("op") ?? "" };
                 switch (edit.Op)
                 {
-                    case "addTask": case "updateTask": case "deleteTask": case "addPhase": case "renamePhase": case "deletePhase": case "clearCompleted": case "moveTask": case "startTask": break;
+                    case "addTask": case "updateTask": case "deleteTask": case "addPhase": case "clearCompleted": case "moveTask": case "startTask": break;
                     default: throw new ArgumentException(PompLanguage.Pick("알 수 없는 계획 편집이에요.", "Unknown plan edit."));
                 }
 
                 if (edit.Op != "addPhase" && edit.Op != "clearCompleted") edit.PhaseIndex = ReadIndex(args, "phase");
                 if (edit.Op == "updateTask" || edit.Op == "deleteTask" || edit.Op == "moveTask" || edit.Op == "startTask") edit.TaskIndex = ReadIndex(args, "task");
                 if (edit.Op == "moveTask") { edit.ToPhase = ReadIndex(args, "toPhase"); edit.ToTask = ReadIndex(args, "toTask"); }
-                if (edit.Op == "addPhase" || edit.Op == "renamePhase") edit.Name = ReadText(args, "name", MaxPlanNameChars, present: true, blankOk: false);
+                if (edit.Op == "addPhase") edit.Name = ReadText(args, "name", MaxPlanNameChars, present: true);
                 if (edit.Op == "addTask" || edit.Op == "addPhase" || edit.Op == "updateTask")
                 {
-                    edit.Content = ReadText(args, "content", MaxPlanContentChars, present: edit.Op != "updateTask", blankOk: false);
+                    edit.Content = ReadText(args, "content", MaxPlanContentChars, present: edit.Op != "updateTask");
                     var status = args["status"];
                     if (status != null && status.Type != JTokenType.Null)
                     {
@@ -192,10 +183,7 @@ namespace Pomp.Hosting
                         edit.Status = text;
                     }
 
-                    // The empty text removes the blocker.
-                    var blocker = ReadText(args, "blocker", MaxPlanBlockerChars, present: false, blankOk: true);
-                    edit.BlockerGiven = blocker != null; edit.Blocker = string.IsNullOrEmpty(blocker) ? null : blocker;
-                    if (edit.Op == "updateTask" && edit.Content == null && edit.Status == null && !edit.BlockerGiven) throw new ArgumentException(PompLanguage.Pick("바꿀 내용이 없어요.", "Nothing to change."));
+                    if (edit.Op == "updateTask" && edit.Content == null && edit.Status == null) throw new ArgumentException(PompLanguage.Pick("바꿀 내용이 없어요.", "Nothing to change."));
                 }
 
                 return edit;
@@ -226,8 +214,6 @@ namespace Pomp.Hosting
                 var phase = phases[PhaseIndex];
                 switch (Op)
                 {
-                    case "renamePhase": phase.Name = Name!; break;
-                    case "deletePhase": phases.RemoveAt(PhaseIndex); break;
                     case "addTask": phase.Tasks.Add(NewTask()); break;
                     default:
                         if (TaskIndex >= phase.Tasks.Count) throw Missing();
@@ -246,12 +232,12 @@ namespace Pomp.Hosting
 
                         if (Op == "startTask")
                         {
-                            // Like the todo tool's start: the one task in progress, any other goes back to pending; a blocker no longer holds.
+                            // Like the todo tool's start: the one task in progress, any other goes back to pending.
                             var started = phase.Tasks[TaskIndex];
                             if (IsCompleted(started)) throw new ArgumentException(PompLanguage.Pick("이미 완료된 작업이에요.", "That task is already completed."));
                             foreach (var other in phases.SelectMany(each => each.Tasks))
                                 if (other.Status == "in_progress" && !ReferenceEquals(other, started)) other.Status = "pending";
-                            started.Status = "in_progress"; started.Blocker = null;
+                            started.Status = "in_progress";
                             break;
                         }
 
@@ -265,7 +251,6 @@ namespace Pomp.Hosting
                         var task = phase.Tasks[TaskIndex];
                         if (Content != null) task.Content = Content;
                         if (Status != null) task.Status = Status;
-                        if (BlockerGiven) task.Blocker = Blocker;
                         break;
                 }
             }
@@ -280,10 +265,9 @@ namespace Pomp.Hosting
             {
                 if (Status == "in_progress" || Op == "startTask") return false;
                 // Clearing takes only completed tasks: the task in progress and its phase stay.
-                if (Op == "addPhase" || Op == "addTask" || Op == "renamePhase" || Op == "clearCompleted") return true;
+                if (Op == "addPhase" || Op == "addTask" || Op == "clearCompleted") return true;
                 if (PhaseIndex >= phases.Count) return true; // Apply reports the missing phase.
                 var phase = phases[PhaseIndex];
-                if (Op == "deletePhase") return !phase.Tasks.Any(task => task.Status == "in_progress");
                 return TaskIndex >= phase.Tasks.Count || phase.Tasks[TaskIndex].Status != "in_progress";
             }
 
@@ -300,10 +284,8 @@ namespace Pomp.Hosting
                         return $"removed the {done.Count} completed task(s) {string.Join(", ", done)}" + (emptied.Count == 0 ? "" : $" and with them the phase(s) left empty {string.Join(", ", emptied)}");
                     case "addPhase": return $"added the phase \"{Name}\" with the task \"{Content}\" ({Status ?? "pending"})";
                     case "addTask": return $"added the task \"{Content}\" ({Status ?? "pending"}) to the phase \"{phase?.Name}\"";
-                    case "renamePhase": return $"renamed the phase \"{phase?.Name}\" to \"{Name}\"";
-                    case "deletePhase": return $"deleted the phase \"{phase?.Name}\" with its tasks";
                     case "deleteTask": return $"deleted the task \"{task?.Content}\"";
-                    case "startTask": return $"started the task \"{task?.Content}\": it is now in progress" + (task?.Status == "blocked" ? " and no longer blocked" : "") + "; any other task in progress went back to pending";
+                    case "startTask": return $"started the task \"{task?.Content}\": it is now in progress; any other task in progress went back to pending";
                     case "moveTask":
                         var into = ToPhase < phases.Count ? phases[ToPhase] : null;
                         var others = into?.Tasks.Where(each => !ReferenceEquals(each, task)).ToList() ?? new List<AgentPlanTaskPayload>();
@@ -314,12 +296,11 @@ namespace Pomp.Hosting
                         var parts = new List<string>();
                         if (Content != null && Content != task?.Content) parts.Add($"its text to \"{Content}\"");
                         if (Status != null && Status != task?.Status) parts.Add($"its status to {Status}");
-                        if (BlockerGiven && Blocker != task?.Blocker) parts.Add(Blocker == null ? "removed its blocker" : $"its blocker to \"{Blocker}\"");
                         return $"changed the task \"{task?.Content}\": " + (parts.Count == 0 ? "no difference" : string.Join(", ", parts));
                 }
             }
 
-            private AgentPlanTaskPayload NewTask() => new AgentPlanTaskPayload { Content = Content!, Status = Status ?? "pending", Blocker = Blocker };
+            private AgentPlanTaskPayload NewTask() => new AgentPlanTaskPayload { Content = Content!, Status = Status ?? "pending" };
 
             private static bool IsCompleted(AgentPlanTaskPayload task) => task.Status == "completed";
 
@@ -333,10 +314,10 @@ namespace Pomp.Hosting
             }
 
             /// <summary>
-            /// A text field: null when absent (an error when <paramref name="present"/> says it must be there), else a string within the
-            /// limit without control characters and, unless <paramref name="blankOk"/>, not blank.
+            /// A text field: null when absent (an error when <paramref name="present"/> says it must be there), else a non-blank string
+            /// within the limit without control characters.
             /// </summary>
-            private static string? ReadText(JObject args, string key, int limit, bool present, bool blankOk)
+            private static string? ReadText(JObject args, string key, int limit, bool present)
             {
                 var token = args[key];
                 if (token == null || token.Type == JTokenType.Null)
@@ -346,7 +327,7 @@ namespace Pomp.Hosting
                 }
 
                 if (token.Type != JTokenType.String) throw BadText();
-                return PlanText((string?)token ?? "", limit, required: !blankOk);
+                return PlanText((string?)token ?? "", limit, required: true);
             }
 
             private static ArgumentException BadText() => new ArgumentException(PompLanguage.Pick("계획 문구가 올바르지 않아요.", "The plan text is invalid."));

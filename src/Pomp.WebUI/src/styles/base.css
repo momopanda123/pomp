@@ -44,6 +44,9 @@
   /* Derived from the variables above, so they follow whatever the host sends. */
   --pomp-hover-bg: color-mix(in srgb, var(--pomp-fg) 9%, transparent);
   --pomp-active-bg: color-mix(in srgb, var(--pomp-fg) 15%, transparent);
+  /* The conversation search (Ctrl+F): every match, and the current one stronger; both keep the text readable on either theme. */
+  --pomp-find-match-bg: color-mix(in srgb, var(--pomp-warning) 22%, transparent);
+  --pomp-find-current-bg: color-mix(in srgb, var(--pomp-warning) 55%, transparent);
 
   /* The red "new" mark on a tab header (not part of the protocol): white text keeps 4.5:1 on it, and it stands out on both panel colors. */
   --pomp-badge-bg: #d13438;

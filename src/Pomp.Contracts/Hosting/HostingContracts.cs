@@ -198,22 +198,20 @@ namespace Pomp.Hosting
     }
 
     /// <summary>
-    /// One chat session bound to one omp process: owns the bridge, the host tool dispatcher, the permission gate
-    /// and the UI translation (design Layer 2). Created by the VSIX composition root; UI-agnostic.
+    /// A backend-neutral chat session lifecycle and UI binding. Native sessions own their real OMP bridge;
+    /// other backends expose only their supported capabilities.
     /// </summary>
     public interface IPompSession : IDisposable
     {
-        IOmpProcessBridge Bridge { get; }
-
         /// <summary>Binds the chat UI (a tool window's WebView). Replaces any previously attached channel.</summary>
         void AttachUi(IUiChannel channel);
 
         void DetachUi(IUiChannel channel);
 
-        /// <summary>Starts omp if it is not running yet (lazy start when the tool window opens).</summary>
+        /// <summary>Starts the selected backend if it is not running yet.</summary>
         Task EnsureStartedAsync(CancellationToken cancellationToken);
 
-        /// <summary>Restarts omp, e.g. after the solution changed (new working directory) or settings changed.</summary>
+        /// <summary>Restarts the session while preserving backend-owned conversation identity.</summary>
         Task RestartAsync(CancellationToken cancellationToken);
     }
 }

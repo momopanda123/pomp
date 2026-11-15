@@ -1,7 +1,6 @@
 import { roleTitle as bundledRoleTitle } from '../../bundledDescriptions';
-import { useT } from '../../i18n';
+import { useT, type Translate } from '../../i18n';
 import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { toolsTranslate, type ToolsTranslate } from '../../i18n/toolsStrings';
 import { KNOWLEDGE_SWATCHES, anchorLabel, candidatePieces, defaultKnowledgeColor, isKnowledgeColor, knowledgeUse, normalizeKnowledgeText, sameRoot, savedPieces, usedContent } from '../../knowledge';
 import { useKnowledge } from '../../knowledgeState';
 import type { KnowledgeDraft, KnowledgeItem, KnowledgePiece, KnowledgeScope, KnowledgeUse } from '../../protocol';
@@ -12,7 +11,7 @@ import { KnowledgeDot } from '../KnowledgeChecklist';
 import { revealControls } from '../RevealControls';
 import { SectionRefresh, ViewSection } from '../ViewSection';
 import { Actions, Badge, Cell, DataTable, Field, FormActions, IconButton, Pager, Row, SearchBox, Switch, Toolbar, matches, usePaged } from '../ui';
-import { InPageDialog } from './InPageDialog';
+import { ChoiceField, ConfirmDelete, InPageDialog, ScopeChoice } from './InPageDialog';
 import './knowledge.css';
 
 /** How many knowledge the add form offers for the name typed so far. */
@@ -29,7 +28,7 @@ interface Anchor { path: string; startLine: number; endLine: number }
  * The new-knowledge and edit form. `color` stays unset until the person picks one: the default follows the list as it loads. `adding`: lines from the
  * code editor, which go to the knowledge the person picks by name (a new one when no knowledge has that name).
  */
-interface Editor { id?: string; revision?: number; name: string; color?: string; scope: KnowledgeScope; use: KnowledgeUse; text: string; anchor?: Anchor; rebase?: boolean; adding?: boolean }
+interface Editor { id?: string; revision?: number; name: string; color?: string; scope: KnowledgeScope; use: KnowledgeUse; text: string; anchor?: Anchor; rebase?: boolean; adding?: boolean; /** The draft (its `seq`) this form was opened for. */ draftSeq?: number }
 /** The form of one piece: a new piece of a knowledge, or the text of an existing one (an anchored piece keeps its lines). `rebase`: the last submit failed. */
 interface PieceEditor { id: string; revision: number; pieceId?: string; text: string; anchor?: Anchor; rebase?: boolean }
 
@@ -46,6 +45,11 @@ export interface KnowledgeViewProps {
   disabled: boolean;
   /** The editor's "Add to Knowledge ▸ New": opens the new-knowledge form with these lines as its first piece (each request once). */
   draft?: { payload: KnowledgeDraft; seq: number } | null;
+  /**
+   * The `seq` of the last draft that is done with (its form was saved, cancelled or replaced, or it was for another workspace). The Tools tab
+   * owns it: this view is rebuilt for every conversation, and a draft that is done must not open its form again.
+   */
+  draftDone?: { current: number };
   /** Puts the text into the chat input and opens Chat. */
   onInsertText?: (text: string) => void;
 }
@@ -54,8 +58,8 @@ export interface KnowledgeViewProps {
  * Tools › Knowledge: the knowledge of the workspace (a name and a color the user chose) as a table, the pieces collected under each, the agents'
  * proposed pieces, and what each one is used as. Everything is text; no piece is ever rendered as markup.
  */
-export function KnowledgeView({ locale, workspaceKey, active, disabled, draft, onInsertText }: KnowledgeViewProps) {
-  const t = toolsTranslate(locale); const ko = locale.startsWith('ko');
+export function KnowledgeView({ workspaceKey, active, disabled, draft, draftDone, onInsertText }: KnowledgeViewProps) {
+  const t = useT();
   const knowledge = useKnowledge();
   const roles = effectiveRoles(useContext(RolesContext)); const teams = effectiveTeams(useContext(TeamsContext));
   const [query, setQuery] = useState('');
@@ -77,18 +81,25 @@ export function KnowledgeView({ locale, workspaceKey, active, disabled, draft, o
   useRefreshOnShow(active && !disabled, () => { void refresh(); });
 
   // The editor's draft opens the new-knowledge form with its lines as the first piece; a draft for another workspace is not ours.
-  const handled = useRef(0);
+  // A draft is done with once its form is saved, cancelled or replaced. A form still open comes back when the view is rebuilt.
+  const ownDone = useRef(0); const done = draftDone ?? ownDone;
+  const opened = useRef(0);
   const nameField = useRef<HTMLInputElement>(null);
   const [nameFocus, setNameFocus] = useState(0);
   useEffect(() => {
-    if (!draft || handled.current === draft.seq) return;
-    handled.current = draft.seq;
+    if (!draft || draft.seq <= done.current || opened.current === draft.seq) return;
     const { root, path, startLine, endLine, text } = draft.payload;
-    if (workspaceKey && !sameRoot(root, workspaceKey)) return;
+    if (workspaceKey && !sameRoot(root, workspaceKey)) { done.current = draft.seq; return; }
+    opened.current = draft.seq;
     setValidation(''); setFormError(''); setPieceEditor(undefined); setDeleting(undefined);
-    setEditor({ name: '', scope: 'project', use: 'original', text, anchor: { path, startLine, endLine }, adding: true });
+    setEditor({ name: '', scope: 'project', use: 'original', text, anchor: { path, startLine, endLine }, adding: true, draftSeq: draft.seq });
     setNameFocus(count => count + 1);
-  }, [draft, workspaceKey]);
+  }, [draft, workspaceKey, done]);
+  /** Opens, replaces or closes the knowledge form. A draft's form that goes away is done with: it never opens by itself again. */
+  function showEditor(next?: Editor) {
+    if (editor?.draftSeq !== undefined && next?.draftSeq !== editor.draftSeq) done.current = Math.max(done.current, editor.draftSeq);
+    setEditor(next);
+  }
   // Each draft puts the caret in the name, also when the form was open already. Visual Studio brings the chat window forward at the same
   // time and moves the focus about while it does (the page's first button, the chat input of the tab it hides): for a moment the name
   // takes the focus back whenever it lands on nothing in particular, so typing goes on from the keyboard.
@@ -106,7 +117,8 @@ export function KnowledgeView({ locale, workspaceKey, active, disabled, draft, o
     const onWindowFocus = (): void => { window.requestAnimationFrame(() => { if (stray(document.activeElement)) take(); }); };
     const onFocusOut = (event: FocusEvent): void => { if (event.target === nameField.current && !event.relatedTarget) window.requestAnimationFrame(() => { if (stray(document.activeElement)) take(); }); };
     document.addEventListener('focusin', onFocusIn, true); document.addEventListener('focusout', onFocusOut, true); window.addEventListener('focus', onWindowFocus);
-    const stop = window.setTimeout(() => { document.removeEventListener('focusin', onFocusIn, true); document.removeEventListener('focusout', onFocusOut, true); window.removeEventListener('focus', onWindowFocus); }, 2000);
+    // After two seconds the name stops asking for the focus: the listeners go, and so does the retry (the form may be on a view that is not shown).
+    const stop = window.setTimeout(() => { window.cancelAnimationFrame(frame); document.removeEventListener('focusin', onFocusIn, true); document.removeEventListener('focusout', onFocusOut, true); window.removeEventListener('focus', onWindowFocus); }, 2000);
     return () => { window.cancelAnimationFrame(frame); window.clearTimeout(stop); document.removeEventListener('focusin', onFocusIn, true); document.removeEventListener('focusout', onFocusOut, true); window.removeEventListener('focus', onWindowFocus); };
   }, [nameFocus]);
 
@@ -151,7 +163,7 @@ export function KnowledgeView({ locale, workspaceKey, active, disabled, draft, o
       ? { action: 'update', id: editor.id, revision: revisionOf(editor.id, editor.revision ?? 0, editor.rebase), knowledge: { ...fields, use: editor.use } }
       : { action: 'create', knowledge: fields, ...(hasText ? { piece: { text, ...(editor.anchor ? { anchor: editor.anchor } : {}) } } : {}) });
     setSubmitting(false);
-    if (reply.ok) { setEditor(undefined); return; }
+    if (reply.ok) { showEditor(); return; }
     setFormError(reply.error || t('tools.failed'));
     setEditor(previous => previous && { ...previous, rebase: true });
   }
@@ -175,8 +187,7 @@ export function KnowledgeView({ locale, workspaceKey, active, disabled, draft, o
     if (reply.ok) setDeleting(undefined); else setFormError(reply.error || t('tools.failed'));
   }
   const toggle = (id: string, open?: boolean) => setExpanded(previous => { const next = new Set(previous); if (open ?? !next.has(id)) next.add(id); else next.delete(id); return next; });
-  const pageT = useT();
-  const roleTitle = (name: string) => bundledRoleTitle(roles.find(role => role.name === name), pageT, name);
+  const roleTitle = (name: string) => bundledRoleTitle(roles.find(role => role.name === name), t, name);
   const teamTitle = (id: string) => teams.find(team => team.id.toLowerCase() === id.toLowerCase())?.title || id;
 
   const message = error || knowledge.notice;
@@ -192,7 +203,7 @@ export function KnowledgeView({ locale, workspaceKey, active, disabled, draft, o
 
   return <div className="tools-scroll-body knowledge-view" data-testid="knowledge-view">
     {proposals.length > 0 && <ViewSection sectionKey="tools-knowledge-candidates" title={t('knowledge.candidates')} status={proposals.length} bodyClassName="ui-flush" data-testid="knowledge-candidates">
-      <DataTable columns="minmax(0, 1fr) 56px" label={t('knowledge.candidates')} head={[ko ? '제안' : 'Proposal', '']}>
+      <DataTable columns="minmax(0, 1fr) 56px" label={t('knowledge.candidates')} head={[t('knowledge.col.proposal'), '']}>
         {proposals.map(({ item, piece }) => <Row key={piece.id} testId={`knowledge-candidate-${piece.id}`}>
           <Cell wrap><span className="knowledge-name"><KnowledgeDot color={item.color} /><strong>{revealControls(item.name)}</strong>
             {piece.anchor && <span className="ui-mono ui-muted knowledge-anchor-inline">{revealControls(anchorLabel(piece.anchor))}</span>}</span>
@@ -206,12 +217,12 @@ export function KnowledgeView({ locale, workspaceKey, active, disabled, draft, o
     </ViewSection>}
     <ViewSection sectionKey="tools-knowledge" title={t('tools.knowledge')} status={usable.length} bodyClassName="ui-flush"
       actions={<><button type="button" className="btn small" data-testid="knowledge-create" data-tools-dialog-fallback disabled={locked}
-        onClick={() => { closeForms(); setEditor({ name: '', scope: 'project', use: 'original', text: '' }); }}><Icon name="plus" size={12} />{t('knowledge.create')}</button>
+        onClick={() => { closeForms(); showEditor({ name: '', scope: 'project', use: 'original', text: '' }); }}><Icon name="plus" size={12} />{t('knowledge.create')}</button>
         <SectionRefresh onClick={() => { void refresh(); }} disabled={disabled || knowledge.pending} testId="knowledge-refresh" /></>}>
       <Toolbar><SearchBox value={query} onChange={setQuery} label={t('knowledge.search')} testId="knowledge-search" /></Toolbar>
       {message && <p className="ui-note" role="alert" data-testid="knowledge-error">{revealControls(message)}</p>}
       {knowledge.hidden > 0 && <p className="ui-note ui-muted" role="status" data-testid="knowledge-hidden">{t('knowledge.hidden', { count: knowledge.hidden })}</p>}
-      {editor && <InPageDialog title={t(editor.id ? 'knowledge.editTitle' : editor.adding ? 'knowledge.addTitle' : 'knowledge.createTitle')} testId="knowledge-editor" onClose={() => setEditor(undefined)} pending={submitting}>
+      {editor && <InPageDialog title={t(editor.id ? 'knowledge.editTitle' : editor.adding ? 'knowledge.addTitle' : 'knowledge.createTitle')} testId="knowledge-editor" onClose={() => showEditor()} pending={submitting}>
         <form noValidate className="ui-form knowledge-form" onSubmit={event => { event.preventDefault(); void save(); }}><fieldset disabled={submitting}>
           <Field label={t('knowledge.name')}>{id => <input id={id} ref={nameField} value={editor.name} data-testid="knowledge-name" maxLength={40} autoComplete="off" onChange={event => setEditor({ ...editor, name: event.target.value })} />}</Field>
           {nameMatches.length > 0 && <ul className="knowledge-matches" aria-label={t('tools.knowledge')} data-testid="knowledge-name-matches">{nameMatches.map(item => <li key={item.id}>
@@ -221,9 +232,8 @@ export function KnowledgeView({ locale, workspaceKey, active, disabled, draft, o
           {existing
             ? <p className="knowledge-existing" data-testid="knowledge-existing"><KnowledgeDot color={existing.color} /><strong>{revealControls(existing.name)}</strong><span>{t('knowledge.pieces', { count: savedPieces(existing).length })}</span></p>
             : <>
-              <ColorField t={t} ko={ko} value={color} onChange={value => setEditor({ ...editor, color: value })} />
-              <Field label={t('knowledge.scope')}>{id => <select id={id} data-testid="knowledge-scope" value={editor.scope} onChange={event => setEditor({ ...editor, scope: event.target.value as KnowledgeScope })}>
-                <option value="project">{t('knowledge.scopeOption.project')}</option><option value="user">{t('knowledge.scopeOption.user')}</option></select>}</Field>
+              <ColorField t={t} value={color} onChange={value => setEditor({ ...editor, color: value })} />
+              <ChoiceField label={t('skills.scope')}><ScopeChoice t={t} label={t('skills.scope')} testId="knowledge-scope" value={editor.scope} onChange={scope => setEditor({ ...editor, scope })} /></ChoiceField>
             </>}
           {editor.id
             ? <Field label={t('knowledge.use')}>{id => <select id={id} data-testid="knowledge-use" value={editor.use} onChange={event => setEditor({ ...editor, use: event.target.value as KnowledgeUse })}>
@@ -234,27 +244,26 @@ export function KnowledgeView({ locale, workspaceKey, active, disabled, draft, o
               <Field label={t('knowledge.text')}>{id => <textarea id={id} value={editor.text} data-testid="knowledge-text" rows={6} spellCheck={false} readOnly={!!editor.anchor} onChange={event => setEditor({ ...editor, text: event.target.value })} />}</Field>
             </>}
         </fieldset>{formAlert('knowledge-editor-error')}
-        <FormActions><button type="button" className="btn" disabled={submitting} onClick={() => setEditor(undefined)}>{t('tools.cancel')}</button>
+        <FormActions><button type="button" className="btn" data-testid="knowledge-cancel" disabled={submitting} onClick={() => showEditor()}>{t('tools.cancel')}</button>
           <button type="submit" className="btn primary" data-testid="knowledge-save" disabled={submitting || disabled}>{t('tools.save')}</button></FormActions></form>
       </InPageDialog>}
       <DataTable columns={COLUMNS} label={t('tools.knowledge')} testId="knowledge-list" empty={!listed.length}
-        head={[ko ? '이름' : 'Name', <span key="default" className="knowledge-center">{t('knowledge.default')}</span>, <span key="pieces" className="knowledge-center">{ko ? '조각' : 'Pieces'}</span>, '']}>
-        {paged.slice.map(item => <KnowledgeRow key={item.id} item={item} t={t} ko={ko} open={expanded.has(item.id)} onToggle={() => toggle(item.id)}
+        head={[t('knowledge.name'), <span key="default" className="knowledge-center">{t('knowledge.default')}</span>, <span key="pieces" className="knowledge-center">{t('knowledge.col.pieces')}</span>, '']}>
+        {paged.slice.map(item => <KnowledgeRow key={item.id} item={item} t={t} open={expanded.has(item.id)} onToggle={() => toggle(item.id)}
           locked={locked} busy={knowledge.optimizing === item.id || starting.has(item.id)} roleTitle={roleTitle} teamTitle={teamTitle} canInsert={!!onInsertText}
           onInsert={() => onInsertText?.(usedContent(item))}
-          onAddPiece={() => { closeForms(); setEditor(undefined); toggle(item.id, true); setPieceEditor({ id: item.id, revision: item.revision, text: '' }); }}
-          onEditPiece={piece => { closeForms(); setEditor(undefined); setPieceEditor({ id: item.id, revision: item.revision, pieceId: piece.id, text: piece.text, anchor: piece.anchor }); }}
+          onAddPiece={() => { closeForms(); showEditor(); toggle(item.id, true); setPieceEditor({ id: item.id, revision: item.revision, text: '' }); }}
+          onEditPiece={piece => { closeForms(); showEditor(); setPieceEditor({ id: item.id, revision: item.revision, pieceId: piece.id, text: piece.text, anchor: piece.anchor }); }}
           onDeletePiece={piece => { void act({ action: 'deletePiece', id: item.id, revision: item.revision, pieceId: piece.id }); }}
           onOptimize={() => { void optimize(item); }}
           onDefault={on => { void act({ action: 'setDefault', id: item.id, revision: item.revision, on }); }}
-          onEdit={() => { closeForms(); setEditor({ id: item.id, revision: item.revision, name: item.name, color: item.color, scope: item.scope, use: item.use, text: '' }); }}
-          onDelete={() => { closeForms(); setEditor(undefined); setDeleting(item); }}
+          onEdit={() => { closeForms(); showEditor({ id: item.id, revision: item.revision, name: item.name, color: item.color, scope: item.scope, use: item.use, text: '' }); }}
+          onDelete={() => { closeForms(); showEditor(); setDeleting(item); }}
           pieceForm={pieceForm(item)}
-          confirm={deleting?.id === item.id && <InPageDialog title={t('knowledge.delete')} testId="knowledge-delete-confirm" onClose={() => setDeleting(undefined)} pending={submitting}>
-            <div className="ui-form"><p>{t('knowledge.deleteQuestion', { name: deleting.name })}</p>{formError && <p className="ui-err" role="alert" data-testid="knowledge-delete-error">{revealControls(formError)}</p>}
-            <FormActions><button type="button" className="btn" data-autofocus disabled={submitting} onClick={() => setDeleting(undefined)}>{t('tools.cancel')}</button>
-              <button type="button" className="btn danger" data-testid="knowledge-delete-yes" disabled={locked || submitting} onClick={() => { void remove(); }}>{t('knowledge.delete')}</button></FormActions></div>
-          </InPageDialog>} />)}
+          confirm={deleting?.id === item.id && <ConfirmDelete t={t} testId="knowledge-delete-confirm" yesTestId="knowledge-delete-yes" question={t('knowledge.deleteQuestion', { name: deleting.name })}
+            locked={locked || submitting} pending={submitting} onCancel={() => setDeleting(undefined)} onConfirm={() => { void remove(); }}>
+            {formError && <p className="ui-err" role="alert" data-testid="knowledge-delete-error">{revealControls(formError)}</p>}
+          </ConfirmDelete>} />)}
       </DataTable>
       <Pager paged={paged} testId="knowledge-pager" />
     </ViewSection>
@@ -265,20 +274,20 @@ export function KnowledgeView({ locale, workspaceKey, active, disabled, draft, o
  * The color of a knowledge: 16 swatches drawn in the page (no system color dialog, whose clicks land off target inside Visual Studio), then the
  * custom color when one is chosen, then "+" which opens a #RRGGBB field for any other color.
  */
-function ColorField({ t, ko, value, onChange }: { t: ToolsTranslate; ko: boolean; value: string; onChange: (value: string) => void }) {
+function ColorField({ t, value, onChange }: { t: Translate; value: string; onChange: (value: string) => void }) {
   const current = value.toLowerCase();
   const preset = (KNOWLEDGE_SWATCHES as readonly string[]).includes(current);
   const [custom, setCustom] = useState(!preset && !!value);
   const [code, setCode] = useState(preset ? '' : value);
   const codeId = useId();
   const swatch = (color: string, testId: string, label: string) => <button type="button" role="radio" key={testId} className="knowledge-swatch" aria-checked={current === color.toLowerCase()} aria-label={label} title={label}
-    data-testid={testId} onClick={() => { onChange(color); }}><span style={{ background: color }} /></button>;
+    data-testid={testId} onClick={() => { onChange(color); }}><span style={{ '--knowledge-color': color } as CSSProperties} /></button>;
   return <div className="ui-field knowledge-color-field" role="group" aria-labelledby={`${codeId}-label`}>
     <span id={`${codeId}-label`} className="knowledge-color-label">{t('knowledge.color')}</span>
     <div className="knowledge-swatches" role="radiogroup" aria-label={t('knowledge.color')}>
       {KNOWLEDGE_SWATCHES.map(color => swatch(color, `knowledge-swatch-${color.slice(1)}`, color))}
       {!preset && isKnowledgeColor(value) && swatch(value, 'knowledge-swatch-custom', value)}
-      <button type="button" className="knowledge-swatch knowledge-swatch-add" aria-expanded={custom} aria-controls={codeId} aria-label={ko ? '사용자 색' : 'Custom color'} title={ko ? '사용자 색' : 'Custom color'}
+      <button type="button" className="knowledge-swatch knowledge-swatch-add" aria-expanded={custom} aria-controls={codeId} aria-label={t('knowledge.customColor')} title={t('knowledge.customColor')}
         data-testid="knowledge-swatch-add" onClick={() => setCustom(open => !open)}><Icon name="plus" size={13} /></button>
     </div>
     {custom && <div className="knowledge-color-code" id={codeId}>
@@ -295,14 +304,14 @@ function PieceText({ text }: { text: string }) {
 }
 
 interface RowProps {
-  item: KnowledgeItem; t: ToolsTranslate; ko: boolean; open: boolean; locked: boolean; busy: boolean; canInsert: boolean;
+  item: KnowledgeItem; t: Translate; open: boolean; locked: boolean; busy: boolean; canInsert: boolean;
   roleTitle: (name: string) => string; teamTitle: (id: string) => string;
   onToggle: () => void; onInsert: () => void; onAddPiece: () => void; onEditPiece: (piece: KnowledgePiece) => void; onDeletePiece: (piece: KnowledgePiece) => void;
   onOptimize: () => void; onDefault: (on: boolean) => void; onEdit: () => void; onDelete: () => void; pieceForm: ReactNode; confirm: ReactNode;
 }
 
 /** One knowledge: its row (name, pieces, scope, actions) and, opened, its tools, optimized text and saved pieces. */
-function KnowledgeRow({ item, t, ko, open, locked, busy, canInsert, roleTitle, teamTitle, onToggle, onInsert, onAddPiece, onEditPiece, onDeletePiece, onOptimize, onDefault, onEdit, onDelete, pieceForm, confirm }: RowProps) {
+function KnowledgeRow({ item, t, open, locked, busy, canInsert, roleTitle, teamTitle, onToggle, onInsert, onAddPiece, onEditPiece, onDeletePiece, onOptimize, onDefault, onEdit, onDelete, pieceForm, confirm }: RowProps) {
   const bodyId = useId();
   const saved = savedPieces(item); const use = knowledgeUse(item); const content = usedContent(item);
   return <div role="rowgroup" className="knowledge-group" data-testid={`knowledge-row-${item.id}`}>
@@ -337,7 +346,7 @@ function KnowledgeRow({ item, t, ko, open, locked, busy, canInsert, roleTitle, t
       {pieceForm}
       {item.use === 'optimized' && item.optimized && <div className="knowledge-optimized" data-testid={`knowledge-optimized-${item.id}`}>
         <Badge tone={use === 'optimized' ? 'info' : 'warn'}>{t(`knowledge.use.${use === 'optimized' ? 'optimized' : 'stale'}`)}</Badge><PieceText text={item.optimized.text} /></div>}
-      <ul className="knowledge-pieces" data-testid={`knowledge-pieces-${item.id}`} aria-label={ko ? '조각' : 'Pieces'}>{saved.map(piece => <li key={piece.id} className="knowledge-piece" data-testid={`knowledge-piece-${piece.id}`}>
+      <ul className="knowledge-pieces" data-testid={`knowledge-pieces-${item.id}`} aria-label={t('knowledge.col.pieces')}>{saved.map(piece => <li key={piece.id} className="knowledge-piece" data-testid={`knowledge-piece-${piece.id}`}>
         <div className="knowledge-piece-main">
           {piece.anchor && <span className="knowledge-anchor" title={anchorLabel(piece.anchor)}><Icon name="file" size={12} /><code>{revealControls(anchorLabel(piece.anchor))}</code>
             <Badge tone={piece.anchor.status === 'current' ? 'ok' : piece.anchor.status === 'missing' ? 'error' : 'warn'} testId={`knowledge-piece-status-${piece.id}`}>{t(`knowledge.anchor.${piece.anchor.status}`)}</Badge></span>}

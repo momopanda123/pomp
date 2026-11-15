@@ -105,6 +105,7 @@ namespace Pomp.Hosting
                 }
                 if (publish) _ui.Post(UiMessageTypes.CommandsState, CommandsPayload(normalized), UiDelivery.State);
                 PublishMemberStopAvailability(normalized);
+                ScheduleRelayFlush();
                 ContextCommandCatalogChanged();
             }
         }
@@ -147,6 +148,7 @@ namespace Pomp.Hosting
                     }
                     _ui.Post(UiMessageTypes.CommandsState, CommandsPayload(normalized), UiDelivery.State);
                     PublishMemberStopAvailability(normalized);
+                    ScheduleRelayFlush();
                     ContextCommandCatalogChanged();
                 }
             }

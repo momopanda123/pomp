@@ -1,7 +1,9 @@
-import { useStatusReport } from '../statusBar';
+import { backendCommandAllowed, capabilities as sessionCapabilities, type SessionCapabilities } from '../backend';
+import { reportStatus, useStatusReport } from '../statusBar';
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent, type RefObject } from 'react';
 import { mentionSelectionToken, MENTION_LIMIT, type ComposerState } from '../composerState';
 import { COMPOSER_CONTROLS, focusControlOrInput, setComposerControlHidden, showAllComposerControls, useHiddenComposerControls } from '../composerControls';
+import { applyDictation, startDictationAnchor, type DictationAnchor } from '../dictation';
 import { newId } from '../format';
 import { roleTitle } from '../bundledDescriptions';
 import { useT, type MessageKey, type Translate } from '../i18n';
@@ -9,17 +11,18 @@ import { usableKnowledge } from '../knowledge';
 import { useKnowledge } from '../knowledgeState';
 import { promptRejection, type SendFailure, type SendResult } from '../limits';
 import { send, APPROVAL_MODES, DEFAULT_SHORTCUTS, MAIN_TARGET, type AgentsStatePayload, type CommandInfo, type ComposerPrefill, type ApprovalMode, type PageShortcuts, type PermissionModeResult, type BackgroundAgentJob, type BackgroundAgentState, type BasketTokens, type ModelInfo, type SendTarget, type SessionInfoPayload, type WorkspaceFile } from '../protocol';
-import type { ComputerReplyPayload, ComputerStatePayload, EditorFollowState, UiToHost } from '../protocol';
+import type { ComputerReplyPayload, ComputerStatePayload, DictationReplyPayload, DictationStatePayload, EditorFollowState, UiToHost } from '../protocol';
 import { matchesShortcut } from '../shortcuts';
 import { useComposerPrediction } from '../useComposerPrediction';
 import { useWordCompletion } from '../useWordCompletion';
 import { ComposerGhost } from './ComposerGhost';
-import { commandCatalog, isBuiltinCommand, COMMAND_ALIASES, slashMatches, slashTakesReferences, type BuiltinCommand, type SlashMatch } from '../slashCommands';
+import { commandCatalog, isBuiltinCommand, COMMAND_ALIASES, slashMatches, slashTakesReferences, type BuiltinCommand, type SlashMatch, type PaletteCommand } from '../slashCommands';
 import type { SetupReply, SetupState } from '../setup';
 import type { Action, TranscriptItem } from '../state';
 import { effectiveRoles, isRunnableTeam, targetKey, targetPayload } from '../teamsCache';
 import { useWorkState } from '../work/store';
 import { ComputerToggle } from './ComputerToggle';
+import { DictationButton } from './DictationButton';
 import { ConfirmPopover } from './ConfirmPopover';
 import { markMenuHandled, useContextMenu, type ContextMenuItem } from './ContextMenu';
 import { PickerPopover } from './ModelPickers';
@@ -39,6 +42,7 @@ const COMPOSER_POPUPS = '.context-popover, .context-breakdown, .picker-pop, .men
 const MENTION_DEBOUNCE_MS = 150;
 
 interface ComposerProps {
+  capabilities?: SessionCapabilities;
   locale: string;
   workspaceKey?: string;
   sessionId?: string; model?: ModelInfo;
@@ -97,6 +101,9 @@ interface ComposerProps {
   computer?: ComputerStatePayload | null;
   computerReply?: ComputerReplyPayload | null;
   computerRequest?: { revision: number };
+  /** Voice input of this conversation (dictation/state, dictation/reply): the microphone button left of Send. */
+  dictation?: DictationStatePayload | null;
+  dictationReply?: DictationReplyPayload | null;
   selectedTarget?: SendTarget;
   onSelectTarget: (target?: SendTarget) => void;
   /** The active partner tab's name (undefined = Default (POMP)): where a message without a one-message target goes. */
@@ -187,8 +194,11 @@ function replayEnter(el: HTMLTextAreaElement, init: KeyboardEventInit): void {
   if (el.dispatchEvent(new window.KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true }))) document.execCommand('insertText', false, '\n');
 }
 
-export function Composer({ locale, workspaceKey, sessionId, model, session, setup, setupReplies, onManageAccounts, inputRef, connected, composerPredictions = false, wordCompletion = false, transcript, busy, queueBlocked = false, insertSkill, insertText, basketRequest = 0, basketTokens, requestPending, newSessionPending, includeEditorContext, onIncludeEditorContextChange, draft, dispatch, onSend, onStop, commands, commandsHidden, onCommand, onGoal, onSteer, skillsOff, prefill, agents, shortcuts = DEFAULT_SHORTCUTS, approvalMode, permissionModeReply, editorFollow, computer, computerReply, computerRequest, selectedTarget, onSelectTarget, partnerName, partner, onOpenPartner }: ComposerProps) {
+export function Composer({ capabilities: suppliedCapabilities, locale, workspaceKey, sessionId, model, session, setup, setupReplies, onManageAccounts, inputRef, connected, composerPredictions = false, wordCompletion = false, transcript, busy, queueBlocked = false, insertSkill, insertText, basketRequest = 0, basketTokens, requestPending, newSessionPending, includeEditorContext, onIncludeEditorContextChange, draft, dispatch, onSend, onStop, commands, commandsHidden, onCommand, onGoal, onSteer, skillsOff, prefill, agents, shortcuts = DEFAULT_SHORTCUTS, approvalMode, permissionModeReply, editorFollow, computer, computerReply, computerRequest, dictation, dictationReply, selectedTarget, onSelectTarget, partnerName, partner, onOpenPartner }: ComposerProps) {
   const t = useT();
+  const caps = suppliedCapabilities ?? sessionCapabilities(session, session?.backend ?? 'omp');
+  const native = caps.nativeOmp;
+  const canAttach = caps.editorContext || caps.images;
   const focusInput = useCallback(() => inputRef.current?.focus(), [inputRef]);
   const [failure, setFailure] = useState<SendFailure | null>(null);
   const composing = useRef(false);
@@ -240,24 +250,25 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const permissionRef = useRef<HTMLDivElement>(null);
   const permissionButton = useRef<HTMLButtonElement>(null);
-  const permissionDisabled = !connected || busy || requestPending || newSessionPending || permissionPending !== null;
+  const permissionDisabled = !native || !connected || busy || requestPending || newSessionPending || permissionPending !== null;
   const [targetError, setTargetError] = useState<string | null>(null);
   // A one-message target that was cleared because it is gone, and where the next message goes now (set by the effect below).
   const [targetLost, setTargetLost] = useState<string | null>(null);
   const lostAtText = useRef('');
   const background = useWorkState('background') as BackgroundAgentState | undefined;
-  const runnableTeams = useMemo(() => agents?.teams.filter(team => isRunnableTeam(team, agents)) ?? [], [agents]);
-  const runnableRoles = useMemo(() => effectiveRoles(agents?.roles ?? []).filter(role => !role.error), [agents?.roles]);
+  const runnableTeams = useMemo(() => native ? agents?.teams.filter(team => isRunnableTeam(team, agents)) ?? [] : [], [agents, native]);
+  const runnableRoles = useMemo(() => native ? effectiveRoles(agents?.roles ?? []).filter(role => !role.error) : [], [agents?.roles, native]);
   // The running members the picker offers are the live ones of this conversation. A snapshot that is only temporarily not live ('unavailable' after a
   // failed get_subagents, 'loading', none yet) keeps the last live list, so a member chosen as the target is not dropped by a hiccup; 'archived'
   // (disconnected) or another conversation empties it.
   const knownInstances = useRef<{ scope: string; jobs: BackgroundAgentJob[] }>({ scope: '', jobs: [] });
   const instances = useMemo(() => {
+    if (!native) return [];
     const scope = `${workspaceKey ?? ''}\n${sessionId ?? ''}`;
     if (background?.state === 'live' && background.sessionId === sessionId) knownInstances.current = { scope, jobs: background.jobs.filter(job => job.status === 'running') };
     else if (background?.state === 'archived' || knownInstances.current.scope !== scope) knownInstances.current = { scope, jobs: [] };
     return knownInstances.current.jobs;
-  }, [background, sessionId, workspaceKey]);
+  }, [background, sessionId, workspaceKey, native]);
   const destinations = useMemo<{ target: SendTarget; name: string; label: string; chip?: string; title: string; groupKey?: string; group?: string; avatar: { kind: 'main' | 'agent' | 'team'; id?: string } }[]>(() => [
     ...[...runnableTeams].sort((a, b) => byName(a.title || a.id, b.title || b.id)).map(team => ({ target: { kind: 'team', id: team.id } as SendTarget, name: team.title || team.id, label: team.title || team.id, title: team.id, groupKey: 'teams', group: t('composer.targetTeams'), avatar: { kind: 'team' as const, id: team.id } })),
     ...[...runnableRoles].sort((a, b) => byName(roleTitle(a, t), roleTitle(b, t))).map(role => ({ target: { kind: 'agent', id: role.name } as SendTarget, name: roleTitle(role, t), label: roleTitle(role, t), title: role.name, groupKey: 'agents', group: t('composer.targetAgents'), avatar: { kind: 'agent' as const, id: role.name } })),
@@ -270,7 +281,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   ], [runnableTeams, runnableRoles, instances, t]);
   // The list: teams, agents, then this conversation's running members; each group by name, except that the row of the conversation the
   // user is in (POMP in the Default tab, the agent or team of an agent/team tab) heads its group, tinted: choosing it clears the one-message
-  // target, so the next message continues this conversation (never a subagent run of itself). POMP is listed only in the Default tab: an
+  // target, so the next message continues this conversation (it is never relayed to this tab's own partner). POMP is listed only in the Default tab: an
   // agent or team tab is its own conversation, where POMP does not answer. Running members of the tab's own role are left out.
   const partnerTab = partner?.id && partner.kind !== 'main' ? { kind: partner.kind, id: partner.id } : undefined;
   const listed = useMemo(() => {
@@ -299,7 +310,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   // The chip names only a target other than the conversation the user is in; without one it is just the send-target button (a picked POMP
   // in the Default tab, or this tab's own partner, would read as a message to itself).
   const targetLabel = selectedDestination ? (selectedDestination.chip ?? selectedDestination.label) : t('composer.sendTarget');
-  const targetTitle = selectedDestination ? t('composer.targetPartnerTitle', { name: selectedDestination.label }) : t('composer.sendTarget');
+  // An agent or team runs the message in its own tab and only the result comes back; a running member of this conversation is steered here.
+  const targetTitle = selectedDestination ? t(selectedDestination.target.kind === 'instance' ? 'composer.targetPartnerTitle' : 'composer.targetRelayTitle', { name: selectedDestination.label }) : t('composer.sendTarget');
   // What the chosen target is called, to name it if it disappears later.
   const selectedName = useRef<{ key: string; name: string }>(undefined);
   if (selectedDestination) selectedName.current = { key: targetKey(selectedTarget), name: selectedDestination.name };
@@ -371,9 +383,11 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     closePermission(); setApprovalMode(mode);
   };
   const [pickerRequest, setPickerRequest] = useState<{ kind: 'model' | 'thinking'; revision: number }>();
-  const catalog = useMemo(() => commandCatalog(commands, t, skillsOff), [commands, t, skillsOff]);
+  const catalog = useMemo<PaletteCommand[]>(() => native ? commandCatalog(commands, t, skillsOff)
+    : [...commandCatalog([], t).filter(command => backendCommandAllowed(command.name, caps) && !commands.some(item => item.name === command.name)), ...commands], [commands, t, skillsOff, native, caps]);
   const matches = useMemo(() => slashMatches(draft.text, caret.start, caret.end, catalog), [draft.text, caret, catalog]);
-  const slash = connected && !draft.composing && !requestPending && (helpOpen || slashDismissed !== draft.text) ? (helpOpen ? catalog.map(command => ({ ...command, value: `/${command.name} ` })) : matches) : null;
+  // Typed text that matches no command is not a command list: the arrows, Tab and Enter stay the input's own.
+  const slash = connected && !draft.composing && !requestPending && (helpOpen || slashDismissed !== draft.text) ? (helpOpen ? catalog.map(command => ({ ...command, value: `/${command.name} ` })) : matches?.length ? matches : null) : null;
   const slashIndex = slash?.length ? Math.min(slashSelected, slash.length - 1) : 0;
   useEffect(() => { setSlashSelected(0); }, [draft.text, helpOpen]);
   useEffect(() => { if (slash?.length) document.getElementById(`${slashId}-${slashIndex}`)?.scrollIntoView({ block: 'nearest' }); }, [slashId, slashIndex, slash?.length]);
@@ -423,6 +437,58 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     setCaret({ start: position, end: position });
     window.requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.setSelectionRange(position, position); });
   }, [insertText, requestPending, draft.composing]);
+  // Bind speech to the draft and caret at the button press, not the first render of an engine frame:
+  // a fast failure/final result can arrive in the same React batch as the starting state.
+  const dictationScope = `${workspaceKey ?? ''}\n${sessionId ?? ''}`;
+  const dictationCapture = useRef<{ anchor: DictationAnchor; text: string; scope: string; recorded: boolean } | null>(null);
+  const dictationCaret = useRef<{ text: string; position: number; scope: string } | null>(null);
+  const [dictationRequested, setDictationRequested] = useState(false);
+  const dictating = native && (dictationRequested || (connected && !!dictation && dictation.state !== 'idle'));
+  const endDictation = (): void => { dictationCapture.current = null; setDictationRequested(false); };
+  const beginDictation = (captureId: string): void => {
+    const input = inputRef.current;
+    const selection = input ? { start: input.selectionStart, end: input.selectionEnd } : caret;
+    dictationCapture.current = { anchor: startDictationAnchor(captureId, draft.text, selection), text: draft.text, scope: dictationScope, recorded: false };
+    setDictationRequested(true);
+  };
+  const refuseDictation = (captureId: string): void => {
+    if (dictationCapture.current?.anchor.captureId === captureId) endDictation();
+  };
+  useLayoutEffect(() => {
+    const pending = dictationCaret.current;
+    if (!pending) return;
+    if (pending.scope !== dictationScope) { dictationCaret.current = null; return; }
+    if (pending.text !== draft.text) return;
+    dictationCaret.current = null;
+    // React has committed the new textarea value; requestAnimationFrame can run before that commit.
+    inputRef.current?.setSelectionRange(pending.position, pending.position);
+    setCaret({ start: pending.position, end: pending.position });
+  }, [draft.text, dictationScope]);
+  useEffect(() => {
+    const capture = dictationCapture.current;
+    if (!capture) return;
+    if (!native || !connected || capture.scope !== dictationScope) { endDictation(); return; }
+    // A prefill, recovered message or another control replaced this draft. Never splice late speech into it.
+    if (draft.text !== capture.text) {
+      endDictation();
+      if (native && dictation?.state !== 'idle') send('dictation/set', { requestId: newId(), on: false });
+      return;
+    }
+    if (dictation?.captureId !== capture.anchor.captureId) return;
+    const idle = dictation.state === 'idle';
+    capture.recorded ||= dictation.state === 'recording' || dictation.state === 'transcribing';
+    const edit = applyDictation(draft.text, capture.anchor, dictation.text);
+    if (!edit) return; // The full draft check above owns invalidation.
+    capture.anchor = edit.anchor; capture.text = edit.text;
+    if (edit.text !== draft.text) {
+      dictationCaret.current = { text: edit.text, position: edit.caret, scope: dictationScope };
+      dispatch({ type: 'composerEdit', text: edit.text, caret: edit.caret, selectionEnd: edit.caret });
+    }
+    if (!idle) return;
+    endDictation();
+    if (dictation.error) reportStatus(plainControls(dictation.error), 'error');
+    else if (capture.recorded && !edit.anchor.spoken) reportStatus(t('dictation.noSpeech'), 'warning');
+  }, [dictation, draft.text, dictationScope, connected, native]);
   const consumedBasket = useRef(0);
   useEffect(() => {
     if (!basketRequest || consumedBasket.current === basketRequest || requestPending) return;
@@ -433,7 +499,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   const rejection = useMemo(() => promptRejection(draft.text, {
     type: 'chat/send', payload: { clientMessageId: 'draft', text, includeEditorContext, ...targetPayload(selectedTarget), attachments: sendPaths.map(path => ({ path })) },
   }, sendPaths), [text, draft.text, sendPaths, includeEditorContext, selectedTarget]);
-  const canSend = connected && !queueBlocked && !requestPending && !newSessionPending && !draft.composing && (text.length > 0 || draft.attachments.length > 0);
+  const canSend = connected && !queueBlocked && !requestPending && !newSessionPending && !draft.composing && !dictating && (text.length > 0 || draft.attachments.length > 0);
   const failureMessage = failure ? failureText(t, failure) : rejection ? failureText(t, rejection) : null;
   // The composer's notices go to the VS status bar (with errors in the POMP log), not as text between its controls.
   useStatusReport(failureMessage);
@@ -441,14 +507,14 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   useStatusReport(targetLost, 'warning');
   useStatusReport(targetError);
   useStatusReport(permissionError);
-  const mention = connected && !draft.composing ? draft.mention : null;
+  const mention = caps.editorContext && connected && !draft.composing ? draft.mention : null;
   const { prediction, discard: discardPrediction } = useComposerPrediction({
-    inputRef, enabled: composerPredictions, sessionId, text: draft.text, caret, focused: inputFocused,
-    suppressed: !connected || requestPending || newSessionPending || queueBlocked || draft.composing || slash !== null || mention !== null,
+    inputRef, enabled: native && composerPredictions, sessionId, text: draft.text, caret, focused: inputFocused,
+    suppressed: !connected || requestPending || newSessionPending || queueBlocked || draft.composing || dictating || slash !== null || mention !== null,
   });
   const { completion: word, dismiss: dismissWord, accepted: acceptedWord } = useWordCompletion({
     enabled: wordCompletion, workspaceKey: workspaceKey ?? '', sessionId, items: transcript, text: draft.text, caret, focused: inputFocused,
-    suppressed: requestPending || draft.composing || slash !== null || mention !== null,
+    suppressed: requestPending || draft.composing || dictating || slash !== null || mention !== null,
   });
   const mentionTargets = useMemo(() => {
     if (!mention) return [];
@@ -463,7 +529,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   const mentionStart = mention?.start;
   const mentionQuery = mention?.query;
   useEffect(() => {
-    if (!connected || draft.composing || mentionStart === undefined || mentionQuery === undefined) return;
+    if (!caps.editorContext || !connected || draft.composing || mentionStart === undefined || mentionQuery === undefined) return;
     const timer = window.setTimeout(() => {
       const requestId = newId();
       dispatch({ type: 'mentionRequested', requestId, start: mentionStart, query: mentionQuery });
@@ -472,7 +538,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
       }
     }, MENTION_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [connected, draft.composing, mentionStart, mentionQuery, dispatch, t]);
+  }, [caps.editorContext, connected, draft.composing, mentionStart, mentionQuery, dispatch, t]);
 
   useEffect(() => {
     const active = document.getElementById(`${popupId}-${mentionIndex}`);
@@ -486,9 +552,9 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   // modal owns it, or while the control cannot open.
   useEffect(() => {
     const targetChord = hasTargets ? shortcuts.sendTargetPicker : '';
-    const stepChords = choices.length > 0 ? [shortcuts.previousTarget, shortcuts.nextTarget] : ['', ''];
-    const permissionChord = shortcuts.permissionMode;
-    const basketChord = shortcuts.contextBasket, contextChord = shortcuts.editorContext;
+    const stepChords = native && choices.length > 0 ? [shortcuts.previousTarget, shortcuts.nextTarget] : ['', ''];
+    const permissionChord = native ? shortcuts.permissionMode : '';
+    const basketChord = shortcuts.contextBasket, contextChord = caps.editorContext ? shortcuts.editorContext : '';
     if (!targetChord && !permissionChord && !stepChords[0] && !stepChords[1] && !basketChord && !contextChord) return;
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
       const forTarget = !!targetChord && matchesShortcut(event, targetChord);
@@ -524,7 +590,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [hasTargets, shortcuts.sendTargetPicker, shortcuts.previousTarget, shortcuts.nextTarget, shortcuts.permissionMode, shortcuts.contextBasket, shortcuts.editorContext, connected, draft.composing, requestPending, mention, slash, permissionDisabled, permissionOpen, permissionConfirm, choices, selectedTarget, onSelectTarget, basketOpen, includeEditorContext, onIncludeEditorContextChange]);
+  }, [native, caps.editorContext, hasTargets, shortcuts.sendTargetPicker, shortcuts.previousTarget, shortcuts.nextTarget, shortcuts.permissionMode, shortcuts.contextBasket, shortcuts.editorContext, connected, draft.composing, requestPending, mention, slash, permissionDisabled, permissionOpen, permissionConfirm, choices, selectedTarget, onSelectTarget, basketOpen, includeEditorContext, onIncludeEditorContextChange]);
 
   const [stopping, setStopping] = useState(false);
   useEffect(() => {
@@ -595,35 +661,39 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   // checked files, queued behind a running reply; the draft and its target stay as they are. Only when the chat cannot take a message
   // now (a request card, a new conversation starting, no connection) does it wait in the input instead.
   const autoSend = useRef<string | null>(null);
+  useEffect(() => { autoSend.current = null; }, [native]);
+  useEffect(() => { if (!native) autoSend.current = null; }, [native, sessionId]);
   const prefillSeq = prefill?.seq;
   useEffect(() => {
     if (!prefill) return;
     const { payload } = prefill;
+    const unsupportedTarget = !native && (payload.target !== undefined || payload.pickTarget === true);
+    if (unsupportedTarget) dispatch({ type: 'localNotice', level: 'warning', message: 'Agent and team editor targets require OMP. The request was kept in this draft without sending.' });
     if (payload.files?.length) dispatch({ type: 'attachmentsAdd', files: payload.files });
     autoSend.current = null;
-    if (payload.text && payload.send && connected && !newSessionPending) {
+    if (!unsupportedTarget && payload.text && payload.send && connected && !newSessionPending) {
       const files = [...draft.attachments, ...(payload.files ?? [])].filter((file, index, all) => all.findIndex(other => other.fullPath === file.fullPath) === index);
-      const result = onSend(payload.text, files, false, MAIN_TARGET, true, payload.includeEditorContext || includeEditorContext, true);
+      const result = onSend(payload.text, files, false, native ? MAIN_TARGET : null, true, payload.includeEditorContext || includeEditorContext, native);
       if (result.ok) return;
     }
-    if (payload.includeEditorContext && !includeEditorContext) onIncludeEditorContextChange(true);
-    // The editor menu's "show all": the send-target picker opens once the main conversation is shown.
-    if (payload.pickTarget) { setBasketOpen(false); window.requestAnimationFrame(() => window.requestAnimationFrame(() => setTargetOpen(true))); }
+    if (caps.editorContext && payload.includeEditorContext && !includeEditorContext) onIncludeEditorContextChange(true);
+    // The editor menu's "show all": the native send-target picker opens once its conversation is shown.
+    if (native && payload.pickTarget) { setBasketOpen(false); window.requestAnimationFrame(() => window.requestAnimationFrame(() => setTargetOpen(true))); }
     if (payload.text) {
       const empty = draft.text.trim().length === 0;
       const next = empty ? payload.text : `${draft.text.replace(/\s+$/u, '')}\n\n${payload.text}`;
       dispatch({ type: 'composerEdit', text: next, caret: next.length, selectionEnd: next.length });
-      if (empty && payload.send) autoSend.current = next;
-      if (payload.send) deferredMain.current = payload.text;
+      if (!unsupportedTarget && empty && payload.send && (native || caps.editorContext || !payload.includeEditorContext)) autoSend.current = next;
+      if (native && payload.send) deferredMain.current = payload.text;
     }
     window.requestAnimationFrame(() => inputRef.current?.focus());
   }, [prefillSeq]); // only a new request, not a re-render
   useEffect(() => {
     const pending = autoSend.current;
-    if (pending === null || draft.text !== pending || (prefill?.payload.includeEditorContext && !includeEditorContext)) return;
+    if (pending === null || draft.text !== pending || (caps.editorContext && prefill?.payload.includeEditorContext && !includeEditorContext)) return;
     autoSend.current = null;
-    // Editor menu requests belong to the Default (POMP) tab's conversation (from another tab the page switches there first).
-    if (canSend && !busy) submit(MAIN_TARGET);
+    // Native requests may need the Default tab; ACP requests stay with their selected conversation.
+    if (canSend && !busy) submit(native ? MAIN_TARGET : undefined);
   });
 
   /** A slash command's refusal: a warning in the chat (with the command's syntax when an argument is missing); the typed command stays in the input. */
@@ -643,12 +713,16 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     const command = /^\/([^\s]+)(?:\s+([\s\S]*))?$/u.exec(text);
     if (rejection) { if (command) commandFailed(rejection); else setFailure(rejection); inputRef.current?.focus(); return; }
     // Alternate spellings are page commands too, not slash text for the engine's queue.
-    const typed = command ? (Object.hasOwn(COMMAND_ALIASES, command[1]!) ? COMMAND_ALIASES[command[1]!] : command[1]!) : undefined;
+    const typed = command ? (native && Object.hasOwn(COMMAND_ALIASES, command[1]!) ? COMMAND_ALIASES[command[1]!] : command[1]!) : undefined;
+    const serverCommand = !native && typed && commands.some(item => item.name === typed);
+    if (!native && command && typed && !serverCommand && !backendCommandAllowed(typed, caps)) {
+      dispatch({ type: 'localNotice', level: 'warning', message: t('acp.noCommand', { name: typed }) }); return;
+    }
     // /plan is POMP's own plan-only command (the host maps it): without a task there is nothing to plan.
-    if (command && typed === 'plan' && !(command[2] ?? '').trim() && catalog.some(item => item.name === 'plan')) {
+    if (native && command && typed === 'plan' && !(command[2] ?? '').trim() && catalog.some(item => item.name === 'plan')) {
       refuseCommand(t('plan.empty'), 'slash.args.plan'); return;
     }
-    if (command && typed && isBuiltinCommand(typed)) {
+    if (command && typed && !serverCommand && isBuiltinCommand(typed)) {
       const name = typed;
       let result: SendResult;
       if (name === 'model' || name === 'thinking' || name === 'effort') { setPickerRequest(previous => ({ kind: name === 'model' ? 'model' : 'thinking', revision: (previous?.revision ?? 0) + 1 })); result = { ok: true }; }
@@ -680,7 +754,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
         setTargetError(null);
         // A name alone switches the conversation partner (a tab); with a message it is a one-message target.
         if (!args?.[2]?.trim() && onOpenPartner && target.kind !== 'instance') { onOpenPartner(target); result = { ok: true }; }
-        // The tab's own partner is this conversation already: the message goes to it as usual, not to a second run of it.
+        // The tab's own partner is this conversation already: the message goes to it as usual, not relayed to a second tab of it.
         else if (partnerTab && args?.[2]?.trim() && target.kind === partnerTab.kind && target.id.toLowerCase() === partnerTab.id.toLowerCase()) result = onSend(args[2].trim(), draft.attachments, true, null);
         else { onSelectTarget(target); result = args?.[2]?.trim() ? onSend(args[2].trim(), draft.attachments, true, target) : { ok: true }; }
       }
@@ -691,7 +765,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
       if (result.ok) dispatch({ type: 'composerEdit', text: '', caret: 0, selectionEnd: 0 });
     } else {
       // A slash command takes the basket's checked files when it hands its text to the model; any other command leaves the basket for the next message.
-      const keepBasket = command !== null && !slashTakesReferences(text, commands);
+      const keepBasket = native && command !== null && !slashTakesReferences(text, commands);
       const destination = override ?? (mainPending ? MAIN_TARGET : undefined);
       const result = onSend(text, keepBasket ? [] : draft.attachments, !keepBasket, destination, false, undefined, destination?.kind === 'main');
       // A slash command's failure is told in the chat; a message that waits for the switch to the Default (POMP) tab is not a failure.
@@ -773,6 +847,11 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   // With "Enter" the key sends (Shift+Enter breaks the line, Ctrl+Enter sends too); with "Ctrl+Enter" only that sends and Enter breaks the line.
   const isSendKey = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => event.key === 'Enter' && !event.shiftKey && (shortcuts.send !== 'Ctrl+Enter' || event.ctrlKey);
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (dictating) {
+      // The input is read-only while a capture runs: Esc or the send key ends the capture. Its text stays and nothing is sent.
+      if (event.key === 'Escape' || isSendKey(event)) { event.preventDefault(); send('dictation/set', { requestId: newId(), on: false }); }
+      return;
+    }
     const native = event.nativeEvent;
     // The browser types this key outside any composition while the composer still counts one open: that composition's end never
     // came (its text was replaced while composing). Without this the composer waits for it, with sending disabled; an Enter that
@@ -863,7 +942,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
     }
     if (!isSendKey(event)) {
       // Escape in the input stops a running reply like the stop button (only when no popup handled it above).
-      if (event.key === 'Escape' && busy && connected && !stopping) {
+      // With a request card waiting, Escape from the empty input answers the card (Dialogs); it must not also stop the run.
+      if (caps.stop && event.key === 'Escape' && busy && connected && !stopping && !(requestPending && draft.text.trim() === '')) {
         event.preventDefault();
         setStopping(true);
         onStop();
@@ -875,7 +955,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
   };
 
   const pickFiles = (): void => {
-    if (!connected || draft.pickerRequestId || composing.current) return;
+    if (!canAttach || !connected || draft.pickerRequestId || composing.current) return;
     const requestId = newId();
     dispatch({ type: 'pickerRequested', requestId });
     if (!send('workspace/pickFiles', { requestId })) dispatch({ type: 'workspaceFailed', requestId, message: t('composer.filesFailed') });
@@ -883,7 +963,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
 
   const insertMention = (): void => {
     const el = inputRef.current;
-    if (!el || !connected || composing.current) return;
+    if (!caps.editorContext || !el || !connected || composing.current) return;
     const start = el.selectionStart;
     const prefix = start > 0 && !/[\s([{]/u.test(draft.text[start - 1]!) ? ' ' : '';
     const value = draft.text.slice(0, start) + prefix + '@' + draft.text.slice(el.selectionEnd);
@@ -894,16 +974,19 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
 
   // Files, folders and symbols that go with the next message, and the knowledge selected for the conversation.
   const knowledge = useKnowledge();
-  const selectedKnowledge = usableKnowledge(knowledge.items).filter(item => knowledge.selected.includes(item.id)).length;
+  const selectedKnowledge = native ? usableKnowledge(knowledge.items).filter(item => knowledge.selected.includes(item.id)).length : 0;
   const basketCount = draft.attachments.length + selectedKnowledge;
   const attachmentPaths = useMemo(() => draft.attachments.map(file => file.path), [draft.attachments]);
-  const placeholder = !connected ? t('composer.placeholderOffline') : newSessionPending ? t('composer.placeholderNewSession') : requestPending ? t('composer.placeholderPending') : busy ? t('composer.placeholderBusy') : t('composer.placeholder');
+  const placeholder = !connected ? t('composer.placeholderOffline') : dictating ? t('composer.placeholderDictation') : newSessionPending ? t('composer.placeholderNewSession') : requestPending ? t('composer.placeholderPending') : busy ? t('composer.placeholderBusy') : t('composer.placeholder');
 
   // Right-click on the composer background: which controls it shows (checked = shown). Text fields keep their edit menu.
   const hiddenControls = useHiddenComposerControls();
+  useEffect(() => {
+    if (hiddenControls.includes('dictation') && dictating) send('dictation/set', { requestId: newId(), on: false });
+  }, [hiddenControls, dictating]);
   const { menuProps: controlsMenuProps, renderMenu: renderControlsMenu } = useContextMenu();
   const controlsMenu = controlsMenuProps((): ContextMenuItem[] => [
-    ...COMPOSER_CONTROLS.map(control => ({
+    ...COMPOSER_CONTROLS.filter(control => native || ['slash', 'basket'].includes(control) || control === 'attach' && canAttach || ['mention', 'editorContext'].includes(control) && caps.editorContext).map(control => ({
       id: control, label: t(`composerControl.${control}` as MessageKey), checked: !hiddenControls.includes(control), testId: `composer-control-${control}`,
       onSelect: () => setComposerControlHidden(control, !hiddenControls.includes(control)),
     })),
@@ -934,7 +1017,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
       {/* Everything about the context of the next message in one row: how full the window is, what is attached, editor context. */}
       <div className="context-row" role="group" aria-label={t('meter.context')} data-testid="context-row">
         <span className="context-tools">
-          <button type="button" className="icon-btn" data-testid="mention" disabled={!connected || draft.composing} title={t('composer.mention')} aria-label={t('composer.mention')} onMouseDown={(event) => event.preventDefault()} onClick={insertMention}><Icon name="at" size={14} /></button>
+          <button type="button" className="icon-btn" data-testid="mention" disabled={!caps.editorContext || !connected || draft.composing} title={t('composer.mention')} aria-label={t('composer.mention')} onMouseDown={(event) => event.preventDefault()} onClick={insertMention}><Icon name="at" size={14} /></button>
           <button type="button" className="icon-btn" data-testid="slash" disabled={!connected || draft.composing} title={t('slash.title')} aria-label={t('slash.title')}
             aria-haspopup="listbox" aria-expanded={slash !== null} onMouseDown={event => event.preventDefault()} onClick={() => {
               // A toggle: a second click (or a click while the typed "/…" list is open) closes the command list.
@@ -942,7 +1025,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
               else { setHelpOpen(true); setSlashDismissed(null); }
               inputRef.current?.focus();
             }}><Icon name="slash" size={14} /></button>
-          <button type="button" className="icon-btn" data-testid="attach" disabled={!connected || draft.composing || !!draft.pickerRequestId} title={t('composer.attach')} aria-label={t('composer.attach')} onClick={pickFiles}><Icon name="paperclip" size={14} /></button>
+          <button type="button" className="icon-btn" data-testid="attach" disabled={!canAttach || !connected || draft.composing || !!draft.pickerRequestId} title={t('composer.attach')} aria-label={t('composer.attach')} onClick={pickFiles}><Icon name="paperclip" size={14} /></button>
           <div className="basket-anchor" ref={basketRef}>
             <button ref={basketButton} type="button" className={basketCount > 0 ? 'context-count filled' : 'context-count'} data-testid="context-chip" disabled={requestPending} title={t('composer.basket', { count: basketCount })}
               aria-label={t('composer.basket', { count: basketCount })} aria-expanded={basketOpen} onClick={event => {
@@ -950,14 +1033,14 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
                 setBasketOpen(!basketOpen);
               }}><Icon name="paperclip" size={12} /><span className="context-count-value">{basketCount}</span></button>
             <div ref={basketPop} className="context-popover" data-testid="context-popover" hidden={!basketOpen} tabIndex={-1}>
-              <ContextBasket visible={basketOpen} files={draft.attachments} text={draft.text} dispatch={dispatch} locale={locale} workspaceKey={workspaceKey} sessionId={sessionId} model={model} connected={connected} disabled={requestPending || newSessionPending || draft.composing} />
+              <ContextBasket native={native} visible={basketOpen} files={draft.attachments} text={draft.text} dispatch={dispatch} locale={locale} workspaceKey={workspaceKey} sessionId={sessionId} model={model} connected={native && connected} disabled={requestPending || newSessionPending || draft.composing} />
             </div>
           </div>
-          <LiveEditorControls state={editorFollow} disabled={requestPending || newSessionPending || draft.composing} shortcuts={shortcuts} inputRef={inputRef} t={t} />
-          <ComputerToggle computer={computer} reply={computerReply} request={computerRequest} onCommandNotice={computerNotice} connected={connected} blocked={newSessionPending} inputRef={inputRef} />
-          <button type="button" className="icon-btn" data-testid="editor-context" aria-pressed={includeEditorContext} title={t('composer.includeContext')} aria-label={t('composer.includeContext')} onClick={() => onIncludeEditorContextChange(!includeEditorContext)}><Icon name="context" size={14} /></button>
+          {native && <LiveEditorControls state={editorFollow} disabled={requestPending || newSessionPending || draft.composing} shortcuts={shortcuts} inputRef={inputRef} t={t} />}
+          {native && <ComputerToggle computer={computer} reply={computerReply} request={computerRequest} onCommandNotice={computerNotice} connected={connected} blocked={newSessionPending} inputRef={inputRef} />}
+          {caps.editorContext && <button type="button" className="icon-btn" data-testid="editor-context" aria-pressed={includeEditorContext} title={t('composer.includeContext')} aria-label={t('composer.includeContext')} onClick={() => onIncludeEditorContextChange(!includeEditorContext)}><Icon name="context" size={14} /></button>}
         </span>
-        <ContextMeter session={session} basketTokens={basketTokens} workspaceKey={workspaceKey} sessionId={sessionId} includeEditorContext={includeEditorContext} attachmentPaths={attachmentPaths} connected={connected} />
+        {native && <ContextMeter session={session} basketTokens={basketTokens} workspaceKey={workspaceKey} sessionId={sessionId} includeEditorContext={includeEditorContext} attachmentPaths={attachmentPaths} connected={connected} />}
       </div>
       {/* The notices are shown in the VS status bar; screen readers get them here (not drawn), and the input refers to the reason. */}
       <div className="sr-only" id={noticeId} role="alert" data-testid="composer-notice">
@@ -1002,7 +1085,7 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
           </div>
         )}
         <div className="composer-input-shell">
-        <textarea ref={inputRef} className="composer-input" data-testid="composer-input" data-pomp-composer="" rows={1} spellCheck={false} autoComplete="off"
+        <textarea ref={inputRef} className="composer-input" data-testid="composer-input" data-pomp-composer="" rows={1} spellCheck={false} autoComplete="off" readOnly={dictating}
           value={draft.text} disabled={!connected} placeholder={placeholder} aria-label={t('composer.input')} aria-invalid={failureMessage !== null}
           aria-describedby={failureMessage !== null ? noticeId : undefined}
           role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded={slash !== null || mention !== null} aria-controls={slash ? slashId : mention ? popupId : undefined}
@@ -1012,7 +1095,9 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
             // Files or an image (no plain text): only the host can read their paths, so it takes them from the clipboard into the basket.
             const data = event.clipboardData;
             if (data.types.includes('text/plain') || !(data.files.length > 0 || data.types.includes('Files'))) return;
-            event.preventDefault(); send('ui/pasteFiles', {});
+            event.preventDefault();
+            if (canAttach) send('ui/pasteFiles', {});
+            else dispatch({ type: 'localNotice', level: 'warning', message: 'Attachments are unavailable for this backend. Nothing was pasted.' });
           }}
           onChange={(event) => {
             discardPrediction();
@@ -1051,14 +1136,15 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
         {word ? <ComposerGhost inputRef={inputRef} text={draft.text.slice(0, word.at)} prediction={word.rest} testId="composer-word-ghost" />
           : prediction && <ComposerGhost inputRef={inputRef} text={draft.text} prediction={prediction} />}
         </div>
-        {/* Send (Enter) sits next to the text it sends; Stop joins it while a reply runs. */}
+        {/* Send (Enter) sits next to the text it sends; Stop joins it while a reply runs, and the microphone dictates into that text. */}
         <div className="composer-send">
-          {busy && <button type="button" className="btn stop composer-send-btn" data-testid="stop" title={stopping ? t('composer.stopping') : t('composer.stop')} aria-label={stopping ? t('composer.stopping') : t('composer.stop')} disabled={!connected || stopping} onClick={() => { setStopping(true); onStop(); }}><Icon name="stop" size={11} /><span className="sr-only">{stopping ? t('composer.stopping') : t('composer.stop')}</span></button>}
+          {caps.stop && busy && <button type="button" className="btn stop composer-send-btn" data-testid="stop" title={stopping ? t('composer.stopping') : t('composer.stop')} aria-label={stopping ? t('composer.stopping') : t('composer.stop')} disabled={!connected || stopping} onClick={() => { setStopping(true); onStop(); }}><Icon name="stop" size={11} /><span className="sr-only">{stopping ? t('composer.stopping') : t('composer.stop')}</span></button>}
+          {native && <DictationButton key={dictationScope} dictation={dictation} reply={dictationReply} connected={connected} blocked={requestPending || newSessionPending || draft.composing} inputRef={inputRef} onStart={beginDictation} onStartFailed={refuseDictation} />}
           <button type="button" className="btn primary composer-send-btn" data-testid="send" disabled={!canSend} title={t(busy ? 'queue.send' : 'composer.send')} aria-label={t(busy ? 'queue.send' : 'composer.send')} onClick={() => submit()}><Icon name="arrowUp" size={14} /><span className="sr-only">{t(busy ? 'queue.send' : 'composer.send')}</span></button>
         </div>
       </div>
       <div className="composer-bar">
-        <div className="permission-mode-anchor" ref={permissionRef} onKeyDown={event => {
+        {native && <div className="permission-mode-anchor" ref={permissionRef} onKeyDown={event => {
           if (event.key === 'Escape' && permissionOpen && !event.nativeEvent.isComposing && event.keyCode !== 229) {
             event.preventDefault(); event.stopPropagation(); closePermission();
           }
@@ -1076,8 +1162,8 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
           {permissionConfirm && <ConfirmPopover anchorRef={permissionRef} testId="permission-mode-confirm" label={t('perm.mode')} question={t('perm.mode.confirmYolo')} enterConfirms
             cancelLabel={t('dialog.cancel')} confirmLabel={t('perm.allow')} cancelTestId="permission-mode-confirm-cancel" confirmTestId="permission-mode-confirm-allow"
             confirmDisabled={permissionDisabled} onCancel={closePermission} onConfirm={() => { closePermission(); setApprovalMode('yolo'); }} />}
-        </div>
-        {hasTargets && (
+        </div>}
+        {native && hasTargets && (
           <div className="send-target-anchor" ref={targetRef} onKeyDown={event => {
             if (event.key === 'Escape' && targetOpen && !event.nativeEvent.isComposing && event.keyCode !== 229) {
               event.preventDefault(); event.stopPropagation(); setTargetOpen(false); focusControlOrInput(targetButton.current, inputRef.current);
@@ -1103,11 +1189,11 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
               markCurrent="background"
               items={listed.filter(item => matchesQuery(targetQuery, item.label)).map(item => ({ ...item, id: targetKey(item.target), current: item.own ? !selectedDestination : item.target === selectedDestination?.target, icon: <DestinationAvatar kind={item.avatar.kind} id={item.avatar.id} /> }))}
               search={listed.length > 10 ? { value: targetQuery, onChange: setTargetQuery, placeholder: t('ui.search'), label: t('ui.search') } : undefined}
-              // The own row clears the one-message target: the next message continues this conversation, never a subagent run of it.
+              // The own row clears the one-message target: the next message continues this conversation, never a relay to its own tab.
               onChoose={item => { onSelectTarget(choices.find(entry => targetKey(entry.target) === item.id)?.target); setTargetLost(null); setTargetOpen(false); focusControlOrInput(targetButton.current, inputRef.current); }} />}
           </div>
         )}
-        <ModelPickers
+        {native && <ModelPickers
           session={session}
           setup={setup}
           replies={setupReplies}
@@ -1118,9 +1204,9 @@ export function Composer({ locale, workspaceKey, sessionId, model, session, setu
           onChosen={focusInput}
           modal={requestPending}
           pickerRequest={pickerRequest}
-        />
+        />}
       </div>
-      <QuotaMeter session={session} setup={setup} replies={setupReplies} connected={connected} busy={busy} locale={locale} onManage={onManageAccounts} />
+      {native && <QuotaMeter session={session} setup={setup} replies={setupReplies} connected={connected} busy={busy} locale={locale} onManage={onManageAccounts} />}
       {renderControlsMenu()}
     </div>
   );

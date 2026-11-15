@@ -8,7 +8,7 @@ import { Icon } from './Icon';
 import { Note } from './Note';
 import { plainControls, revealControls } from './RevealControls';
 import { LimitSummary, SubscriptionUsage } from './SubscriptionUsage';
-import { useRememberedOpen, ViewSection } from './ViewSection';
+import { SectionRefresh, useRememberedOpen, ViewSection } from './ViewSection';
 import { tightestLimit } from '../usage';
 import { Badge } from './ui';
 
@@ -228,18 +228,7 @@ export function AccountsSection({ setup, cmd, state, providersError, usageBusy, 
 
   return (
     <ViewSection sectionKey="setup-accounts" className="setup-section acct-section" headingId={titleId} aria-labelledby={titleId} data-testid="setup-accounts" title={t('setup.accounts.title')} status={accounts.length}
-      bodyClassName="ui-flush" actions={<button
-          type="button"
-          className="icon-btn"
-          data-testid="usage-refresh"
-          disabled={inert || usageBusy}
-          aria-busy={usageBusy || undefined}
-          title={t('setup.usage.refresh')}
-          aria-label={t('setup.usage.refresh')}
-          onClick={onRefreshUsage}
-        >
-          {usageBusy ? <span className="spinner" aria-hidden="true" /> : <Icon name="restart" size={13} />}
-        </button>}>
+      bodyClassName="ui-flush" actions={<SectionRefresh testId="usage-refresh" label={t('setup.usage.refresh')} disabled={inert} busy={usageBusy} onClick={onRefreshUsage} />}>
 
       {state === 'loading' && (
         <div className="setup-loading acct-inset" role="status" data-testid="accounts-loading">

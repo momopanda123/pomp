@@ -1,6 +1,7 @@
 import { memo, useMemo, useState } from 'react';
 import { clip, formatDuration, prettyArgs, summarizeArgs } from '../format';
-import { useT } from '../i18n';
+import { useT, type Translate } from '../i18n';
+import { useFindReveal } from '../findReveal';
 import { engineAbortText, isEngineAbort } from '../engineAbortText';
 import { useWorkState } from '../work/store';
 import { CommandJob } from './CommandJob';
@@ -33,6 +34,11 @@ export function previewPath(item: ToolItem): string | undefined {
   return undefined;
 }
 
+/** What opening the card shows: the arguments, then the live progress or the result. The conversation search looks through it while the card is closed. */
+export function toolBodyTexts(item: ToolItem, t: Translate): [args: string, result: string] {
+  return [prettyArgs(item.args), item.state === 'running' && item.progress ? item.progress : engineAbortText(item.resultText ?? '', t)];
+}
+
 /** Collapsible card for one tool call: name, arguments summary, live progress, result (collapsed by default). */
 export const ToolCard = memo(function ToolCard({ item, sessionId, controlsEnabled = false }: { item: ToolItem; sessionId?: string; controlsEnabled?: boolean }) {
   const t = useT();
@@ -40,6 +46,7 @@ export const ToolCard = memo(function ToolCard({ item, sessionId, controlsEnable
   const jobs = sessionId ? terminal.jobs.filter(job => job.origin?.sessionId === sessionId && job.origin.toolCallId === item.toolCallId) : [];
   const members = background && background.sessionId === sessionId ? background.jobs.filter(job => job.parentToolCallId === item.toolCallId) : [];
   const [open, setOpen] = useState(false);
+  useFindReveal(item.key, () => setOpen(true));
   const summary = useMemo(() => summarizeArgs(item.args), [item.args]);
   const argsJson = useMemo(() => prettyArgs(item.args), [item.args]);
 
@@ -55,7 +62,7 @@ export const ToolCard = memo(function ToolCard({ item, sessionId, controlsEnable
   const preview = useMemo(() => previewPath(item), [item]);
 
   return (
-    <div className={`tool ${statusClass}`}>
+    <div className={`tool ${statusClass}`} data-find-collapsed={open ? undefined : ''}>
       <button type="button" className="tool-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <span className="tool-status" role="img" aria-label={statusLabel} title={statusLabel}>
           {item.state === 'running' ? (

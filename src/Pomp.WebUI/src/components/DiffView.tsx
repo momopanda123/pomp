@@ -2,6 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSPr
 import { parseUnifiedDiff, sideBySideRows, type ContentRow, type DiffRow, type SplitRow } from '../diff';
 import { useT } from '../i18n';
 import { revealControls } from './RevealControls';
+import { Segmented } from './ui';
 
 const INITIAL_ROWS = 1500;
 const SPLIT_MIN_WIDTH = 480;
@@ -58,10 +59,8 @@ export const DiffView = memo(function DiffView({ diff, onFullyShown }: { diff: s
     <div className="diff" role="group" ref={root} aria-label={t('perm.diff')} data-mode={effectiveMode}>
       <div className="diff-head">
         <span>{t('perm.diff')}</span>
-        <span className="diff-modes" role="group" aria-label={t('diff.mode')}>
-          <button type="button" className="btn subtle" data-testid="diff-inline" aria-pressed={mode === 'inline'} onClick={() => chooseMode('inline')}>{t('diff.inline')}</button>
-          <button type="button" className="btn subtle" data-testid="diff-split" aria-pressed={mode === 'split'} onClick={() => chooseMode('split')}>{t('diff.split')}</button>
-        </span>
+        <Segmented<DiffMode> label={t('diff.mode')} value={mode} onChange={chooseMode}
+          options={[{ id: 'inline', label: t('diff.inline'), testId: 'diff-inline' }, { id: 'split', label: t('diff.split'), testId: 'diff-split' }]} />
         <span className="diff-stat"><span className="add">+{parsed.added}</span><span className="del">−{parsed.removed}</span></span>
       </div>
       {rows.length === 0 ? null : (

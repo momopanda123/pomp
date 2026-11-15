@@ -238,7 +238,8 @@ namespace Pomp.Hosting
                 if (!(_settings is IApprovalModeWriter writer))
                     throw new InvalidOperationException(PompLanguage.Pick("권한 모드를 바꿀 수 없어요.", "The permission mode cannot be changed."));
                 bool busy;
-                lock (_stateLock) busy = _info.IsStreaming || _info.HasPendingAsyncWork;
+                // A message admitted but not streaming yet counts too: the restart that applies the mode would cut it off.
+                lock (_stateLock) busy = _info.IsStreaming || _info.HasPendingAsyncWork || _turns.Count > 0;
                 if (wanted != mode && (busy || _ui.PendingRequestCount > 0))
                     throw new InvalidOperationException(PompLanguage.Pick("응답이 진행 중이에요.", "A reply is in progress."));
                 if (wanted != mode)

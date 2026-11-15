@@ -32,9 +32,9 @@ export function DraftTokenCounter({ text, attachments, knowledge, root, sessionI
   useEffect(() => {
     if (!waiting) return;
     const id = request.current;
-    const timer = window.setTimeout(() => { if (request.current === id) { request.current = null; setWaiting(false); setResult({ requestId: id ?? '', error: ko ? '토큰 계산 응답을 받지 못했어요' : 'No token count response received' }); } }, 12000);
+    const timer = window.setTimeout(() => { if (request.current === id) { request.current = null; setWaiting(false); setResult({ requestId: id ?? '', error: t('setup.noReply') }); } }, 12000);
     return () => window.clearTimeout(timer);
-  }, [waiting, ko]);
+  }, [waiting, t]);
   const unusable = disabled || !connected || !root || !sessionId || !model || text.length > 128000;
   const count = () => {
     if (unusable || request.current || !root || !sessionId || !model) return;

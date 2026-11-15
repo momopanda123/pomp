@@ -55,6 +55,32 @@ export function useEscapeToComposer(input: RefObject<HTMLTextAreaElement | null>
   }, [input]);
 }
 
+/**
+ * When Visual Studio gives the tool window focus (its tab was selected), WebView2 puts it on the first tabbable control: the Chat
+ * tab, drawn with a keyboard focus ring and a keyboard tooltip. A click on that tab never shows either. Focus that arrives from outside
+ * the page with no key or pointer press in it moves to the composer when the Chat tab is shown, and off the tab bar otherwise.
+ */
+export function useHostFocusRedirect(input: RefObject<HTMLTextAreaElement | null>, chatShown: () => boolean): void {
+  useEffect(() => {
+    let lastInput = -Infinity;
+    const mark = (): void => { lastInput = performance.now(); };
+    const onFocusIn = (event: FocusEvent): void => {
+      const target = event.target instanceof Element ? event.target.closest<HTMLElement>('.shell-tab') : null;
+      if (!target || event.relatedTarget !== null || performance.now() - lastInput < 600) return;
+      if (chatShown() && input.current) input.current.focus({ preventScroll: true });
+      else target.blur();
+    };
+    window.addEventListener('pointerdown', mark, true);
+    window.addEventListener('keydown', mark, true);
+    document.addEventListener('focusin', onFocusIn, true);
+    return () => {
+      window.removeEventListener('pointerdown', mark, true);
+      window.removeEventListener('keydown', mark, true);
+      document.removeEventListener('focusin', onFocusIn, true);
+    };
+  }, [input, chatShown]);
+}
+
 /** The Windows paths of the `file:` URIs in a `text/uri-list` (comment lines and other schemes are left out). */
 export function fileUriPaths(list: string): string[] {
   const paths: string[] = [];
@@ -81,8 +107,10 @@ export function fileUriPaths(list: string): string[] {
  *   Solution Explorer's selection, the dragged items.
  * Plain text dragged from the editor still drops into the composer.
  */
-export function useFileDrops(unsupported: () => string): void {
+export function useFileDrops(unsupported: () => string, enabled = true, unavailable?: () => string): void {
   const message = useRef(unsupported); message.current = unsupported;
+  const allowed = useRef(enabled); allowed.current = enabled;
+  const refused = useRef(unavailable); refused.current = unavailable;
   useEffect(() => {
     const handled = (event: DragEvent): boolean => {
       const types = event.dataTransfer?.types;
@@ -95,6 +123,7 @@ export function useFileDrops(unsupported: () => string): void {
     const drop = (event: DragEvent): void => {
       if (!handled(event)) return;
       event.preventDefault();
+      if (!allowed.current) { const text = refused.current?.(); if (text) send('ui/status', { text, level: 'warning' }); return; }
       const data = event.dataTransfer!; const webview = window.chrome?.webview;
       if (!webview) return;
       if (!data.types.length) { send('ui/dropFiles', { projectItems: true }); return; }

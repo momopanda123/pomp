@@ -41,7 +41,9 @@ export function ModelShareSection({ share, cmd, inert }: ModelShareSectionProps)
   const newCode = cmd.feedback('shareNewCode');
   const revoke = cmd.feedback('shareRevoke');
   const on = share.state === 'on';
-  const switchedOn = on || share.state === 'starting';
+  // Anything but "off" is a share the saved setting still asks for (a failed one starts again with Visual Studio): the switch is on,
+  // so that it can be switched off.
+  const switchedOn = share.state !== 'off';
 
   const address = draftAddress ?? share.address ?? share.addresses[0]?.address ?? '';
   const portText = draftPort ?? String(share.port);
@@ -190,7 +192,8 @@ export function ModelShareSection({ share, cmd, inert }: ModelShareSectionProps)
       </form>
 
       <div className="share-clients">
-        {share.clients.length > 0 && <DataTable columns="minmax(0, 1fr) auto" label={t('setup.share.clients')} testId="share-clients"
+        {/* No PC yet: the table keeps its header over blank rows, with no sentence. */}
+        <DataTable columns="minmax(0, 1fr) auto" label={t('setup.share.clients')} testId="share-clients" empty={share.clients.length === 0}
           head={[t('setup.share.clients'), '']}>
           {share.clients.map((client) => {
             const answer = cmd.sent.shareRevoke?.tag === client.name ? revoke : undefined;
@@ -209,9 +212,7 @@ export function ModelShareSection({ share, cmd, inert }: ModelShareSectionProps)
               </Row>
             );
           })}
-        </DataTable>}
-        {share.clients.length === 0 && <div className="ui-form share-clients-empty"><strong className="share-info-title">{t('setup.share.clients')}</strong>
-          <span className="hint" data-testid="share-clients-empty">{t('setup.share.clientsEmpty')}</span></div>}
+        </DataTable>
         {asking !== undefined && (
           <div className="acct-confirm share-confirm" role="group" aria-label={plainControls(t('setup.share.revokeFor', { name: asking }))} data-testid="share-revoke-confirm" tabIndex={-1}
             onKeyDown={(event) => {

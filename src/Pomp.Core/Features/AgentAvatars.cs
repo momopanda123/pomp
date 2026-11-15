@@ -26,6 +26,22 @@ namespace Pomp.Features
         private static readonly Regex Color = new Regex("^#[0-9a-fA-F]{6}$", RegexOptions.CultureInvariant);
         private static readonly Regex Image = new Regex("^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$", RegexOptions.CultureInvariant);
         private static readonly ConcurrentDictionary<string, object> Locks = new ConcurrentDictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        private static long lastRevision;
+
+        /// <summary>
+        /// A revision no picture of this process had before and later than <paramref name="previous"/>. A picture set after "reset to
+        /// default" (the entry and its revision are gone) must not get a revision the page already cached an image under: the clock keeps
+        /// it ahead of earlier runs, the counter ahead of every revision given in this run.
+        /// </summary>
+        private static long NextRevision(long previous)
+        {
+            while (true)
+            {
+                var last = System.Threading.Interlocked.Read(ref lastRevision);
+                var next = Math.Max(Math.Max(previous, last) + 1, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                if (System.Threading.Interlocked.CompareExchange(ref lastRevision, next, last) == last) return next;
+            }
+        }
 
         /// <summary>The checked picture to store: <c>{ shape, color?, image? }</c>; anything else is refused.</summary>
         public static JObject Normalize(JObject avatar)
@@ -95,7 +111,7 @@ namespace Pomp.Features
                 {
                     var stored = Normalize(avatar);
                     if (avatar["image"] == null && roles[name]?["image"] is JToken kept) stored["image"] = kept.DeepClone();
-                    stored["rev"] = rev + 1;
+                    stored["rev"] = NextRevision(rev);
                     roles[name] = stored;
                 }
                 var directory = Path.GetDirectoryName(file)!;

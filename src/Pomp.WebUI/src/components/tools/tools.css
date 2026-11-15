@@ -12,7 +12,8 @@
 .tools-scroll-body { flex: 1; min-height: 0; min-width: 0; max-width: 100%; padding: 10px; overflow-y: auto; overflow-x: hidden; overflow-wrap: anywhere; overscroll-behavior: contain; }
 .tools-scroll-body .view-section-body :is(h3, h4) { font-size: 1em; margin: 0 0 6px; }
 .tools-scroll-body :is(p, small, strong, label, li, div) { min-width: 0; overflow-wrap: anywhere; }
-.tools-scroll-body p { margin: 5px 0 8px; }
+/* Every paragraph of a Tools view is a note or a line of a form: none carries a paragraph margin. */
+.tools-scroll-body p { margin: 0; }
 .tools-scroll-body :is(input:not([type='checkbox']), select, textarea) { display: block; width: 100%; min-width: 0; max-width: 100%; }
 .tools-scroll-body :is(button, select) { max-width: 100%; white-space: normal; overflow-wrap: anywhere; height: auto; min-height: var(--pomp-control-height); }
 .tools-scroll-body textarea { min-height: 60px; resize: vertical; }
@@ -72,44 +73,11 @@
 /* Long script editors stay readable in a monospace face; they wrap instead of scrolling the page. */
 .tools-mono { font-family: var(--pomp-font-mono); }
 
-/* Agents › Rules: the event rules, the hook definitions and the hook runtime state are cards of one column; the Agents page scrolls and pads,
-   so the definitions keep only the form styling of their body. */
-.agent-rules { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.agent-rules > .tools-scroll-body { flex: none; padding: 0; overflow: visible; }
-
-/* Tools › Knowledge: the search and the new-knowledge button share a row, a knowledge is a row that opens to its pieces, a piece is plain preformatted text. */
-.knowledge-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; margin: 0 0 8px; }
-.tools-scroll-body .knowledge-bar > input { flex: 1 1 10em; width: auto; }
-.tools-scroll-body button.knowledge-toggle { display: inline-flex; gap: 5px; align-items: center; min-width: 0; padding: 1px 3px; border: 0; background: transparent; color: var(--pomp-fg); text-align: left; }
-.knowledge-toggle:hover { background: var(--pomp-hover-bg); }
-.knowledge-body { min-width: 0; margin: 4px 0 0 16px; }
-.knowledge-body[hidden] { display: none; }
-.knowledge-pieces { margin: 4px 0; }
-.knowledge-pieces > li { padding: 5px 0; }
-.knowledge-text { max-height: 240px; margin: 4px 0; padding: 6px 8px; overflow: auto; border-radius: var(--pomp-radius); background: var(--pomp-code-bg); font-family: var(--pomp-font-mono); font-size: .92em; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
-.knowledge-anchor { display: flex; flex-wrap: wrap; gap: 3px 6px; align-items: baseline; margin: 2px 0; color: var(--pomp-muted-fg); font-size: .9em; }
-.knowledge-anchor code { font-family: var(--pomp-font-mono); }
-.knowledge-optimized { margin: 2px 0 6px; }
-.knowledge-color-field { min-width: 0; margin: 0; padding: 0; border: 0; }
-.knowledge-color-field > legend { padding: 0; }
-.knowledge-swatches { display: flex; flex-wrap: wrap; gap: 4px; margin: 3px 0 6px; }
-/* The whole 28 px square is the target; the color fills it, so where it looks clickable is where it clicks. */
-.tools-scroll-body button.knowledge-swatch { display: inline-flex; flex: none; width: 28px; height: 28px; min-width: 0; padding: 3px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: transparent; cursor: pointer; }
-.knowledge-swatch > span { flex: 1; border-radius: 2px; pointer-events: none; }
-.tools-scroll-body button.knowledge-swatch[aria-checked="true"] { padding: 2px; border: 2px solid var(--pomp-fg); }
-.knowledge-color-code { display: flex; gap: 6px; align-items: center; }
-.tools-scroll-body .knowledge-color-code > input { width: 7em; font-family: var(--pomp-font-mono); }
-.knowledge-matches { list-style: none; display: flex; flex-direction: column; gap: 1px; margin: 2px 0 6px; padding: 0; }
-.tools-scroll-body .knowledge-matches button { display: flex; gap: 6px; align-items: center; width: 100%; min-width: 0; padding: 3px 6px; border: 0; background: transparent; color: var(--pomp-fg); text-align: left; overflow-wrap: anywhere; }
-.knowledge-matches button:hover { background: var(--pomp-hover-bg); }
-.knowledge-existing { display: flex; gap: 6px; align-items: center; margin: 2px 0 6px; color: var(--pomp-muted-fg); }
-
 /* Tools › Skills, MCP, Rules, Workflows: tables in flush cards, forms in an inline panel above them. */
 .tools-scroll-body .ui-icon-btn, .tools-scroll-body .ui-switch { min-height: 0; }
 .tools-scroll-body .ui-seg > button { min-height: var(--pomp-bar-height); white-space: nowrap; }
 .tools-scroll-body .view-section-actions .btn.small { min-height: var(--pomp-bar-height); white-space: nowrap; }
 .tools-scroll-body .ui-cell > .ui-sub + .ui-sub { margin-top: 1px; }
-.tools-scroll-body p.ui-note { margin: 0; }
 .tools-name-line { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
 .tools-name-line > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tools-name-line > .ui-badge, .tools-name-line > .inline-kind { flex: none; }
@@ -158,5 +126,5 @@
 .tools-scroll-body .tools-pair > input { width: 100%; }
 .tools-scroll-body .tools-pair-add { align-self: flex-start; }
 .tools-import-preview { border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); }
-.tools-import-preview .ui-badge { max-width: 180px; }
+.tools-import-preview .ui-badge { max-width: min(180px, 100%); }
 .tools-test-head > .ui-grow { flex: 1; }

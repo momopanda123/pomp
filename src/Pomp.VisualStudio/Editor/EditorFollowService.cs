@@ -58,7 +58,7 @@ namespace Pomp.VisualStudio.Editor
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             if (disposed) return;
-            var next = string.IsNullOrEmpty(sessionId) ? string.Empty : (VsAdapterContext.NormalizePath(workspace) ?? workspace) + "\n" + sessionId;
+            var next = ConversationKey(workspace, sessionId);
             task = taskId ?? string.Empty;
             var nextTitle = sessionTitle ?? string.Empty;
             var switched = session != next;
@@ -75,11 +75,30 @@ namespace Pomp.VisualStudio.Editor
             if (switched) NotifyChanged();
         }
 
-        public void Record(string path, ITextBuffer buffer, ITextSnapshot before, ITextSnapshot after)
+        /// <summary>A conversation's key for its marks and bookmarks: its workspace and session id; empty without a session id.</summary>
+        private static string ConversationKey(string? workspace, string? sessionId) =>
+            string.IsNullOrEmpty(sessionId) ? string.Empty : (VsAdapterContext.NormalizePath(workspace) ?? workspace) + "\n" + sessionId;
+
+        /// <summary>Whose edit is recorded: the conversation's key, its request (task) and its title.</summary>
+        private readonly struct EditOwner
+        {
+            public EditOwner(string session, string request, string title) { Session = session; Request = request; Title = title; }
+            public readonly string Session;
+            public readonly string Request;
+            public readonly string Title;
+        }
+
+        /// <summary>The conversation an edit belongs to: the one whose tool made it (the host's EditorSessionScope), else the displayed one.</summary>
+        private EditOwner Owner(Pomp.Hosting.EditorSessionContext? context) => context.HasValue
+            ? new EditOwner(ConversationKey(context.Value.WorkspaceRoot, context.Value.SessionId), context.Value.TaskId ?? string.Empty, context.Value.SessionTitle ?? string.Empty)
+            : new EditOwner(session, task, title);
+
+        public void Record(string path, ITextBuffer buffer, ITextSnapshot before, ITextSnapshot after, Pomp.Hosting.EditorSessionContext? provenance = null)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             if (disposed || before == after || (!Enabled && !bookmarksEnabled)) return;
-            if (session.Length == 0) { services.Logger.Warn("Live edit provenance unavailable: no active conversation."); return; }
+            var owner = Owner(provenance);
+            if (owner.Session.Length == 0) { services.Logger.Warn("Live edit provenance unavailable: no active conversation."); return; }
             if (before.TextBuffer != buffer || after.TextBuffer != buffer || after != buffer.CurrentSnapshot || before.Version.Next != after.Version)
             {
                 services.Logger.Warn("Live edit provenance skipped because the buffer changed independently: " + path);
@@ -95,8 +114,8 @@ namespace Pomp.VisualStudio.Editor
             }
             if (!state.History.TryGetValue(before.Version.VersionNumber, out var previous))
                 throw new InvalidOperationException("The live edit baseline is no longer available.");
-            previous.Sessions.TryGetValue(session, out var old);
-            old = DropEarlierRequest(old);
+            previous.Sessions.TryGetValue(owner.Session, out var old);
+            old = DropEarlierRequest(old, owner);
             var changes = before.Version.Changes;
             if (changes.Count == 0) return;
             if (!state.History.ContainsKey(after.Version.VersionNumber))
@@ -106,9 +125,9 @@ namespace Pomp.VisualStudio.Editor
                 state.Sessions = moved;
             }
             var next = LiveChangeTracker.Record(old ?? new List<LiveChange>(), before, after, changes);
-            state.Sessions[session] = next;
+            state.Sessions[owner.Session] = next;
             state.Save(after);
-            Committed(path, buffer, after, changes.Min(c => c.NewPosition));
+            Committed(path, buffer, after, changes.Min(c => c.NewPosition), owner);
         }
 
         /// <summary>
@@ -116,11 +135,12 @@ namespace Pomp.VisualStudio.Editor
         /// <paramref name="changes"/> (positions in the current text, each with its text before) become this conversation's change, as
         /// <see cref="Record"/> would have made it. Earlier marks they overlap give way to them.
         /// </summary>
-        public void RecordLoaded(string path, ITextBuffer buffer, IReadOnlyList<LiveChange> changes)
+        public void RecordLoaded(string path, ITextBuffer buffer, IReadOnlyList<LiveChange> changes, Pomp.Hosting.EditorSessionContext? provenance = null)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             if (disposed || changes.Count == 0 || (!Enabled && !bookmarksEnabled)) return;
-            if (session.Length == 0) { services.Logger.Warn("Live edit provenance unavailable: no active conversation."); return; }
+            var owner = Owner(provenance);
+            if (owner.Session.Length == 0) { services.Logger.Warn("Live edit provenance unavailable: no active conversation."); return; }
             var current = buffer.CurrentSnapshot;
             if (!buffers.ContainsKey(buffer)) RebindReopenedBuffer(buffer, current);
             if (!buffers.TryGetValue(buffer, out var state))
@@ -129,41 +149,42 @@ namespace Pomp.VisualStudio.Editor
                 buffers.Add(buffer, state);
                 Attach(state);
             }
-            state.Sessions.TryGetValue(session, out var old);
-            old = DropEarlierRequest(old);
+            state.Sessions.TryGetValue(owner.Session, out var old);
+            old = DropEarlierRequest(old, owner);
             var next = (old ?? new List<LiveChange>()).Where(e => !changes.Any(c => LiveChangeTracker.Touches(c.Start, c.End, e.Start, e.End))).ToList();
             next.AddRange(changes);
             next.Sort((a, b) => a.Start.CompareTo(b.Start));
-            state.Sessions[session] = next;
+            state.Sessions[owner.Session] = next;
             state.Save(current);
-            Committed(path, buffer, current, changes.Min(c => c.Start));
+            Committed(path, buffer, current, changes.Min(c => c.Start), owner);
         }
 
         /// <summary>With "last editing request only", a new request's first edit in this conversation drops the earlier request's marks in every file.</summary>
-        private List<LiveChange>? DropEarlierRequest(List<LiveChange>? old)
+        private List<LiveChange>? DropEarlierRequest(List<LiveChange>? old, EditOwner owner)
         {
-            if (services.Settings.AppliedLiveChangeRetention != LiveChangeRetention.LastRequest || task.Length == 0) return old;
-            if (markedTask.TryGetValue(session, out var shown) && shown != task)
+            if (services.Settings.AppliedLiveChangeRetention != LiveChangeRetention.LastRequest || owner.Request.Length == 0) return old;
+            if (markedTask.TryGetValue(owner.Session, out var shown) && shown != owner.Request)
             {
-                var owner = session;
-                foreach (var other in buffers.Values) Drop(other, name => name == owner);
+                var conversation = owner.Session;
+                foreach (var other in buffers.Values) Drop(other, name => name == conversation);
                 old = null;
             }
-            markedTask[session] = task;
+            markedTask[owner.Session] = owner.Request;
             return old;
         }
 
         /// <summary>A recorded change: its bookmark, the follow to its first line, the views redrawn.</summary>
-        private void Committed(string path, ITextBuffer buffer, ITextSnapshot after, int first)
+        private void Committed(string path, ITextBuffer buffer, ITextSnapshot after, int first, EditOwner owner)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             var line = after.GetLineNumberFromPosition(Math.Min(first, after.Length)) + 1;
             if (bookmarksEnabled)
             {
-                if (task.Length > 0) BookmarkAction(() => bookmarks.Mark(path, buffer, line, session, task, title), "marking " + path);
+                if (owner.Request.Length > 0) BookmarkAction(() => bookmarks.Mark(path, buffer, line, owner.Session, owner.Request, owner.Title), "marking " + path);
                 else services.Logger.Warn("Live bookmark provenance unavailable: no authoritative active task.");
             }
-            if (Enabled)
+            // The editor follows the conversation it displays: a background tab's edit is recorded and bookmarked, not navigated to.
+            if (Enabled && owner.Session == session)
             {
                 pendingPath = path; pendingBuffer = buffer;
                 pendingPoint = after.CreateTrackingPoint(Math.Min(first, after.Length), PointTrackingMode.Negative);

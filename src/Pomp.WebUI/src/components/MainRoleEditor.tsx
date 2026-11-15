@@ -8,7 +8,7 @@ import { AgentDialog } from './AgentDialog';
 import { Avatar } from './AgentsTables';
 import { Icon } from './Icon';
 import { revealControls } from './RevealControls';
-import { Badge, Segmented } from './ui';
+import { Badge, IconButton, Segmented } from './ui';
 
 type Scope = 'project' | 'user';
 type Loaded = { scope?: Scope | null; project?: MainInstructionsFile; user: MainInstructionsFile };
@@ -67,10 +67,10 @@ export function MainRoleEditor({ returnFocus, disabled, replies, onClose }: {
     if (send('agents/command', { requestId: id, action: 'saveMain', scope, instructions: texts[scope], ...(file.hash ? { expectedHash: file.hash } : {}) })) setPending({ id, kind: 'save' });
     else setError(t('error.hostUnavailable'));
   };
-  return <AgentDialog testId="main-role-editor" className="editor-dialog" labelledBy="main-role-editor-title" returnFocus={returnFocus} onClose={() => { if (!saving) onClose(); }}>
+  return <AgentDialog testId="main-role-editor" labelledBy="main-role-editor-title" returnFocus={returnFocus} onClose={() => { if (!saving) onClose(); }}>
     <div className="dialog-head">
       <h4 id="main-role-editor-title">{t('agents.editRole')}</h4>
-      <button type="button" className="icon-btn" disabled={saving} aria-label={t('agents.close')} onClick={onClose}><Icon name="x" size={13} /></button>
+      <IconButton icon="x" label={t('agents.close')} disabled={saving} onClick={onClose} />
     </div>
     {error && <div className="dialog-error" role="alert">
       <Icon name="error" size={12} /><span>{revealControls(error)}</span>

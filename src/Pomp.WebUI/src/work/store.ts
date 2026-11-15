@@ -34,16 +34,18 @@ let release: (() => void) | undefined;
 const rootKey = (root: string) => root.replaceAll('\\', '/').toLowerCase();
 const notify = () => listeners.forEach(listener => listener());
 
-/** In-memory only. A workspace/session switch invalidates every previous panel snapshot. */
+/**
+ * In-memory only. Another workspace invalidates every panel snapshot. Another conversation in the same workspace keeps what belongs to
+ * the workspace (proposal, problems, code review, command jobs, applied records, workflow): the host publishes those only when the page
+ * starts, not again for each conversation.
+ */
 export function setWorkScope(root: string, sessionId?: string): void {
-  if (scope && rootKey(scope.root) === rootKey(root) && scope.sessionId === sessionId) { scope = { root, sessionId }; return; }
+  const sameRoot = !!scope && rootKey(scope.root) === rootKey(root);
+  if (sameRoot && scope?.sessionId === sessionId) { scope = { root, sessionId }; return; }
   scope = { root, sessionId };
+  const previous = state;
   state = emptyState();
-  notify();
-}
-
-export function resetWorkState<K extends keyof WorkState>(key: K): void {
-  state = { ...state, [key]: emptyState()[key] };
+  if (sameRoot) state = { ...state, review: previous.review, problems: previous.problems, codeReview: previous.codeReview, terminal: previous.terminal, history: previous.history, workflow: previous.workflow };
   notify();
 }
 
@@ -87,7 +89,8 @@ function receive(message: HostMessage): void {
       break;
     case 'workspace/composerState': {
       const data = message.payload;
-      if (!matchesWorkScope(data.root, data.sessionId) || !Number.isSafeInteger(data.revision) || data.revision < 0 || !Array.isArray(data.steps) || data.steps.length > 32 || !data.steps.every(step => typeof step === 'string' && step.length <= 500) || !Array.isArray(data.outcomes)) return;
+      // A workflow belongs to the workspace: one that another conversation owns is still shown, so that this conversation can resume or cancel it.
+      if (!matchesWorkScope(data.root) || !Number.isSafeInteger(data.revision) || data.revision < 0 || !Array.isArray(data.steps) || data.steps.length > 32 || !data.steps.every(step => typeof step === 'string' && step.length <= 500) || !Array.isArray(data.outcomes)) return;
       if (state.workflow?.id === data.id && state.workflow.revision > data.revision) return;
       state = { ...state, workflow: data };
       break;
