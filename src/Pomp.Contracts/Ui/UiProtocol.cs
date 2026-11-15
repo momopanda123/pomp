@@ -42,6 +42,11 @@ namespace Pomp.Ui
     public static class UiMessageTypes
     {
         // Host -> UI
+        public const string BackendState = "backend/state";
+        public const string ConversationBackend = "conversation/backend";
+        public const string AcpState = "acp/state";
+        public const string AcpCommand = "acp/command";
+        public const string AcpReply = "acp/reply";
         public const string HostHello = "host/hello";
         public const string BridgeState = "bridge/state";
         public const string ThemeChanged = "theme/changed";
@@ -71,6 +76,18 @@ namespace Pomp.Ui
 
         /// <summary>Host → UI: an existing subagent accepted a direct message; its reply/turn may still be running.</summary>
         public const string ChatSubagentAccepted = "chat/subagentAccepted";
+
+        /// <summary>
+        /// Host → UI: a message sent to another agent or team went to that partner's own conversation tab (<see cref="ChatRelaySentPayload"/>);
+        /// part of the transcript of the conversation it was sent from, shown as the user's bubble with the recipient and a status.
+        /// </summary>
+        public const string ChatRelaySent = "chat/relaySent";
+
+        /// <summary>Host → UI: where a relayed message stands in its recipient's tab (<see cref="ChatRelayStatusPayload"/>); part of the transcript.</summary>
+        public const string ChatRelayStatus = "chat/relayStatus";
+
+        /// <summary>Host → UI: a relayed message ended in its recipient's tab (<see cref="ChatRelayResultPayload"/>): the outcome and the final answer only.</summary>
+        public const string ChatRelayResult = "chat/relayResult";
 
         /// <summary>Host → UI: a side question's full record (<see cref="BtwRecordPayload"/>) at each lifecycle change; not part of the transcript.</summary>
         public const string BtwRecord = "btw/record";
@@ -164,6 +181,10 @@ namespace Pomp.Ui
         /// <summary>Host → UI: computer use for this conversation (docs/architecture.md §8.5), and the reply to one computer/set.</summary>
         public const string ComputerState = "computer/state";
         public const string ComputerReply = "computer/reply";
+
+        /// <summary>Host → UI: voice input of this conversation <c>{state, captureId, text, error}</c> (docs/ui-protocol.md "dictation/state"), and the reply to one dictation/set.</summary>
+        public const string DictationState = "dictation/state";
+        public const string DictationReply = "dictation/reply";
         public const string Error = "error";
 
         // UI -> Host
@@ -210,31 +231,36 @@ namespace Pomp.Ui
         public const string ConversationTab = "conversation/tab";
         public const string ChatQueue = "chat/queue";
 
-        /// <summary>Edit of the agent's current plan (engine todo phases): <c>{requestId, sessionId, base, phases}</c>.</summary>
+        /// <summary>Edit of a conversation's plan (engine todo phases): <c>{requestId, root, sessionId, base, phases}</c>.</summary>
         public const string AgentPlan = "workspace/agentPlan";
 
         /// <summary>Host → UI answer to <see cref="AgentPlan"/> and <see cref="AgentPlanEdit"/>: <c>{requestId, ok, error?}</c>.</summary>
         public const string AgentPlanResult = "workspace/agentPlanResult";
 
-        /// <summary>One page of the whole plan: <c>{requestId, sessionId, page, size, query?}</c>; answered by <see cref="AgentPlanPageResult"/>.</summary>
+        /// <summary>One page of a conversation's plan: <c>{requestId, root, sessionId, page, size, query?}</c>; answered by <see cref="AgentPlanPageResult"/>.</summary>
         public const string AgentPlanPage = "workspace/agentPlanPage";
 
         /// <summary>
         /// Host → UI page of the plan: <c>{requestId, ok, error?, revision, page, size, total, completedCount, phases: [{index, name, taskCount}],
-        /// rows: [{phase, task, content, status, blocker?}]}</c>; <c>total</c> counts the tasks that match the query, <c>completedCount</c>
+        /// rows: [{phase, task, content, status}]}</c>; <c>total</c> counts the tasks that match the query, <c>completedCount</c>
         /// the completed tasks of the whole plan.
         /// </summary>
         public const string AgentPlanPageResult = "workspace/agentPlanPageResult";
 
         /// <summary>
-        /// One change to the whole plan, checked against <c>revision</c>: <c>{requestId, sessionId, revision, op, phase?, task?, toPhase?, toTask?,
-        /// name?, content?, status?, blocker?}</c> with op <c>addTask | updateTask | deleteTask | addPhase | renamePhase | deletePhase |
+        /// One change to a conversation's plan, checked against <c>revision</c>: <c>{requestId, root, sessionId, revision, op, phase?, task?, toPhase?, toTask?,
+        /// name?, content?, status?}</c> with op <c>addTask | updateTask | deleteTask | addPhase |
         /// clearCompleted | moveTask | startTask</c> (<c>clearCompleted</c> removes every completed task, and a phase it leaves empty;
         /// <c>moveTask</c> puts the task at <c>toTask</c> of <c>toPhase</c>; <c>startTask</c> makes it the task in progress).
         /// </summary>
         public const string AgentPlanEdit = "workspace/agentPlanEdit";
+        /// <summary>Continue, run a task or stop a named conversation without activating its chat tab; answered by AgentPlanResult.</summary>
+        public const string AgentPlanAction = "workspace/agentPlanAction";
         public const string AgentsHistory = "agents/history";
         public const string ComputerSet = "computer/set";
+
+        /// <summary>UI → host <c>{ requestId, on }</c>: the composer's microphone button; a start's requestId is its captureId. Answered by <see cref="DictationReply"/>.</summary>
+        public const string DictationSet = "dictation/set";
         public const string ToolsCommand = "tools/command";
         public const string SkillsCommand = "skills/command";
         public const string McpCommand = "mcp/command";
@@ -541,9 +567,6 @@ namespace Pomp.Ui
     {
         public string Content { get; set; } = string.Empty;
         public string Status { get; set; } = "pending";
-
-        /// <summary>What a blocked task waits for, as the engine reported it.</summary>
-        public string? Blocker { get; set; }
     }
 
     public sealed class AgentPlanPhasePayload
@@ -552,8 +575,39 @@ namespace Pomp.Ui
         public List<AgentPlanTaskPayload> Tasks { get; set; } = new List<AgentPlanTaskPayload>();
     }
 
+    public sealed class SessionCapabilitiesPayload
+    {
+        public bool NativeOmp { get; set; }
+        public bool Queue { get; set; }
+        public bool Steer { get; set; }
+        public bool Stop { get; set; }
+        public bool Images { get; set; }
+        public bool EditorContext { get; set; }
+        public PlanCapabilitiesPayload Plan { get; set; } = new PlanCapabilitiesPayload();
+        public HistoryCapabilitiesPayload History { get; set; } = new HistoryCapabilitiesPayload();
+    }
+
+    public sealed class PlanCapabilitiesPayload
+    {
+        public bool Read { get; set; }
+        public bool Edit { get; set; }
+        public bool Actions { get; set; }
+    }
+
+    public sealed class HistoryCapabilitiesPayload
+    {
+        public bool List { get; set; }
+        public bool Preview { get; set; }
+        public bool Resume { get; set; }
+        public bool Rename { get; set; }
+        public bool Delete { get; set; }
+        public bool Compact { get; set; }
+    }
+
     public sealed class SessionInfoPayload
     {
+        public string? Backend { get; set; }
+        public SessionCapabilitiesPayload? Capabilities { get; set; }
         public string RecoveryStatus { get; set; } = "ready";
 
         public string? RecoveryMessage { get; set; }
@@ -675,6 +729,50 @@ namespace Pomp.Ui
         public string AgentInstance { get; set; } = string.Empty;
         public List<ChatAttachment>? Attachments { get; set; }
         public ChatEditorContext? EditorContext { get; set; }
+    }
+
+    /// <summary>
+    /// A message the user sent to another agent or team (docs/architecture.md §8.3): it runs in that partner's own conversation tab, never
+    /// in the conversation it was sent from.
+    /// </summary>
+    public sealed class ChatRelaySentPayload
+    {
+        /// <summary>Unique id of this delivery (never a turn's prompt id); the status and the result name it.</summary>
+        public string RelayId { get; set; } = string.Empty;
+        public string? ClientMessageId { get; set; }
+        /// <summary>The user's text as typed.</summary>
+        public string Text { get; set; } = string.Empty;
+        public List<ChatAttachment>? Attachments { get; set; }
+        /// <summary>The recipient: an agent (role name) or a team (id).</summary>
+        public ConversationPartnerPayload Target { get; set; } = new ConversationPartnerPayload();
+        /// <summary>"sending", "delivered", "working", "waiting", "done", "failed", "stopped", or "unknown" (a restored one whose outcome was never recorded).</summary>
+        public string Status { get; set; } = "sending";
+        public string? Detail { get; set; }
+        /// <summary>The recipient's conversation, once the message reached it.</summary>
+        public string? SessionId { get; set; }
+    }
+
+    /// <summary>A relayed message's state before it ends: "sending", "delivered" (waits its turn there), "working" or "waiting" (for the user, in that tab).</summary>
+    public sealed class ChatRelayStatusPayload
+    {
+        public string RelayId { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string? Detail { get; set; }
+        public string? SessionId { get; set; }
+    }
+
+    /// <summary>How a relayed message ended in the recipient's tab; <see cref="Text"/> is that turn's final answer only (bounded).</summary>
+    public sealed class ChatRelayResultPayload
+    {
+        public string RelayId { get; set; } = string.Empty;
+        public ConversationPartnerPayload Target { get; set; } = new ConversationPartnerPayload();
+        /// <summary>"done", "failed" or "stopped".</summary>
+        public string Status { get; set; } = "done";
+        public string? Text { get; set; }
+        /// <summary>The answer was longer than the relayed part.</summary>
+        public bool? Truncated { get; set; }
+        public string? Error { get; set; }
+        public string? SessionId { get; set; }
     }
 
     /// <summary>Steered messages Stop withdrew from omp before the agent read them.</summary>
@@ -880,6 +978,9 @@ namespace Pomp.Ui
         public string Message { get; set; } = string.Empty;
 
         public bool Retryable { get; set; }
+
+        /// <summary>The rejected chat input, when the error must not affect a newer pending message.</summary>
+        public string? ClientMessageId { get; set; }
     }
 
     // ---- UI -> Host payloads -------------------------------------------------------------------
@@ -908,10 +1009,16 @@ namespace Pomp.Ui
 
         public List<ChatAttachment>? Attachments { get; set; }
 
-        /// <summary>A team id (docs/architecture.md §8.2): the message goes to that team through <c>/pomp-team</c>; null = this conversation.</summary>
+        /// <summary>
+        /// A team id (docs/architecture.md §8.2). The conversation's own team: the message goes to it through <c>/pomp-team</c>. Any other
+        /// team: the message goes to that team's own conversation tab (<see cref="ChatRelaySentPayload"/>). Null = this conversation.
+        /// </summary>
         public string? Team { get; set; }
 
-        /// <summary>A role name (docs/architecture.md §8.3): a new assignment run by exactly that agent (<c>/pomp-agent</c>).</summary>
+        /// <summary>
+        /// A role name (docs/architecture.md §8.3): the message goes to that agent's own conversation tab
+        /// (<see cref="ChatRelaySentPayload"/>); the conversation's own agent means this conversation.
+        /// </summary>
         public string? Agent { get; set; }
 
         /// <summary>A running subagent id of this conversation (docs/architecture.md §8.3): direct delivery via <c>steer_subagent</c>.</summary>
@@ -1531,6 +1638,20 @@ namespace Pomp.Ui
         public List<McpServerPayload> Servers { get; set; } = new List<McpServerPayload>();
         public bool RestartRequired { get; set; }
         public string? Message { get; set; }
+        public AntigravityMcpStatePayload? Antigravity { get; set; }
+    }
+    /// <summary>External Antigravity configuration only; configured does not mean connected or signed in.</summary>
+    public sealed class AntigravityMcpStatePayload
+    {
+        public bool Installed { get; set; }
+        public bool Configured { get; set; }
+        public bool CanConfigure { get; set; }
+        public string? ApplicationPath { get; set; }
+        public string? ConfigPath { get; set; }
+        public string? WorkspaceRoot { get; set; }
+        public string? ServerName { get; set; }
+        public string? ConfigHash { get; set; }
+        public string? Message { get; set; }
     }
     public sealed class McpServerPayload
     {
@@ -1651,15 +1772,40 @@ namespace Pomp.Ui
     /// <summary>An open agent or team tab: its own conversation.</summary>
     public sealed class ConversationTabPayload
     {
+        public string? Backend { get; set; }
         public string SessionId { get; set; } = string.Empty;
         public ConversationPartnerPayload Partner { get; set; } = new ConversationPartnerPayload();
         public string? Title { get; set; }
         public bool IsRunning { get; set; }
+        /// <summary>An approval or question waits for the user in this tab.</summary>
+        public bool Waiting { get; set; }
+    }
+
+    /// <summary>A live conversation's plan summary. Task pages and mutations stay on its owning engine.</summary>
+    public sealed class ConversationPlanPayload
+    {
+        public string? Backend { get; set; }
+        public bool? Editable { get; set; }
+        public bool? CanContinue { get; set; }
+        public bool? CanRun { get; set; }
+        public bool? CanStop { get; set; }
+        public string SessionId { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public ConversationPartnerPayload Partner { get; set; } = new ConversationPartnerPayload();
+        public bool Ready { get; set; }
+        public bool IsStreaming { get; set; }
+        public bool HasPendingAsyncWork { get; set; }
+        public int PlanTaskCount { get; set; }
+        public int PlanOpenCount { get; set; }
+        public string? PlanRevision { get; set; }
     }
 
     /// <summary>conversation/tabsState: the current conversation's partner and the workspace's chat tabs (docs/architecture.md §8.8).</summary>
     public sealed class ConversationTabsStatePayload
     {
+        public string? Backend { get; set; }
+        public string Root { get; set; } = string.Empty;
+        public List<ConversationPlanPayload> Plans { get; set; } = new List<ConversationPlanPayload>();
         public string? SessionId { get; set; }
         public ConversationPartnerPayload Partner { get; set; } = new ConversationPartnerPayload();
         public string? Title { get; set; }
@@ -1672,6 +1818,8 @@ namespace Pomp.Ui
         /// <summary>The Default (POMP) tab's conversation; null when it has none yet (activating it starts a new one).</summary>
         public string? Main { get; set; }
         public bool MainRunning { get; set; }
+        /// <summary>An approval or question waits for the user in the Default tab.</summary>
+        public bool MainWaiting { get; set; }
         public List<ConversationTabPayload> Tabs { get; set; } = new List<ConversationTabPayload>();
     }
 
@@ -1799,6 +1947,7 @@ namespace Pomp.Ui
 
     public sealed class SessionNewPayload
     {
+        public string? Backend { get; set; }
         /// <summary>Echoed in <see cref="SessionNewResultPayload.RequestId"/>.</summary>
         public string? RequestId { get; set; }
     }

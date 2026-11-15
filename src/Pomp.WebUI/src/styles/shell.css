@@ -27,9 +27,9 @@
 .session-name { flex: 1; min-width: 0; padding: 2px 4px; border: 0; background: transparent; color: var(--pomp-fg); font-size: .94em; font-weight: 600; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .session-name:disabled { cursor: default; }
 .session-quick-menu { top: 100%; left: 6px; right: 6px; max-height: 50vh; overflow-y: auto; }
-.session-rename, .session-search { min-width: 0; min-height: var(--pomp-control-height); padding: 2px 7px; border: 1px solid var(--pomp-input-border); border-radius: var(--pomp-radius); background: var(--pomp-input-bg); color: var(--pomp-input-fg); }
+.session-rename { min-width: 0; min-height: var(--pomp-control-height); padding: 2px 7px; border: 1px solid var(--pomp-input-border); border-radius: var(--pomp-radius); background: var(--pomp-input-bg); color: var(--pomp-input-fg); }
 .session-rename { flex: 1; width: 0; }
-.session-rename:focus, .session-search:focus { outline: none; border-color: var(--pomp-focus-border); }
+.session-rename:focus { outline: none; border-color: var(--pomp-focus-border); }
 .activity-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px 8px; }
 .activity-chip, .work-chip { display: inline-flex; gap: 4px; align-items: center; min-width: 0; min-height: var(--pomp-bar-height); padding: 1px 7px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); background: transparent; color: var(--pomp-muted-fg); font-size: .88em; cursor: pointer; }
 .activity-chip:hover, .work-chip:hover, .work-chip[aria-selected='true'] { background: var(--pomp-hover-bg); color: var(--pomp-fg); }
@@ -40,7 +40,6 @@
 .work-view > .work-page { flex: 1; min-height: 0; }
 .sessions-page { flex: 1; min-width: 0; padding: 10px 8px; overflow-x: hidden; overflow-y: auto; }
 .sessions-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 4px; margin-bottom: 8px; }
-.session-search { display: block; width: 100%; }
 .session-list { list-style: none; padding: 0; margin: 8px 0; }
 .session-list > li { display: flex; flex-direction: column; gap: 4px; padding: 8px 6px; border-bottom: 1px solid var(--pomp-border); }
 .session-list > li.current { background: var(--pomp-hover-bg); border-left: 2px solid var(--pomp-accent); }
@@ -87,6 +86,7 @@
 .composer[data-hide~='bookmarks'] [data-testid='live-bookmarks'],
 .composer[data-hide~='editorContext'] [data-testid='editor-context'],
 .composer[data-hide~='contextMeter'] .context-row > .context-meter,
+.composer[data-hide~='dictation'] [data-testid='dictation'],
 .composer[data-hide~='permission'] .permission-mode-chip,
 .composer[data-hide~='target'] .send-target-chip,
 .composer[data-hide~='model'] .picker-model,
@@ -188,6 +188,12 @@
   .context-row { gap: 4px; }
   .context-row .meter-name { display: none; }
   .context-row .usage-bar.meter-bar { min-width: 12px; }
+  /* All eight tools (with Live, bookmarks and screen & input control) stay in one line down to 190px: smaller squares, closer together.
+     With a larger font they wrap inside the composer instead of pushing it wider than the pane. */
+  .context-tools { flex: 0 1 auto; flex-wrap: wrap; gap: 1px; min-width: 0; }
+  .context-tools .icon-btn { width: 18px; height: 18px; }
+  .context-tools .context-count { height: 18px; }
+  .live-editor-controls { gap: 1px; }
 }
 @media (min-width: 300px) and (max-width: 359px) {
   .shell-tab { padding: 0 4px; gap: 3px; font-size: .86em; }

@@ -30,12 +30,19 @@ namespace Pomp.Hosting
                 lock (_stateLock) if (!ReferenceEquals(origin, _epochConnection)) return true;
                 if (!(note["files"] is JArray files)) return true;
                 var applied = note["error"]?.Type != JTokenType.Boolean || !(bool)note["error"]!;
+                var owner = EditorSessionContext;
                 foreach (var file in files)
                 {
                     if (!(file is JObject entry) || entry["path"]?.Type != JTokenType.String) continue;
                     var path = (string)entry["path"]!;
                     var before = entry["before"]?.Type == JTokenType.String ? (string?)entry["before"] : null;
-                    AdapterGuard.TryRunAsync(async token => { await _adapters.TextBuffers.ShowDiskEditAsync(path, before, applied, token).ConfigureAwait(false); return true; },
+                    AdapterGuard.TryRunAsync(async token =>
+                            {
+                                // The edit is this conversation's, also when another tab is shown while the editor records it.
+                                using (EditorSessionScope.Enter(owner))
+                                    await _adapters.TextBuffers.ShowDiskEditAsync(path, before, applied, token).ConfigureAwait(false);
+                                return true;
+                            },
                             _options.AdapterTimeout, _logger, "Live: disk edit", _disposeCts.Token)
                         .Forget(_logger, "showing a disk edit of " + path);
                 }
@@ -65,7 +72,12 @@ namespace Pomp.Hosting
                         foreach (var path in list) if (path.Type == JTokenType.String) paths.Add((string)path!);
                 }
                 if (paths.Count > 0)
-                    await AdapterGuard.TryRunAsync(async token => { await _adapters.TextBuffers.HoldDiskEditAsync(paths, token).ConfigureAwait(false); return true; },
+                    await AdapterGuard.TryRunAsync(async token =>
+                        {
+                            using (EditorSessionScope.Enter(EditorSessionContext))
+                                await _adapters.TextBuffers.HoldDiskEditAsync(paths, token).ConfigureAwait(false);
+                            return true;
+                        },
                         _options.AdapterTimeout, _logger, "Live: hold files", _disposeCts.Token).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is FormatException || ex is JsonException || ex is InvalidCastException)

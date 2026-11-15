@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { newId } from './format';
-import { useT } from './i18n';
+import { useT, type Translate } from './i18n';
 import { send, type SetupCommand } from './protocol';
 import type { SetupReply } from './setup';
 
@@ -34,6 +34,7 @@ export type Slot =
   | 'connectSharedModels'
   | 'logout'
   | 'models'
+  | 'refreshModels'
   | 'setModel'
   | 'setEditorModel'
   | 'resolveEditorModel'
@@ -49,6 +50,8 @@ interface Sent {
   unreachable?: boolean;
   timedOut?: boolean;
   timeoutMs: number;
+  /** The host's answer, kept here the first time it is seen: the reply list is short and an old answer falls off it. */
+  answer?: { error?: string };
 }
 
 export interface Feedback {
@@ -71,10 +74,13 @@ export interface SetupCommands {
 
 /**
  * Posting `setup/command`s and matching their answers (`setup/state` with the same `requestId`, kept by the reducer as
- * {@link SetupReply}). Used by the account panel and by the composer pickers, each with its own slots.
+ * {@link SetupReply}). The Accounts, Remote and Agents pages share one (created in `App`, so that an answer that arrives while its
+ * page is off screen is still there on return); the composer pickers have their own, each with its own slots.
+ * `translate`: for a caller above the language provider (`App`); everyone else gets the page's language from the context.
  */
-export function useSetupCommands(replies: SetupReply[]): SetupCommands {
-  const t = useT();
+export function useSetupCommands(replies: SetupReply[], translate?: Translate): SetupCommands {
+  const contextTranslate = useT();
+  const t = translate ?? contextTranslate;
   const [sent, setSent] = useState<Partial<Record<Slot, Sent>>>({});
 
   const post = useCallback<SetupCommands['post']>((slot, make, tag, timeoutMs = REPLY_TIMEOUT_MS) => {
@@ -90,16 +96,35 @@ export function useSetupCommands(replies: SetupReply[]): SetupCommands {
     const entry = sent[slot];
     if (!entry) return { pending: false, done: false };
     if (entry.unreachable) return { pending: false, error: t('error.hostUnavailable'), done: false };
-    const reply = replies.find((item) => item.requestId === entry.requestId);
-    if (reply) return { pending: false, error: reply.error, done: !reply.error };
+    // The newest reply with this id is the answer (the host may answer one request again); the remembered one stands in once it has
+    // fallen off the short reply list.
+    const answer = replies.find((item) => item.requestId === entry.requestId) ?? entry.answer;
+    if (answer) return { pending: false, error: answer.error, done: !answer.error };
     if (entry.timedOut) return { pending: false, error: t('setup.noReply'), done: false, timedOut: true };
     return { pending: true, done: false };
   };
 
+  // An answer is remembered with its command: the reply list keeps only the newest few, and a command whose answer fell off it must not
+  // look unanswered again.
+  useEffect(() => {
+    setSent((previous) => {
+      let next = previous;
+      for (const slot of Object.keys(previous) as Slot[]) {
+        const entry = previous[slot];
+        if (!entry || entry.unreachable) continue;
+        const reply = replies.find((item) => item.requestId === entry.requestId);
+        if (!reply || (entry.answer && entry.answer.error === reply.error)) continue;
+        if (next === previous) next = { ...previous };
+        next[slot] = { ...entry, answer: reply.error ? { error: reply.error } : {} };
+      }
+      return next;
+    });
+  }, [sent, replies]);
+
   // Give up on commands that nobody answers.
   useEffect(() => {
     const timers = Object.values(sent).flatMap((entry) =>
-      entry && !entry.unreachable && !entry.timedOut && !replies.some((reply) => reply.requestId === entry.requestId)
+      entry && !entry.unreachable && !entry.timedOut && !entry.answer && !replies.some((reply) => reply.requestId === entry.requestId)
         ? [
             window.setTimeout(() => {
               setSent((previous) => {
@@ -117,4 +142,21 @@ export function useSetupCommands(replies: SetupReply[]): SetupCommands {
   }, [sent, replies]);
 
   return { sent, post, feedback, clear };
+}
+
+/**
+ * For a page that is unmounted while its tab is off screen and shares its commands with the other pages: leaving the page forgets the
+ * answers the user has already seen there (a note, an error, "saved"), so they are not shown again on return. A command that is still
+ * waiting is kept, and so is a slot for which `keep` says so: its answer arrives while the page is away and is shown on return.
+ */
+export function useRetireSeenOnLeave(cmd: SetupCommands, slots: readonly Slot[], keep?: (slot: Slot) => boolean): void {
+  const latest = useRef({ cmd, keep });
+  latest.current = { cmd, keep };
+  useEffect(() => () => {
+    const { cmd: current, keep: kept } = latest.current;
+    for (const slot of slots) {
+      if (current.sent[slot] && !current.feedback(slot).pending && !kept?.(slot)) current.clear(slot);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 }

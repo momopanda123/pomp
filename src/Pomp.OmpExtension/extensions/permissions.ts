@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { isPompHost, offeredHostTools } from '../lib/vs-state.ts';
 import { readBounded } from '../lib/project-rules.ts';
 import { validatePolicyRelativePath } from '../lib/policy-path.ts';
+import { mutationTargets } from '../lib/tool-targets.ts';
 interface Rule { tool: string; effect: 'allow' | 'deny'; paths?: string[]; commands?: string[] }
 interface Policy { version: 1; default: 'deny'; requireSandbox?: boolean; requireReviewedEdits?: boolean; rules: Rule[] }
 export interface PolicyDecision { configured: boolean; allowed: boolean; reason: string; fingerprint?: string }
@@ -22,7 +23,7 @@ export function parsePolicy(text: string): Policy {
  }
  return policy;
 }
-function targetPaths(input: unknown): string[] {
+function targetPaths(tool: string, input: unknown): string[] {
  if(!input||typeof input!=='object')return[];
  const args=input as Record<string,unknown>;const result:string[]=[];
  for(const key of ['path','file','file_path','filePath','source','destination','oldPath','newPath'])if(typeof args[key]==='string')result.push(args[key] as string);
@@ -30,13 +31,17 @@ function targetPaths(input: unknown): string[] {
   if(typeof file==='string')result.push(file);else if(file&&typeof file.path==='string')result.push(file.path);
  }
  if(Array.isArray(args.paths))for(const value of args.paths.slice(0,101))if(typeof value==='string')result.push(value);
+ // A move or rename writes its destination too (hashline `MV`, `*** Move to`, `edits[].rename`, `lsp rename_file`): a path rule
+ // judges it like the file it starts from. The host mirror is ProjectExecutionPolicy.PathsMatch.
+ if(tool==='edit'||tool==='apply_patch')for(const file of mutationTargets(tool,input)?.files??[])if(!result.includes(file))result.push(file);
+ if(tool==='lsp'&&args.action==='rename_file'&&typeof args.new_name==='string')result.push(args.new_name);
  return result;
 }
 function contained(root:string,target:string):boolean {
  const rel=path.relative(root,target);return rel===''||(!path.isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('..'+path.sep));
 }
-function pathsMatch(root:string,folders:string[],input:unknown,deny=false):boolean {
- const targets=targetPaths(input);if(targets.length===0||targets.length>100)return deny;
+function pathsMatch(root:string,folders:string[],tool:string,input:unknown,deny=false):boolean {
+ const targets=targetPaths(tool,input);if(targets.length===0||targets.length>100)return deny;
  const matches=targets.map(value=>{
   if(value.includes('\0')||value.length>4096)return deny;
   if(/^[A-Za-z]:(?![\\/])/.test(value))return deny;
@@ -72,14 +77,14 @@ export function evaluatePolicy(root:string,tool:string,input:unknown,policyRoot?
   if(policy.requireSandbox)return{configured:true,allowed:false,fingerprint,reason:'An OS-enforced sandbox was required, but this host does not provide one. Execution is blocked.'};
   if(policy.requireReviewedEdits && !offeredHostTools().has(tool)) {
    const action=input&&typeof input==='object'&&'action' in input?input.action:undefined;
-   const readOnly=['read','grep','find','ls','todo'].includes(tool)||(tool==='lsp'&&typeof action==='string'&&['diagnostics','definition','references','symbols','hover'].includes(action));
+   const readOnly=['read','grep','glob','find','ls','todo'].includes(tool)||(tool==='lsp'&&typeof action==='string'&&['diagnostics','definition','references','symbols','hover'].includes(action));
    if(!readOnly)return{configured:true,allowed:false,fingerprint,reason:'Review-only project: raw writes, processes, child spawning and unknown extension tools are blocked. Use advertised host source tools and approved shadow review. This cooperative dispatch filter is not OS isolation.'};
   }
   const cwd=(input as {cwd?:unknown;workdir?:unknown})?.cwd??(input as {workdir?:unknown})?.workdir;
   if(cwd!==undefined&&(typeof cwd!=='string'||path.relative(root,path.resolve(root,cwd))!==''))return{configured:true,allowed:false,fingerprint,reason:'Project policy does not allow a tool-specific working-directory override.'};
   const matches=policy.rules.filter(rule=>{
    if(rule.tool!=='*'&&rule.tool!==tool)return false;
-   if(rule.paths&&!pathsMatch(root,rule.paths,input,rule.effect==='deny'))return false;
+   if(rule.paths&&!pathsMatch(root,rule.paths,tool,input,rule.effect==='deny'))return false;
    if(rule.commands){const command=(input as {command?:unknown})?.command;if(typeof command!=='string'||!rule.commands.includes(command))return false;}
    return true;
   });

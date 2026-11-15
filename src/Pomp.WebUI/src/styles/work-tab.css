@@ -15,19 +15,24 @@
   white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; }
 .workspace-review .review-hunk-editor { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 8px; }
 .workspace-review .review-hunk-editor textarea { min-height: 96px; background: var(--pomp-input-bg); }
-.review-generators { font-size: .92em; }
+/* The source-generator switch keeps its label whole and moves to a line of its own when the foot is narrow. */
+.workspace-review .ui-card-foot > .ui-grow:has(> .ui-switch) { min-width: max-content; }
 .isolation-files { display: flex; flex-direction: column; padding: 2px 6px 6px 26px; border-bottom: 1px solid color-mix(in srgb, var(--pomp-border) 65%, transparent); }
 .isolation-file { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-height: 26px; font-size: .92em; }
 .isolation-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @container (max-width: 360px) { .workspace-review.review-layout-split .review-comparison { display: flex; } .review-hunks { padding-left: 10px; } }
-/* Plan task and phase forms sit below the table they edit. */
-.agent-plan .plan-task-form { border-top: 1px solid var(--pomp-border); }
+/* Conversation selection leads the header actions; the task editor is the first block of the card body. */
+.work-plan .ui-form { border-bottom: 1px solid var(--pomp-border); }
+.work-plan > .view-section-header > .view-section-actions { flex: 1 1 100%; margin-left: 0; justify-content: flex-start; }
+.work-plan > .view-section-header > .view-section-actions > .btn { flex: 1 1 6em; min-width: 0; max-width: 100%; align-self: stretch; padding-inline: 2px; white-space: normal; }
+.agent-plan .plan-conversation-field { flex: 1 1 100%; min-width: 0; }
 .agent-plan .plan-task-handle { cursor: grab; }
 .agent-plan .plan-task-handle:disabled { cursor: default; }
-.ui-card-foot > .review-generators { white-space: nowrap; min-width: max-content; }
 .interactive-meta { display: flex; flex-wrap: wrap; gap: 6px; }
 .work-interactive .interactive-command-echo { margin: 0; padding: 6px 10px; border-bottom: 1px solid var(--pomp-border); background: var(--pomp-code-bg); white-space: pre-wrap; overflow-wrap: anywhere; }
-.work-interactive .work-terminal-screen { height: 320px; padding: 6px; background: #000; }
+/* The screen matches the terminal renderer's own black canvas; before a terminal exists its mount point takes no room. */
+.work-interactive .work-terminal-screen { height: 320px; padding: 6px; overflow: hidden; background: #000; }
+.work-interactive .work-terminal-idle { height: 0; overflow: hidden; }
 
 /* Work › 변경 › 변경 제안: the agent is still working (header), and the outcome of the last applied proposal (a row with the way to the records). */
 .ui-working { display: inline-flex; align-items: center; gap: 5px; color: var(--pomp-muted-fg); font-size: .92em; white-space: nowrap; }

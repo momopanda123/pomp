@@ -81,6 +81,9 @@ namespace Pomp.Tools
         /// <summary>Optional workflow admission check, repeated after approval before execution.</summary>
         internal Func<HostToolInvocation, PermissionKind, string?>? AdmissionCheck { get; set; }
 
+        /// <summary>The conversation that owns this dispatcher's calls, read when a tool starts executing: editor adapters shared by several conversations attribute the tool's edits to it (<see cref="EditorSessionScope"/>).</summary>
+        internal Func<EditorSessionContext?>? OwnerContext { get; set; }
+
         /// <summary>Number of calls currently in flight.</summary>
         public int ActiveCount => _active.Count;
 
@@ -295,10 +298,14 @@ namespace Pomp.Tools
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var result = prepared != null
-                    ? await prepared.ExecuteAsync(cancellationToken).ConfigureAwait(false)
-                    : await tool.ExecuteAsync(invocation, cancellationToken).ConfigureAwait(false);
-                return result ?? HostToolResult.Error("VS tool '" + invocation.ToolName + "' returned no result.");
+                // What the tool changes in the editor belongs to the conversation that called it, whichever one the chat shows now.
+                using (EditorSessionScope.Enter(OwnerContext?.Invoke() ?? EditorSessionScope.Current))
+                {
+                    var result = prepared != null
+                        ? await prepared.ExecuteAsync(cancellationToken).ConfigureAwait(false)
+                        : await tool.ExecuteAsync(invocation, cancellationToken).ConfigureAwait(false);
+                    return result ?? HostToolResult.Error("VS tool '" + invocation.ToolName + "' returned no result.");
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

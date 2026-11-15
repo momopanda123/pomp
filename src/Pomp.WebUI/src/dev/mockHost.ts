@@ -28,6 +28,8 @@
  *   switch    = ok (default) | error | slow   switch session and replay a short transcript
  *   messages  = ok (default) | error | slow   40-message pages with nextCursor
  *   knowledgeDraft = 1   the editor's "Add to Knowledge > New" arrives at the start (knowledge/draft), as window.pompMockHost.knowledge.draft() sends it later
+ *   acp = connected | auth | missing | error | exited | busy   start with the Antigravity (ACP) conversation selected (see mockBackend.ts);
+ *               without it the backend picker switches to it, connected
  *
  * Whatever the scenario, typing a message in the composer starts a turn of the scenario's kind.
  *
@@ -47,6 +49,8 @@ import type {
   ContextBreakdown,
   ComputerSetCommand,
   ComputerStatePayload,
+  DictationSetCommand,
+  DictationStatePayload,
   HostMessage,
   HostMessageType,
   HostToUi,
@@ -77,6 +81,7 @@ import type { ConversationPartner } from '../conversationProtocol';
 import { createMockKnowledge } from './mockKnowledge';
 import { createMockAdvisors } from './mockAdvisors';
 import { createMockWork } from './mockWork';
+import { createMockBackend, type MockBackend } from './mockBackend';
 
 declare global {
   interface Window {
@@ -502,12 +507,18 @@ export function installMockHost(): void {
     window.setTimeout(() => listeners.forEach((listener) => listener({ data })), 0);
   };
   const post = <K extends HostMessageType>(type: K, payload: HostToUi[K]): void => {
+    // While the Antigravity conversation is shown, the native conversation's frames stay with the host (mockBackend).
+    if (backend.holds(type)) return;
     const message = { type, payload };
     if (ready) deliver(message);
     else backlog.push(message);
   };
+  const backend: MockBackend = createMockBackend(post, {
+    root: MOCK_ROOT, ko: opts.locale.startsWith('ko'), nativeSession: () => sessionId, stopNative: () => stopTurn(),
+    showNative: () => { if (bridgeRunning) post('bridge/state', { state: 'running' }); else void bridgeStart(); postSession(streaming); conversations.snapshot(); postCommands(); },
+  });
   // Work tab data (?work=1 | active); session/info is reposted when the plan changes.
-  const work = createMockWork(post, MOCK_ROOT, () => sessionId, () => postSession(streaming));
+  const work = createMockWork(post, MOCK_ROOT, () => sessionId, () => postSession(streaming), () => conversations.tabs.sessions());
 
   // ---- Accounts that are signed in and the models they offer (shared by the session and the setup scripts below) ----
   const authenticated = new Set<string>(opts.accounts ?? (opts.scenario === 'setup' ? [] : ['openai-codex', 'anthropic']));
@@ -551,7 +562,14 @@ export function installMockHost(): void {
   let tokens = 12_840;
   let streaming = false;
   const mockTools = createMockToolsHandler(message => post(message.type, message.payload as never), { sessionId, busy: () => streaming });
-  const conversations = createMockConversations(post, { sessionId: () => sessionId, busy: () => streaming, start: input => startTurn(input, opts.scenario, true), steer: input => steerTurn(input) });
+  const conversations = createMockConversations(post, {
+    root: MOCK_ROOT, sessionId: () => sessionId, busy: () => streaming,
+    plan: (id, partner) => ({
+      sessionId: id, partner, title: sessions.find(entry => entry.sessionId === id)?.title ?? (partner.id || (opts.locale.startsWith('ko') ? '새 대화' : 'New conversation')),
+      ready: bridgeRunning, isStreaming: (id === sessionId && streaming) || work.isPlanRunning(id), hasPendingAsyncWork: false, ...work.sessionInfo(id),
+    }),
+    start: input => startTurn(input, opts.scenario, true), steer: input => steerTurn(input),
+  });
   for (const entry of sessions) {
     entry.partner = entry.id === currentEntry.id ? { kind: 'main' } : entry.messageCount! % 3 === 0 ? { kind: 'team', id: 'feature-dev' } : { kind: 'agent', id: 'architect' };
     if (entry.sessionId) conversations.tabs.seed(entry.sessionId, entry.partner);
@@ -578,7 +596,7 @@ export function installMockHost(): void {
     sessionId,
     ...(sessionName ? { sessionName } : {}),
     contextUsage: { tokens, contextWindow: 200_000, percent: (tokens / 200_000) * 100, breakdown: mockBreakdown(tokens) },
-    isStreaming,
+    isStreaming: isStreaming || work.isPlanRunning(sessionId),
     workingDirectory: MOCK_ROOT,
     ...work.sessionInfo(),
   });
@@ -593,6 +611,7 @@ export function installMockHost(): void {
     contextTokens.set(sessionId, tokens);
     post('session/info', sessionInfo(isStreaming));
     advisors.snapshot();
+    conversations.tabs.publish();
   };
   const historyState = (requestId?: string, error?: string): SessionHistoryState => ({
     ...(requestId ? { requestId } : {}),
@@ -930,7 +949,48 @@ export function installMockHost(): void {
     conversations.finish(promptId, 'completed');
   };
 
+  // ---- A message to another agent or team runs in that partner's tab; this chat follows its status and gets the answer back ----
+  const relayFrames = new Map<string, HostMessage[]>();
+  const relayMode = new URLSearchParams(window.location.search).get('relay');
+  const relayPost = <K extends 'chat/relaySent' | 'chat/relayStatus' | 'chat/relayResult'>(source: string, type: K, payload: HostToUi[K]): void => {
+    relayFrames.set(source, [...(relayFrames.get(source) ?? []), { type, payload } as HostMessage]);
+    if (source === sessionId) post(type, payload);
+  };
+  /** True when the send was a relay (shown, refused or run); false for an ordinary message of this conversation. */
+  const relaySend = (payload: UiToHost['chat/send']): boolean => {
+    const target = payload.team ? { kind: 'team' as const, id: payload.team } : payload.agent ? { kind: 'agent' as const, id: payload.agent } : undefined;
+    const own = conversations.tabs.current();
+    if (!target || (own && own.kind === target.kind && own.id === target.id)) return false;
+    const ko = opts.locale.startsWith('ko');
+    const refuse = (message: string): true => { post('error', { code: 'queue_rejected', message, retryable: false, clientMessageId: payload.clientMessageId }); return true; };
+    const command = payload.text.trimStart().startsWith('/') ? payload.text.trimStart().slice(1).split(/\s+/, 1)[0] : undefined;
+    if (command && ENGINE_COMMANDS.some(item => item.name === command))
+      return refuse(ko ? `/${command} 명령은 그 탭에서 직접 실행해 주세요.` : `Run /${command} in that tab itself.`);
+    if (/^(missing|unknown)/.test(target.id)) return refuse(ko ? `사용할 수 없는 대상이에요: ${target.id}` : `Target is not available: ${target.id}`);
+    const source = sessionId; const relayId = nextId('relay');
+    const tab = conversations.tabs.ensure(target);
+    conversations.start(payload, relayId);
+    relayPost(source, 'chat/relaySent', { relayId, clientMessageId: payload.clientMessageId, text: payload.text, attachments: payload.attachments, target, status: 'sending' });
+    const later = (ms: number, step: () => void): void => { window.setTimeout(step, ms); };
+    later(250, () => relayPost(source, 'chat/relayStatus', { relayId, status: 'delivered', sessionId: tab }));
+    later(600, () => { conversations.tabs.mark(tab, 'running'); relayPost(source, 'chat/relayStatus', { relayId, status: 'working', sessionId: tab }); });
+    if (relayMode === 'waiting') {
+      later(1100, () => { conversations.tabs.mark(tab, 'waiting'); relayPost(source, 'chat/relayStatus', { relayId, status: 'waiting', detail: ko ? '승인 요청' : 'Approval request', sessionId: tab }); });
+      return true;
+    }
+    later(1600, () => {
+      conversations.tabs.mark(tab, undefined);
+      const failed = relayMode === 'failed';
+      conversations.record(relayId, failed ? 'failed' : 'completed');
+      relayPost(source, 'chat/relayResult', failed
+        ? { relayId, target, status: 'failed', error: ko ? '모델 제공자가 일시적으로 과부하 상태입니다.' : 'The model provider is temporarily overloaded.', sessionId: tab }
+        : { relayId, target, status: 'done', text: SHORT_ANSWER, sessionId: tab });
+    });
+    return true;
+  };
+
   const startTurn = (payload: UiToHost['chat/send'], kind: Scenario, draining = false): void => {
+    if (relaySend(payload)) return;
     if (sessionChanging) {
       const promptId = nextId('prompt');
       post('chat/turnStarted', { promptId, clientMessageId: payload.clientMessageId, text: payload.text, team: payload.team, agent: payload.agent, agentInstance: payload.agentInstance });
@@ -1344,6 +1404,33 @@ export function installMockHost(): void {
     computerState.ownerElsewhere = computerOwner ? (computerOwner.sessionId === sessionId ? null : computerOwner.label)
       : computerQuery === 'owned' ? 'Reviewer · OtherProject' : null;
     post('computer/state', computerState);
+  };
+  // Voice input (PompSession.Dictation): a start records after a moment (?dictation=slow: the first use downloads the model), then the
+  // capture's whole text grows word by word until it is stopped. ?dictation=nomic fails the start like a PC without a microphone.
+  const dictationQuery = urlParams.get('dictation');
+  const dictationState: DictationStatePayload = { state: 'idle', captureId: null, text: '', error: null };
+  let dictationTimer: number | undefined;
+  const postDictation = () => post('dictation/state', { ...dictationState });
+  const startDictation = (captureId: string) => {
+    Object.assign(dictationState, { state: 'starting', captureId, text: '', error: null });
+    postDictation();
+    window.setTimeout(() => {
+      if (dictationState.captureId !== captureId || dictationState.state !== 'starting') return;
+      if (dictationQuery === 'nomic') {
+        Object.assign(dictationState, { state: 'idle', error: '마이크를 찾을 수 없어요. 마이크 연결과 Windows의 마이크 접근 권한을 확인해 주세요.' });
+        postDictation();
+        return;
+      }
+      dictationState.state = 'recording';
+      postDictation();
+      const words = '솔루션을 빌드하고 실패한 테스트를 고쳐 주세요.'.split(' ');
+      let spoken = 0;
+      dictationTimer = window.setInterval(() => {
+        if (spoken >= words.length) { window.clearInterval(dictationTimer); return; }
+        dictationState.text = words.slice(0, ++spoken).join(' ');
+        postDictation();
+      }, 450);
+    }, dictationQuery === 'slow' ? 4000 : 600);
   };
   const postBackground = () =>
     post('workspace/backgroundState', {
@@ -1868,6 +1955,7 @@ export function installMockHost(): void {
     const ko = opts.locale.startsWith('ko');
     // Like the real host (PompSession.History): /compact is told in the chat when it starts, ends and fails; a failed rename too.
     const refuse = (message: string): void => {
+      if (command.action === 'switch') post('session/newResult', { requestId, status: 'failed', message });
       postHistory(requestId, message);
       if (command.action === 'compact') post('chat/notice', { level: 'warning', message: (ko ? '컨텍스트를 압축하지 못했어요: ' : 'The context could not be compacted: ') + message });
       if (command.action === 'rename') post('chat/notice', { level: 'warning', message: (ko ? '대화 이름을 바꾸지 못했어요: ' : 'The conversation could not be renamed: ') + message });
@@ -1922,11 +2010,12 @@ export function installMockHost(): void {
         }
         case 'delete': {
           const entry = sessions.find(item => item.id === command.id);
-          if (!entry) { postHistory(requestId, opts.locale.startsWith('ko') ? '대화를 찾을 수 없어요.' : 'The conversation was not found.'); break; }
+          if (command.root !== MOCK_ROOT || !entry || entry.sessionId !== command.sessionId) { postHistory(requestId, opts.locale.startsWith('ko') ? '선택한 대화가 바뀌었어요.' : 'The selected conversation changed.'); break; }
           if (entry.id === currentEntry.id) {
-            currentEntry = { id: nextId('mock-entry-new'), sessionId: nextId('mock-session-new'), title: opts.locale.startsWith('ko') ? '새 대화' : 'New conversation', modifiedUtc: new Date().toISOString(), messageCount: 0, current: true };
+            if (entry.messageCount === 0 && !entry.name?.trim()) { postHistory(requestId); break; }
+            currentEntry = { id: nextId('mock-entry-new'), sessionId: nextId('mock-session-new'), title: opts.locale.startsWith('ko') ? '새 대화' : 'New conversation', modifiedUtc: new Date().toISOString(), messageCount: 0, current: true, partner: entry.partner };
             sessionId = currentEntry.sessionId!;
-            mockTools.resetConversation(sessionId); postComputer(); conversations.changedSession(); sessionName = undefined;
+            mockTools.resetConversation(sessionId); postComputer(); conversations.changedSession(entry.partner); sessionName = undefined;
             transcripts.set(currentEntry.id, []); tokens = 0; touchSession(); postSession(false); knowledge.snapshot();
           }
           sessions = sessions.filter(item => item.id !== entry.id); transcripts.delete(entry.id); if (entry.sessionId) conversations.tabs.forget(entry.sessionId);
@@ -1962,7 +2051,7 @@ export function installMockHost(): void {
         case 'switch': {
           const entry = sessions.find((item) => item.id === command.id);
           if (command.root !== MOCK_ROOT || !entry?.sessionId) {
-            postHistory(requestId, 'The session entry is no longer available in this workspace.');
+            refuse('The session entry is no longer available in this workspace.');
             break;
           }
           current = null;
@@ -2050,14 +2139,16 @@ export function installMockHost(): void {
     knowledge.snapshot();
     advisors.snapshot();
     postComputer();
+    postDictation();
     postBackground();
     postProblems();
     postProjectHooks();
     work.snapshot();
     postInteractive();
+    backend.snapshot();
     // The real host sends engine/info at every engine start and in the ui/ready snapshot.
-    if (opts.engine === 'bundled') post('engine/info', { source: 'bundled', version: '18.18.9', verified: true, expectedVersion: '18.18.9' });
-    else if (opts.engine === 'settings') post('engine/info', { source: 'settings', version: '18.9.0', verified: false, expectedVersion: '18.18.9', path: 'D:\\tools\\omp-next\\omp.exe' });
+    if (opts.engine === 'bundled') post('engine/info', { source: 'bundled', version: '18.20.0', verified: true, expectedVersion: '18.20.0' });
+    else if (opts.engine === 'settings') post('engine/info', { source: 'settings', version: '18.9.0', verified: false, expectedVersion: '18.20.0', path: 'D:\\tools\\omp-next\\omp.exe' });
     else if (opts.engine === 'installed') post('engine/info', { source: 'installed', version: '18.4.1', verified: false, path: 'C:\\Users\\dev\\AppData\\Local\\omp\\omp.exe' });
     postHistory(undefined, opts.sessions === 'error' ? 'The session list could not be read (mock failure).' : undefined);
     if (new URLSearchParams(window.location.search).get('taskApproval') === '1') post('permission/request', {
@@ -2078,7 +2169,7 @@ export function installMockHost(): void {
     void (async () => {
       await bridgeStart();
       const replayOption = new URLSearchParams(window.location.search).get('replay');
-      replay(replayOption === 'truncated', replayOption ? REPLAY_FIXTURE : []);
+      replay(replayOption === 'truncated', replayOption ? REPLAY_FIXTURE : relayFrames.get(sessionId) ?? []);
       if (scenario === 'reconnect') void bridgeCrashAndRecover();
       if (scenario !== 'idle' && scenario !== 'setup' && opts.autosend) {
         await wait(300);
@@ -2091,7 +2182,7 @@ export function installMockHost(): void {
     postMessage(message: unknown): void {
       sent.push(message);
       const { type, payload } = (message ?? {}) as { type?: string; payload?: Record<string, unknown> };
-      if (type && (work.handle(type, payload) || mockTools({ type, payload }) || conversations.handle(type, payload))) return;
+      if (type && (backend.handle(type, payload) || work.handle(type, payload) || mockTools({ type, payload }) || conversations.handle(type, payload))) return;
       switch (type) {
         case 'ui/ready':
           onReady();
@@ -2360,10 +2451,22 @@ export function installMockHost(): void {
           }, 350);
           break;
         }
-        case 'workspace/agentPlan': {
-          // The engine plan lives in omp; the preview never pretends a plan edit was applied.
-          const requestId = (payload as { requestId?: string } | undefined)?.requestId ?? '';
-          setTimeout(() => post('workspace/agentPlanResult', { requestId, ok: false, error: 'Plan editing requires the real host; this preview did not change the plan.' }), 200);
+        case 'dictation/set': {
+          const { requestId, on } = payload as unknown as DictationSetCommand;
+          if (on && dictationState.state !== 'idle') {
+            post('dictation/reply', { requestId, ok: false, error: '이미 음성 입력 중이에요.' });
+          } else if (on) {
+            startDictation(requestId);
+            post('dictation/reply', { requestId, ok: true });
+          } else {
+            window.clearInterval(dictationTimer);
+            const recording = dictationState.state === 'recording';
+            if (recording) { dictationState.state = 'transcribing'; postDictation(); }
+            window.setTimeout(() => {
+              if (dictationState.state !== 'idle') { dictationState.state = 'idle'; postDictation(); }
+              post('dictation/reply', { requestId, ok: true });
+            }, recording ? 500 : 0);
+          }
           break;
         }
         case 'ui/vsKey':

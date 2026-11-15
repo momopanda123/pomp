@@ -9,6 +9,14 @@
   .automation-list .automation-col, .automation-list .ui-cell:has(> .automation-col) { display: none; }
   .automation-list .automation-badges { display: flex; }
 }
+/* The run history follows the list: in a narrow pane the time moves under the rule name and its column goes away, so the name keeps its width. */
+.automation-when { display: none; }
+@container (max-width: 400px) {
+  .automation-log { grid-template-columns: 2px minmax(0, 1fr) 84px 0px; }
+  .automation-log .automation-col, .automation-log .ui-cell:has(> .automation-col) { display: none; }
+  .automation-log .ui-tr > .ui-cell:nth-child(2) { grid-column-start: 2; }
+  .automation-log .automation-when { display: inline; }
+}
 .automation-policy { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 6px 6px 10px; border-bottom: 1px solid var(--pomp-border);
   background: color-mix(in srgb, var(--pomp-warning) 8%, transparent); }
 .automation-policy > .ui-grow, .automation-confirm > .ui-grow { flex: 1 1 10em; min-width: 0; }

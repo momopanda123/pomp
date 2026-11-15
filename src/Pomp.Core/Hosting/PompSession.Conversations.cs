@@ -30,6 +30,14 @@ namespace Pomp.Hosting
         private readonly List<QueuedChat> _chatQueue = new List<QueuedChat>();
         private string? _queueSession, _queueReason;
         private bool _queuePaused, _queueDispatchScheduled;
+        // A completed prompt can leave async/admitted work behind. Only engine settlement releases ordinary sends.
+        private bool _chatEngineSettled = true;
+        private bool ChatRunBusyLocked() => _turns.Count > 0 || _info.IsStreaming || !_chatEngineSettled;
+        // A background run may outlive the tracked prompt. Its cached streaming bit must not disable settlement polling.
+        private bool QueueWaitingForSettlementLocked() =>
+            !_chatEngineSettled && _turns.Count == 0 && !_queuePaused && _chatQueue.Count > 0
+            && _queueSession == _info.SessionId && _pendingSessionChange == null && !_sessionSwitchUncertain
+            && _bridge.State == BridgeState.Running && !_epoch.IsCancellationRequested;
         private Func<Task>? _pendingSessionChange;
         private string? _pendingSessionRequestId;
         private string? _pendingSessionAction;
@@ -41,7 +49,7 @@ namespace Pomp.Hosting
         private bool SessionChangeBusy()
         {
             lock (_stateLock)
-                if (_info.IsStreaming || _info.HasPendingAsyncWork || _turns.Count > 0) return true;
+                if (_info.IsStreaming || _info.HasPendingAsyncWork || _turns.Count > 0 || (!_chatEngineSettled && _recoveryStatus != "failed")) return true;
             return _ui.PendingRequestCount > 0 || _terminalJobs.HasUnfinishedWork || _interactiveTerminal.HasUnfinishedWork;
         }
         // One omp engine cannot switch sessions while it is replying. Leave the run intact, then take
@@ -73,7 +81,7 @@ namespace Pomp.Hosting
                     bool refreshPending;
                     lock (_stateLock)
                         refreshPending = _pendingSessionChange == action && _turns.Count == 0
-                            && (_info.IsStreaming || _info.HasPendingAsyncWork);
+                            && (_info.IsStreaming || _info.HasPendingAsyncWork || !_chatEngineSettled);
                     if (refreshPending && DateTime.UtcNow - lastPendingRefresh >= TimeSpan.FromSeconds(3))
                     {
                         lastPendingRefresh = DateTime.UtcNow;
@@ -84,12 +92,14 @@ namespace Pomp.Hosting
                     {
                         Func<Task>? ready = null;
                         bool lost = false;
+                        // Read before the state lock: ui/ready holds the hub lock while it takes the state lock for the snapshot.
+                        var externalWork = _ui.PendingRequestCount > 0 || _terminalJobs.HasUnfinishedWork || _interactiveTerminal.HasUnfinishedWork;
                         lock (_stateLock)
                         {
                             if (_pendingSessionChange != action) return;
                             lost = _pendingSessionConnection == null || !ReferenceEquals(_pendingSessionConnection, _epochConnection)
                                 || _pendingSourceSessionId != _info.SessionId || _pendingSourceRoot != _workingDirectory || _bridge.State != BridgeState.Running;
-                            if (!lost && SessionChangeBusy()) return;
+                            if (!lost && (externalWork || _info.IsStreaming || _info.HasPendingAsyncWork || _turns.Count > 0 || (!_chatEngineSettled && _recoveryStatus != "failed"))) return;
                             ready = _pendingSessionChange;
                             _pendingSessionChange = null;
                             _pendingSessionAction = null;
@@ -132,13 +142,13 @@ namespace Pomp.Hosting
             throw new InvalidOperationException(PompLanguage.Pick("대화 상대를 찾을 수 없어요.", "Conversation partner was not found."));
         }
         internal void CheckConversationPartner(ConversationPartnerPayload partner) => ValidatePartner(partner);
-        private ConversationTabsStatePayload TabsView()
+        private ConversationTabsStatePayload TabsView(bool includePlan = true)
         {
             ConversationTabsStatePayload state; string root;
             bool running; string? active;
             lock (_stateLock) { root = _workingDirectory; active = _info.SessionId; running = _info.IsStreaming || _info.HasPendingAsyncWork || _turns.Count > 0;
                 state = new ConversationTabsStatePayload {
-                    SessionId = _partnerSession, Partner = CopyPartner(_partner), Message = _partnerMessage,
+                    Root = root, SessionId = _partnerSession, Partner = CopyPartner(_partner), Message = _partnerMessage,
                     PendingAction = _pendingSessionAction, PendingRequestId = _pendingSessionRequestId,
                     PendingPartner = _pendingSessionPartner == null ? null : CopyPartner(_pendingSessionPartner),
                     PendingSessionId = _pendingSessionId }; }
@@ -147,7 +157,8 @@ namespace Pomp.Hosting
             string? Title(ConversationPartnerPayload partner) => partner.Kind == "agent" ? roles.FirstOrDefault(r => r.Name == partner.Id && !r.Shadowed && string.IsNullOrEmpty(r.Error))?.Title ?? partner.Id
                 : partner.Kind == "team" ? teams.FirstOrDefault(t => t.Id == partner.Id && !t.Shadowed && string.IsNullOrEmpty(t.Error))?.Title ?? partner.Id : null;
             state.Title = Title(state.Partner); state.Main = tabs.Main; state.MainRunning = running && active == tabs.Main;
-            state.Tabs = tabs.Conversations.Where(e => e.Open).Select(e => new ConversationTabPayload { SessionId = e.SessionId, Partner = CopyPartner(e.Partner), Title = Title(e.Partner), IsRunning = running && active == e.SessionId }).ToList();
+            state.Tabs = tabs.Conversations.Where(e => e.Open).Select(e => new ConversationTabPayload { SessionId = e.SessionId, Backend = e.Backend, Partner = CopyPartner(e.Partner), Title = e.Backend == "antigravity-acp" ? "Antigravity" : Title(e.Partner), IsRunning = running && active == e.SessionId }).ToList();
+            if (includePlan && ConversationPlan is ConversationPlanPayload plan) state.Plans.Add(plan);
             return state;
         }
         private void PublishTabs()
@@ -234,6 +245,9 @@ namespace Pomp.Hosting
             lock (_stateLock) { _partnerSession = sessionId; _partner = value; _teamInstances.Clear(); _unavailableTeams.Clear(); _partnerMessage = null; }
             PauseChatQueue(PompLanguage.Pick("대화가 바뀌었어요.", "Conversation changed."), onlyIfItems: !hadSession);
             PublishTabs();
+            // What this conversation sent to other tabs: its records go to the engine, and outcomes that arrived meanwhile are shown.
+            ScheduleRelayFlush();
+            PullRelayBacklog();
             if (!string.IsNullOrEmpty(sessionId)) _commands.Enqueue(() => ApplyConversationPartnerAsync(sessionId!, assign != null));
         }
         private ConversationPartnerPayload? DefaultPartner(ChatSendPayload send)
@@ -286,7 +300,12 @@ namespace Pomp.Hosting
             lock (_stateLock) return new ChatQueueStatePayload { SessionId = _chatQueue.Count == 0 ? null : _queueSession, Paused = _queuePaused, Reason = _queueReason, Items = _chatQueue.Select(q => new ChatQueueItemPayload { Id = q.Id, Text = q.Send.Text, IncludeEditorContext = q.Send.IncludeEditorContext, Attachments = CopySend(q.Send).Attachments, Team = q.Send.Team ?? (q.Partner?.Kind == "team" ? q.Partner.Id : null), Agent = q.Send.Agent ?? (q.Partner?.Kind == "agent" ? q.Partner.Id : null), AgentInstance = q.Send.AgentInstance, CreatedAt = q.CreatedAt, CanSteer = CanSteer(q.Send) }).ToList() };
         }
         private int QueueBytes() => System.Text.Encoding.UTF8.GetByteCount(Pomp.Json.PompJson.Serialize(QueueView()));
-        private void PublishChatQueue() => _ui.Post(UiMessageTypes.ChatQueueState, QueueView(), UiDelivery.State);
+        private void PublishChatQueue()
+        {
+            _ui.Post(UiMessageTypes.ChatQueueState, QueueView(), UiDelivery.State);
+            // A message another conversation sent here may wait in this queue: its sender hears where it stands.
+            PublishInboundRelays();
+        }
         private void PauseChatQueue(string reason, bool onlyIfItems = false)
         {
             lock (_stateLock) { if (onlyIfItems && _chatQueue.Count == 0) return; _queuePaused = true; _queueReason = reason; }
@@ -305,7 +324,7 @@ namespace Pomp.Hosting
             if (new[] { send.Team, send.Agent, send.AgentInstance }.Count(t => !string.IsNullOrWhiteSpace(t)) > 1) throw new ArgumentException(PompLanguage.Pick("보낼 대상이 너무 많아요.", "Too many targets."));
         }
         // Called under the send decision's state lock; Stop must not race a first-item pause reset.
-        private QueuedChat EnqueueChatLocked(ChatSendPayload send, ConversationPartnerPayload? partner, long generation, bool allowResume = true)
+        private QueuedChat EnqueueChatLocked(ChatSendPayload send, ConversationPartnerPayload? partner, long generation, bool allowResume = true, InboundRelay? relay = null)
         {
             ValidateQueuedSend(send);
             if (_sessionSwitchUncertain || _recoveryStatus != "ready" || _bridge.State != BridgeState.Running)
@@ -314,10 +333,11 @@ namespace Pomp.Hosting
             var empty = _chatQueue.Count == 0;
             if (empty) _queueSession = _info.SessionId;
             if (_queueSession != _info.SessionId) throw new InvalidOperationException(PompLanguage.Pick("이 대기열은 다른 대화의 항목이에요.", "This queue belongs to another conversation."));
-            var item = new QueuedChat { Id = Guid.NewGuid().ToString("N"), Send = CopySend(send), Partner = partner == null ? null : CopyPartner(partner) };
+            var item = new QueuedChat { Id = Guid.NewGuid().ToString("N"), Send = CopySend(send), Partner = partner == null ? null : CopyPartner(partner), Relay = relay };
             _chatQueue.Add(item);
             if (QueueBytes() > 1800 * 1024) { _chatQueue.Remove(item); throw new InvalidOperationException(PompLanguage.Pick("대기열이 너무 커요.", "The queue is too large.")); }
             if (empty && allowResume && generation == _chatStopGeneration) { _queuePaused = false; _queueReason = null; }
+            if (relay != null) relay.State = RelayState.Queued;
             return item;
         }
         private void PublishQueuedChat(ChatSendPayload send, QueuedChat item)
@@ -366,9 +386,12 @@ namespace Pomp.Hosting
         }
         private void ScheduleQueueDispatch()
         {
+            // The engine may be idle now: what this conversation sent to other tabs is written to it.
+            ScheduleRelayFlush();
             lock (_stateLock)
             {
-                if (_queueDispatchScheduled || _pendingSessionChange != null || _queuePaused || _chatQueue.Count == 0 || _queueSession != _info.SessionId || _turns.Count > 0 || _info.IsStreaming || _bridge.State != BridgeState.Running || _sessionSwitchUncertain) return;
+                if (!_refreshRunning && QueueWaitingForSettlementLocked()) RequestInfoRefresh();
+                if (_queueDispatchScheduled || _pendingSessionChange != null || _queuePaused || _chatQueue.Count == 0 || _queueSession != _info.SessionId || ChatRunBusyLocked() || _bridge.State != BridgeState.Running || _sessionSwitchUncertain) return;
                 _queueDispatchScheduled = true;
                 _commands.Enqueue(async () =>
                 {
@@ -376,13 +399,14 @@ namespace Pomp.Hosting
                     lock (_stateLock)
                     {
                         _queueDispatchScheduled = false; generation = _chatStopGeneration;
-                        if (_pendingSessionChange == null && !_queuePaused && _chatQueue.Count > 0 && _queueSession == _info.SessionId && _turns.Count == 0 && !_info.IsStreaming && _bridge.State == BridgeState.Running && !_sessionSwitchUncertain) next = _chatQueue[0];
+                        if (_pendingSessionChange == null && !_queuePaused && _chatQueue.Count > 0 && _queueSession == _info.SessionId && !ChatRunBusyLocked() && _bridge.State == BridgeState.Running && !_sessionSwitchUncertain) next = _chatQueue[0];
                     }
                     if (next == null) return;
                     // A message an event rule queued keeps its marker: its turn must never forward again (PompSession.AgentHooks.cs).
                     var send = CopySend(next.Send);
                     send.ClientMessageId = (next.Send.ClientMessageId?.StartsWith(HookMessagePrefix, StringComparison.Ordinal) == true ? HookMessagePrefix : "queue-") + Guid.NewGuid().ToString("N");
-                    await HandleChatSendAsync(send, generation, expectedSession: _queueSession, bypassQueue: true, capturedPartner: next.Partner, queuedItemId: next.Id).ConfigureAwait(false);
+                    await HandleChatSendAsync(send, generation, expectedSession: _queueSession, bypassQueue: true, capturedPartner: next.Partner, queuedItemId: next.Id, relay: next.Relay).ConfigureAwait(false);
+                    if (next.Relay != null) PublishInboundRelays();
                 });
             }
         }
@@ -401,7 +425,9 @@ namespace Pomp.Hosting
                 {
                     var send = new ChatSendPayload { ClientMessageId = "history-" + Guid.NewGuid().ToString("N"), Text = entry.Text, IncludeEditorContext = false, Team = entry.Target.Kind == "team" ? entry.Target.Id : null, Agent = entry.Target.Kind == "agent" ? entry.Target.Id : null, AgentInstance = entry.Target.Kind == "dm" ? entry.Target.Id : null };
                     long generation; QueuedChat? queued;
-                    lock (_stateLock) { generation = _chatStopGeneration; queued = send.AgentInstance == null && (_turns.Count > 0 || _info.IsStreaming || _chatQueue.Count > 0) ? EnqueueChatLocked(send, null, generation) : null; }
+                    // A run for another agent or team goes to that partner's tab again; it never waits in this conversation's queue.
+                    var relayed = RelayTarget(CopySend(send)) != null;
+                    lock (_stateLock) { generation = _chatStopGeneration; queued = !relayed && send.AgentInstance == null && (ChatRunBusyLocked() || _chatQueue.Count > 0) ? EnqueueChatLocked(send, null, generation) : null; }
                     if (queued != null) { PublishQueuedChat(send, queued); ScheduleQueueDispatch(); }
                     else if (!await HandleChatSendAsync(send, generation).ConfigureAwait(false)) throw new InvalidOperationException(PompLanguage.Pick("실행 기록을 다시 보내지 못했어요.", "Run history could not be sent again."));
                 }
@@ -409,8 +435,15 @@ namespace Pomp.Hosting
             }
             catch (Exception ex) { Reply(UiMessageTypes.AgentsHistoryReply, requestId, ex.Message); }
         }
-        private void BeginRun(TurnState turn, ChatSendPayload send)
+        private void BeginRun(TurnState turn, ChatSendPayload send, InboundRelay? relay = null)
         {
+            if (relay != null)
+                lock (_stateLock)
+                {
+                    // The sending conversation made the run's history entry; the members this turn starts are counted for it.
+                    if (_relayRuns.Count >= 64) _relayRuns.Clear();
+                    _relayRuns[turn.PromptId] = relay;
+                }
             var kind = send.Team != null ? "team" : send.Agent != null ? "agent" : send.AgentInstance != null ? "dm" : null; if (kind == null) return;
             var id = send.Team ?? send.Agent ?? send.AgentInstance!;
             var roster = GetAgentRoster(); var team = kind == "team" ? roster.ListTeams().FirstOrDefault(t => string.Equals(t.Id, id, StringComparison.OrdinalIgnoreCase) && !t.Shadowed && string.IsNullOrEmpty(t.Error)) : null;
@@ -422,7 +455,7 @@ namespace Pomp.Hosting
                 SyncTeamInstancesLocked(); session = _info.SessionId ?? "";
                 turn.Team = team?.Id; turn.TeamMembers = team == null ? null : new HashSet<string>(team.Members, StringComparer.Ordinal); turn.TeamConnection = _epochConnection;
             }
-            if (history == null) return;
+            if (history == null || relay != null) return;
             try
             {
                 var runId = history.Begin(session, new AgentRunTargetPayload { Kind = kind, Id = id, Title = title ?? id }, send.Text, turn.PromptId);
@@ -435,13 +468,14 @@ namespace Pomp.Hosting
         }
         private void ObserveRunJob(string session, JObject job, bool fresh)
         {
-            TurnState? turn; AgentRunHistory? history; bool partnerChanged = false; bool duringHookTurn;
+            TurnState? turn; AgentRunHistory? history; bool partnerChanged = false; bool duringHookTurn; InboundRelay? relayed = null;
             lock (_stateLock)
             {
                 if (_info.SessionId != session) return;
                 SyncTeamInstancesLocked(); turn = _turns.Values.FirstOrDefault(); history = turn?.History ?? _runHistory;
                 // The job's own turn when known (it may have ended already), else the turn running now.
                 var ownPrompt = (string?)job["promptId"];
+                if (!string.IsNullOrEmpty(ownPrompt)) _relayRuns.TryGetValue(ownPrompt!, out relayed);
                 duringHookTurn = !string.IsNullOrEmpty(ownPrompt) && _turns.TryGetValue(ownPrompt!, out var own)
                     ? IsHookTurn(own)
                     : (!string.IsNullOrEmpty(ownPrompt) && _hookPrompts.Contains(ownPrompt!)) || (turn != null && IsHookTurn(turn));
@@ -456,7 +490,16 @@ namespace Pomp.Hosting
                     }
                 }
             }
-            try { if (history?.Observe(session, turn?.RunId, job, fresh) == true) PublishRunHistory(); }
+            try
+            {
+                if (history?.Observe(session, turn?.RunId, job, fresh) == true) PublishRunHistory();
+                if (relayed?.RunId != null && history != null)
+                {
+                    // The entry is the sending conversation's and names the delivery, not this tab's prompt.
+                    var member = (JObject)job.DeepClone(); member["promptId"] = relayed.Id;
+                    history.Observe(relayed.SourceSession, relayed.RunId, member, fresh);
+                }
+            }
             catch (Exception ex) { _logger.Warn("Run history progress could not be saved: " + ex.Message); }
             if (partnerChanged) PublishTabs();
             ObserveHookJob(job, fresh, duringHookTurn);
@@ -467,6 +510,8 @@ namespace Pomp.Hosting
             public string Id { get; set; } = "";
             public ChatSendPayload Send { get; set; } = new ChatSendPayload();
             public ConversationPartnerPayload? Partner { get; set; }
+            /// <summary>Set when another conversation sent this message here (<see cref="AcceptRelay"/>).</summary>
+            public InboundRelay? Relay { get; set; }
             public string CreatedAt { get; } = DateTimeOffset.UtcNow.ToString("O");
         }
     }

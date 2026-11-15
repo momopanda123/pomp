@@ -9,8 +9,8 @@ const SEEN_LIMIT = 2000;
 
 export interface TabBadges { chat: number; work: number }
 
-/** A reply in the transcript: an assistant message with text, or a turn that failed. */
-const isReply = (item: TranscriptItem) => (item.kind === 'assistant' && item.done && item.text.trim() !== '') || item.kind === 'turnError';
+/** A reply in the transcript: an assistant message with text, a turn that failed, or the answer that came back from another tab. */
+const isReply = (item: TranscriptItem) => (item.kind === 'assistant' && item.done && item.text.trim() !== '') || item.kind === 'turnError' || item.kind === 'relayResult';
 
 /** Where the transcript stood when Chat left the screen: the last message's reply can still grow, so it is scanned again from there. */
 function chatMark(sessionId: string | undefined, revision: number, items: TranscriptItem[]) {

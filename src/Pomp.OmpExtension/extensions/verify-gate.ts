@@ -11,7 +11,9 @@
  * (omp `edit`/`write`/`ast_edit`/`apply_patch`, host `edit_buffer_hashline`,
  * `add_project_file`, `rename_project_file`) and (b) verification calls after the last
  * edit (`build_solution`, `read_error_list`, `manage_tests`, or a shell command that is
- * a build/test). `session_start`/`agent_start` reset the per-turn state.
+ * a build/test). The state lasts for the user's turn: `agent_start` resets it, except
+ * when the run before it settled only to continue (todo reminder, retry, compaction,
+ * waiting for background work, or this gate's own nudge).
  *
  * Continuation rules: at most once per user turn; never in subagents; never when the
  * turn was aborted or ended in error; never when the edited files are only docs
@@ -22,9 +24,8 @@
  *
  * No fight with the other continuations: the engine runs its own plan/todo completion
  * check BEFORE the session_stop pass and settles with willContinue when it schedules a
- * follow-up, so this hook only runs when no engine continuation follows; the host's
- * workflow auto-continue is a separate user-armed run that the gate skips via the
- * composer runtime flag. At most one gate nudge per user turn across all mechanisms.
+ * follow-up, so this hook only runs when no engine continuation follows. At most one
+ * gate nudge per user turn.
  *
  * The static evidence section below is unconditional (it must not break prefix caching,
  * so it is fixed text): never claim success without fresh evidence from this turn.
@@ -200,8 +201,9 @@ export function lastAssistantText(message: unknown): string {
 export default function verifyGate(pi: ExtensionAPI): void {
 	if (!isPompHost()) return;
 
-	// Per-turn state for the MAIN agent (subagents never nudge). Reset on every agent start.
+	// Per-turn state for the MAIN agent (subagents never nudge). Reset when a new user turn starts, not when a run continues.
 	let turn = freshTurn();
+	let continuing = false;
 	let loggedOnce = false;
 	const logOnce = (message: string): void => {
 		if (loggedOnce) return;
@@ -226,7 +228,17 @@ export default function verifyGate(pi: ExtensionAPI): void {
 	pi.on("agent_start", (_event, ctx) => {
 		try {
 			if (ctx?.agent?.kind === "sub") return;
-			turn = freshTurn();
+			if (!continuing) turn = freshTurn();
+			continuing = false;
+		} catch {
+			// ignore
+		}
+	});
+
+	pi.on("agent_end", (event, ctx) => {
+		try {
+			if (ctx?.agent?.kind === "sub") return;
+			continuing = (event as { willContinue?: unknown } | undefined)?.willContinue === true;
 		} catch {
 			// ignore
 		}
@@ -251,7 +263,7 @@ export default function verifyGate(pi: ExtensionAPI): void {
 			}
 			const state = readVsState();
 			const solutionOpen = (state?.solutionPath ?? null) !== null;
-			// A POMP Workflow run owns its Verification phase (the host may auto-continue it): never nudge into it.
+			// A POMP Workflow run owns its Verification phase: never nudge into it.
 			// The engine's own plan/todo continuation runs before this hook and settles with willContinue, so when this
 			// hook fires no engine continuation follows.
 			const workflowActive = readComposerRuntime()?.active === true;

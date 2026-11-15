@@ -111,6 +111,12 @@ namespace Pomp.Hosting
         /// </summary>
         public event EventHandler<TimeSpan>? PageReady;
 
+        /// <summary>
+        /// Every <c>ui/ready</c> of the attached channel, also a page that reloaded on the same channel: the snapshot, transcript and
+        /// pending requests are queued by then. Raised outside the lock, before <see cref="PageReady"/>.
+        /// </summary>
+        public event EventHandler? Ready;
+
         public bool HasChannel
         {
             get
@@ -425,6 +431,8 @@ namespace Pomp.Hosting
                 StartDrain();
             }
 
+            RaisePendingRequestsChanged();
+
             var started = DateTime.UtcNow;
             using (cancellationToken.Register(() => pending.Completion.TrySetCanceled()))
             {
@@ -482,6 +490,8 @@ namespace Pomp.Hosting
                 StartDrain();
             }
 
+            RaisePendingRequestsChanged();
+
             using (cancellationToken.Register(() => pending.Completion.TrySetCanceled()))
             {
                 try
@@ -504,26 +514,46 @@ namespace Pomp.Hosting
         /// <summary>Removes this request's own entry only: a delivery failure may have cleared it and a new request may reuse the id.</summary>
         private void RemovePermission(string requestId, PendingPermission pending)
         {
+            var removed = false;
             lock (_lock)
             {
                 if (_permissions.TryGetValue(requestId, out var current) && ReferenceEquals(current, pending))
                 {
                     _permissions.Remove(requestId);
                     _pendingBytes -= pending.Bytes;
+                    removed = true;
                 }
             }
+
+            if (removed) RaisePendingRequestsChanged();
         }
 
         private void RemoveDialog(string requestId, PendingDialog pending)
         {
+            var removed = false;
             lock (_lock)
             {
                 if (_dialogs.TryGetValue(requestId, out var current) && ReferenceEquals(current, pending))
                 {
                     _dialogs.Remove(requestId);
                     _pendingBytes -= pending.Bytes;
+                    removed = true;
                 }
             }
+
+            if (removed) RaisePendingRequestsChanged();
+        }
+
+        /// <summary>
+        /// An approval or question was added or left the pending table (<see cref="PendingRequestCount"/> changed): a conversation that is not
+        /// on screen tells the tab strip that it waits for the user. Raised outside the lock; a handler never runs under it.
+        /// </summary>
+        public event EventHandler? PendingRequestsChanged;
+
+        private void RaisePendingRequestsChanged()
+        {
+            try { PendingRequestsChanged?.Invoke(this, EventArgs.Empty); }
+            catch (Exception ex) { _logger.Warn("A pending request observer failed: " + ex.Message); }
         }
 
         private void Dismiss(string requestId, bool isPermission, string reason)
@@ -674,6 +704,15 @@ namespace Pomp.Hosting
                 StartDrain();
             }
 
+            try
+            {
+                Ready?.Invoke(this, EventArgs.Empty);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn("A ready handler failed: " + ex.Message);
+            }
+
             if (firstReady.HasValue)
             {
                 try
@@ -763,6 +802,8 @@ namespace Pomp.Hosting
                 return;
             }
 
+            RaisePendingRequestsChanged();
+
             // Validate before deserialization: missing, numeric and unknown enum values all deny immediately.
             var choice = message.Payload?["decision"];
             var namedChoice = choice?.Type == Newtonsoft.Json.Linq.JTokenType.String ? (string?)choice : null;
@@ -812,6 +853,8 @@ namespace Pomp.Hosting
                 _logger.Debug("Ignoring a dialog response for the unknown request '" + response.RequestId + "'.");
                 return;
             }
+
+            RaisePendingRequestsChanged();
 
             pending.Completion.TrySetResult(new DialogAnswer
             {
@@ -1019,7 +1062,7 @@ namespace Pomp.Hosting
             _outboxTail = error;
             _outboxBytes = MessageBytes(error);
             _outboxTailBytes = _outboxBytes;
-            Task.Run(() => _logger.Warn(reason)).Forget(_logger, "UI delivery failure");
+            Task.Run(() => { _logger.Warn(reason); RaisePendingRequestsChanged(); }).Forget(_logger, "UI delivery failure");
             if (_ready && !_draining)
             {
                 _draining = true;

@@ -23,7 +23,7 @@ export function WorkspaceHistory({ locale, inert, connected = true, onReview }: 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState(''); const [search, setSearch] = useState('');
   const [error, setError] = useState('');
-  const ko = locale.toLowerCase().startsWith('ko'); const t = useT();
+  const t = useT();
   const page = history.page ?? 0;
   useEffect(() => () => window.clearTimeout(armTimer.current), []);
   useEffect(() => { setSelected(new Set()); setArmed(undefined); }, [history.root]);
@@ -32,13 +32,13 @@ export function WorkspaceHistory({ locale, inert, connected = true, onReview }: 
       if (message.type === 'workspace/historyReply' && message.payload.requestId === restoreRequest.current && message.payload.root === history.root) {
         restoreRequest.current = undefined; setPending(false);
         if (message.payload.ok && message.payload.proposalId) { setSelected(new Set()); onReview?.(); }
-        else setError(message.payload.error || (ko ? '제안을 만들지 못했어요.' : 'Could not create the proposal.'));
+        else setError(message.payload.error || t('work.proposalFailed'));
         return;
       }
       if (message.type === 'workspace/historyReply' && message.payload.requestId === deleteRequest.current) {
         deleteRequest.current = undefined;
         setDeleting(ids => { if (ids && message.payload.ok) setSelected(before => new Set([...before].filter(id => !ids.includes(id)))); return undefined; });
-        if (!message.payload.ok) setError(message.payload.error || (ko ? '기록을 지우지 못했어요.' : 'Could not delete the record.'));
+        if (!message.payload.ok) setError(message.payload.error || t('work.history.deleteFailed'));
         return;
       }
       if (message.type !== 'workspace/historyState' || restoreRequest.current || deleteRequest.current) return;
@@ -48,17 +48,17 @@ export function WorkspaceHistory({ locale, inert, connected = true, onReview }: 
       setError(message.payload.message ?? '');
     });
     return off;
-  }, [history.root, onReview, ko]);
+  }, [history.root, onReview, t]);
   useEffect(() => {
     if (!pending) return;
-    const timer = window.setTimeout(() => { restoreRequest.current = undefined; setPending(false); setError(ko ? '결과를 받지 못했어요.' : 'No reply received.'); }, 120000);
+    const timer = window.setTimeout(() => { restoreRequest.current = undefined; setPending(false); setError(t('tools.noReply')); }, 120000);
     return () => window.clearTimeout(timer);
-  }, [pending, ko]);
+  }, [pending, t]);
   useEffect(() => {
     if (!deleting) return;
-    const timer = window.setTimeout(() => { deleteRequest.current = undefined; setDeleting(undefined); setError(ko ? '결과를 받지 못했어요.' : 'No reply received.'); }, 30000);
+    const timer = window.setTimeout(() => { deleteRequest.current = undefined; setDeleting(undefined); setError(t('tools.noReply')); }, 30000);
     return () => window.clearTimeout(timer);
-  }, [deleting, ko]);
+  }, [deleting, t]);
   const refresh = (nextPage = page, nextQuery = search) => {
     if (inert || pending) return;
     if (send('workspace/history', { action: 'refresh', root: history.root, page: nextPage, size: PAGE_SIZE, ...(nextQuery ? { query: nextQuery } : {}) })) setError('');
@@ -92,40 +92,39 @@ export function WorkspaceHistory({ locale, inert, connected = true, onReview }: 
   const chosen = [...selected]; const restorable = entries.filter(entry => selected.has(entry.id) && entry.state === 'applied').map(entry => entry.id);
   const pageIds = entries.map(entry => entry.id); const allOnPage = pageIds.length > 0 && pageIds.every(id => selected.has(id));
   const toggle = (id: string, on: boolean) => setSelected(before => { const next = new Set(before); if (on) next.add(id); else next.delete(id); return next; });
-  const fileLabel = (files: string[]) => files.length ? files[0].split(/[\\/]/).pop() + (files.length > 1 ? (ko ? ` 외 ${files.length - 1}` : ` +${files.length - 1}`) : '') : '';
+  const fileLabel = (files: string[]) => { const name = files[0]?.split(/[\\/]/).pop() ?? ''; return files.length > 1 ? t('work.history.more', { name, count: files.length - 1 }) : name; };
   const busy = inert || !connected || pending || !!deleting;
   return <ViewSection sectionKey="work-history" className="workspace-history" headingLevel="h3" inert={inert || undefined} bodyClassName="ui-flush"
-    title={ko ? '적용 기록' : 'Applied changes'} status={total}
+    title={t('work.history.title')} status={total}
     actions={<SectionRefresh onClick={() => refresh()} disabled={inert || !connected || pending} testId="history-refresh" />}>
     <Toolbar>
-      <SearchBox value={query} onChange={setQuery} label={ko ? '파일 검색' : 'Search files'} testId="history-search" />
-      <span className="ui-grow" />
+      <SearchBox value={query} onChange={setQuery} label={t('work.searchFiles')} testId="history-search" />
       <button type="button" className="btn small subtle" data-testid="history-restore-selected" disabled={busy || !restorable.length} onClick={() => restore(restorable)}>
-        <Icon name="undo" size={12} />{ko ? `되돌리기 검토 ${restorable.length}` : `Review undo ${restorable.length}`}</button>
+        <Icon name="undo" size={12} />{t('work.history.restoreSelected', { count: restorable.length })}</button>
       {armed === 'selection'
-        ? <button type="button" className="btn small subtle ui-danger-confirm" data-testid="history-delete-selected-confirm" disabled={busy} onClick={() => remove('selection', chosen)}>{ko ? `삭제 확인 ${chosen.length}` : `Confirm ${chosen.length}`}</button>
-        : <button type="button" className="btn small subtle" data-testid="history-delete-selected" disabled={busy || !chosen.length} onClick={() => remove('selection', chosen)}><Icon name="trash" size={12} />{ko ? `삭제 ${chosen.length}` : `Delete ${chosen.length}`}</button>}
+        ? <button type="button" className="btn small danger" data-testid="history-delete-selected-confirm" disabled={busy} onClick={() => remove('selection', chosen)}>{t('work.history.deleteSelectedConfirm', { count: chosen.length })}</button>
+        : <button type="button" className="btn small subtle" data-testid="history-delete-selected" disabled={busy || !chosen.length} onClick={() => remove('selection', chosen)}><Icon name="trash" size={12} />{t('work.history.deleteSelected', { count: chosen.length })}</button>}
     </Toolbar>
-    <DataTable columns="16px minmax(76px, max-content) minmax(0, 1fr) auto auto" label={ko ? '적용 기록' : 'Applied changes'} testId="history-table" empty={!entries.length}
-      head={[<input key="all" type="checkbox" aria-label={ko ? '이 쪽 모두 선택' : 'Select this page'} checked={allOnPage} disabled={busy || !pageIds.length} data-testid="history-select-page"
+    <DataTable columns="16px minmax(76px, max-content) minmax(0, 1fr) auto auto" label={t('work.history.title')} testId="history-table" empty={!entries.length}
+      head={[<input key="all" type="checkbox" aria-label={t('work.history.selectPage')} checked={allOnPage} disabled={busy || !pageIds.length} data-testid="history-select-page"
         onChange={event => setSelected(before => { const next = new Set(before); for (const id of pageIds) { if (event.target.checked) next.add(id); else next.delete(id); } return next; })} />,
-        ko ? '시각' : 'Time', ko ? '파일' : 'Files', ko ? '상태' : 'State', '']}>
+        t('ui.col.time'), t('work.files'), t('tcol.state'), '']}>
       {entries.map(entry => <Row key={entry.id} testId={`history-${entry.id}`} selected={selected.has(entry.id)}>
-        <Cell><input type="checkbox" aria-label={ko ? `${fileLabel(entry.files)} 선택` : `Select ${fileLabel(entry.files)}`} checked={selected.has(entry.id)} disabled={busy}
+        <Cell><input type="checkbox" aria-label={t('work.selectNamed', { name: fileLabel(entry.files) })} checked={selected.has(entry.id)} disabled={busy}
           data-testid={`history-select-${entry.id}`} onChange={event => toggle(entry.id, event.target.checked)} /></Cell>
         <Cell className="ui-muted">{entry.createdUtc ? new Date(entry.createdUtc).toLocaleString(locale, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</Cell>
         <Cell title={entry.files.join('\n')} className="ui-mono">{revealControls(fileLabel(entry.files))}{entry.error && <span className="ui-sub ui-err">{revealControls(entry.error)}</span>}</Cell>
-        <Cell><Badge tone={entry.state === 'applied' ? 'ok' : entry.state === 'restored' ? 'info' : 'neutral'} title={entry.state}>{entry.state === 'restored' ? (ko ? '되돌림' : 'Restored') : revealControls(stateLabel(entry.state, locale))}</Badge></Cell>
+        <Cell><Badge tone={entry.state === 'applied' ? 'ok' : entry.state === 'restored' ? 'info' : 'neutral'} title={entry.state}>{entry.state === 'restored' ? t('work.history.restored') : revealControls(stateLabel(entry.state, locale))}</Badge></Cell>
         <Actions>
-          <IconButton icon="undo" label={ko ? '되돌리기 검토' : 'Review undo'} disabled={busy || entry.state !== 'applied'} onClick={() => restore([entry.id])} testId={`history-restore-${entry.id}`} />
+          <IconButton icon="undo" label={t('work.history.restore')} disabled={busy || entry.state !== 'applied'} onClick={() => restore([entry.id])} testId={`history-restore-${entry.id}`} />
           {(armed === entry.id
-            ? <button type="button" className="btn small subtle ui-danger-confirm" data-testid={`history-delete-confirm-${entry.id}`} disabled={!!deleting} onClick={() => remove(entry.id, [entry.id])}>{ko ? '삭제 확인' : 'Confirm'}</button>
-            : <IconButton icon="trash" tone="danger" label={deleting?.includes(entry.id) ? (ko ? '지우는 중' : 'Deleting') : (ko ? '기록 삭제' : 'Delete record')} disabled={!!deleting} onClick={() => remove(entry.id, [entry.id])} testId={`history-delete-${entry.id}`} />)}
+            ? <button type="button" className="btn small danger" data-testid={`history-delete-confirm-${entry.id}`} disabled={!!deleting} onClick={() => remove(entry.id, [entry.id])}>{t('work.confirmDelete')}</button>
+            : <IconButton icon="trash" tone="danger" label={t(deleting?.includes(entry.id) ? 'work.history.deleting' : 'work.history.delete')} disabled={!!deleting} onClick={() => remove(entry.id, [entry.id])} testId={`history-delete-${entry.id}`} />)}
         </Actions>
       </Row>)}
     </DataTable>
     <Pager paged={paged} testId="history-pager" />
-    {pending && <p className="ui-note ui-muted" role="status">{ko ? '확인 중' : 'Loading'}</p>}
+    {pending && <p className="ui-note ui-muted" role="status">{t('work.loading')}</p>}
     {error && <p className="ui-note" role="alert">{revealControls(error)}</p>}
   </ViewSection>;
 }

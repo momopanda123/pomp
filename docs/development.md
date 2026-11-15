@@ -44,8 +44,8 @@ POMP를 빌드하고 디버깅하고 수정하는 사람을 위한 문서다. �
 | 인터넷 연결 | 첫 빌드에서 고정된 소스와 잠긴 종속성을 가져올 때 필요하다 |
 | Git, Bun 1.4.4+, Rust/Cargo (MSVC x64), Visual Studio C++ 빌드 도구 | 패치한 omp 엔진을 로컬에서 처음 빌드할 때 필요하다 |
 
-첫 빌드는 `build/build-omp.ps1`로 고정된 omp 18.18.9 소스에 `engines/omp/pomp-v18.18.9.patch`를 적용한다.
-빌드된 실행 파일은 `artifacts\engines\omp\18.18.9\`에 캐시하며 `engines/omp/engine.props`의 크기·SHA-256과
+첫 빌드는 `build/build-omp.ps1`로 고정된 omp 18.20.0 소스에 `engines/omp/pomp-v18.20.0.patch`를 적용한다.
+빌드된 실행 파일은 `artifacts\engines\omp\18.20.0\`에 캐시하며 `engines/omp/engine.props`의 크기·SHA-256과
 맞아야 패키지에 넣는다. 공식 릴리스 바이너리는 이 패치가 없으므로 대체할 수 없다. 오프라인에서는 같은
 패치 빌드의 로컬 사본을 `-OmpExe`로 지정한다.
 
@@ -85,7 +85,7 @@ POMP를 빌드하고 디버깅하고 수정하는 사람을 위한 문서다. �
 
 ### omp 엔진과 로그인
 
-POMP 릴리스마다 시험한 omp 버전 하나가 VSIX에 들어 있다. 위치는 `<확장 폴더>\omp\omp.exe`이고, 현재 버전은 18.18.9이다.
+POMP 릴리스마다 시험한 omp 버전 하나가 VSIX에 들어 있다. 위치는 `<확장 폴더>\omp\omp.exe`이고, 현재 버전은 18.20.0이다.
 
 - 시작할 때 크기와 SHA-256으로 그 파일이 맞는지 확인한다.
 - omp 업데이트는 POMP 업데이트로만 들어온다.
@@ -119,7 +119,7 @@ C# 언어 버전은 `12.0`으로 고정되어 있다. 설정 위치는 `Director
 
 | 항목 | 크기 |
 |---|---|
-| 엔진 실행 파일 | 약 238 MiB. 소스 빌드 후 캐시한다 |
+| 엔진 실행 파일 | 약 240 MiB. 소스 빌드 후 캐시한다 |
 | Release VSIX | 약 136 MB. VS 버전에 따라 조금 다르다 |
 | Debug VSIX | 압축하지 않으므로 Release보다 크다 |
 
@@ -197,6 +197,8 @@ Debug 빌드는 실행 중인 IDE 주 버전에 맞는 플레이버만 실험 �
 | VS 2017 | VS2017 |
 
 Release VSIX를 실험 인스턴스(`/rootSuffix:<이름>`)에 다시 설치하거나 새 버전으로 올리면, 설치기가 그 인스턴스의 `Extensions\extensions.configurationchanged`를 갱신하지 않는다. 그러면 VS가 확장 캐시를 다시 만들지 않고 지워진 이전 확장 폴더를 읽어 "PompPackage 패키지가 제대로 로드되지 않았습니다"가 난다(ActivityLog: `CreateInstance failed … <이전 폴더>\Pomp.VisualStudio.dll`). 같은 버전 재설치는 VS 2019·2026에서, 새 버전(0.5.9 → 0.5.10)과 설치 창(`/quiet` 없이)은 VS 2026에서 확인했다. VS를 닫은 상태에서 `devenv /rootSuffix <이름> /updateconfiguration`을 한 번 실행하면 해결된다. 루트 접미사 없는 일반 인스턴스는 확인하지 않았다.
+
+VS 2026 UI를 수동 검증할 때는 `/rootSuffix POMP` 프로필을 사용한다. 우상단 프로필 정보 버튼이 `POMP`로 표시되어 긴 이름이 말줄임표로 잘리지 않는다. 설치기의 `/rootSuffix:POMP`, 캐시 갱신의 `devenv /rootSuffix POMP /updateconfiguration`, 실행의 `devenv /rootSuffix POMP <솔루션 경로>`를 맞춘다. 일반 프로필과 이전 실험 프로필은 삭제하지 않는다. VS 설정은 프로필별로 분리되며 프로젝트의 채팅 데이터는 그대로 사용한다.
 
 ### 실행 중 동작
 

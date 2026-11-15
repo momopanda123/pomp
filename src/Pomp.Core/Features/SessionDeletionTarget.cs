@@ -7,9 +7,9 @@ namespace Pomp.Features
 {
     internal sealed class SessionDeletionTarget
     {
-        public SessionDeletionTarget(string path, string sessionId, string artifacts)
+        public SessionDeletionTarget(string path, string sessionId, string artifacts, bool isEmpty)
         {
-            Path = path; SessionId = sessionId; Artifacts = artifacts;
+            Path = path; SessionId = sessionId; Artifacts = artifacts; IsEmpty = isEmpty;
             var info = new FileInfo(path); length = info.Length; modified = info.LastWriteTimeUtc;
         }
         private readonly long length;
@@ -17,9 +17,8 @@ namespace Pomp.Features
         public string Path { get; }
         public string SessionId { get; }
         public string Artifacts { get; }
+        public bool IsEmpty { get; }
         public IReadOnlyList<string> Paths => Directory.Exists(Artifacts) ? new[] { Artifacts, Path } : new[] { Path };
-        /// <summary>The same validated file, measured again: after the engine has left the conversation (it may write on leaving).</summary>
-        public SessionDeletionTarget Remeasure() => new SessionDeletionTarget(Path, SessionId, Artifacts);
         public void Validate()
         {
             CheckpointStore.CheckDirectPath(Path);

@@ -133,7 +133,8 @@ function LoginLink({ url }: { url: string }) {
 /**
  * Where the sign-in stands: starting, running (with the browser link, instructions, progress and the prompt for a code to paste),
  * and its result — a short confirmation, or the failure with the way out (retry, sign in in a terminal). A result that was already
- * there when the panel opened is old news and is not shown again; the user can dismiss a result.
+ * there when the panel opened is old news and is not shown again, unless it is the result of a sign-in this page started (it arrived
+ * while another tab was on screen); the user can dismiss a result.
  */
 export function LoginCard({ login, providers, cmd, inert, onSignIn, onConsole }: LoginCardProps) {
   const t = useT();
@@ -148,7 +149,7 @@ export function LoginCard({ login, providers, cmd, inert, onSignIn, onConsole }:
   const startError = start.timedOut && running ? undefined : start.error;
 
   const resultKey = `${login.state}|${login.provider ?? ''}|${login.message ?? ''}`;
-  const [dismissed, setDismissed] = useState<string | null>(() => (login.state === 'succeeded' || login.state === 'failed' ? resultKey : null));
+  const [dismissed, setDismissed] = useState<string | null>(() => (!sent.login && (login.state === 'succeeded' || login.state === 'failed') ? resultKey : null));
   const lastRequest = useRef(sent.login?.requestId);
   useEffect(() => {
     if (running) setDismissed(null);

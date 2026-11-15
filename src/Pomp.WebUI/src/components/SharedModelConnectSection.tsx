@@ -53,16 +53,16 @@ export function SharedModelConnectSection({ cmd, inert }: SharedModelConnectSect
   }, [answer.pending, answer.error]);
 
   return (
-    <ViewSection sectionKey="setup-connect" className="setup-section connect-section" title={t('setup.connect.title')} headingId={titleId} aria-labelledby={titleId}
+    <ViewSection sectionKey="setup-connect" className="setup-section" title={t('setup.connect.title')} headingId={titleId} aria-labelledby={titleId}
       data-testid="setup-connect" bodyClassName="ui-flush">
-      <form className="ui-form connect-form" autoComplete="off" noValidate onSubmit={connect} data-testid="connect-form">
+      <form className="ui-form" autoComplete="off" noValidate onSubmit={connect} data-testid="connect-form">
         <Field label={t('setup.connect.address')} error={addressBad ? t('setup.connect.addressInvalid') : undefined}>{(id) => (
-          <input id={id} type="text" className="ui-mono" data-testid="connect-address" placeholder="192.168.0.10:47611" maxLength={300} autoComplete="off"
+          <input id={id} type="text" className="ui-mono" data-testid="connect-address" placeholder={t('remote.connect.addressExample')} maxLength={300} autoComplete="off"
             autoCapitalize="off" spellCheck={false} value={address} disabled={answer.pending} aria-invalid={addressBad || undefined}
             onChange={(event) => { retire(); setAddress(event.target.value); }} />
         )}</Field>
         <Field label={t('setup.connect.code')} error={codeBad ? t('setup.connect.codeInvalid') : undefined}>{(id) => (
-          <input id={id} ref={codeRef} type="text" className="ui-mono" data-testid="connect-code" placeholder="ABCD-EFGH-IJKL-MNOP-QRST-UVWX" maxLength={64}
+          <input id={id} ref={codeRef} type="text" className="ui-mono" data-testid="connect-code" placeholder={t('remote.connect.codeExample')} maxLength={64}
             autoComplete="off" autoCapitalize="characters" spellCheck={false} value={code} disabled={answer.pending} aria-invalid={codeBad || undefined}
             onChange={(event) => { retire(); setCode(event.target.value); }} />
         )}</Field>

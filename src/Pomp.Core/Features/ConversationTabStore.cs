@@ -12,10 +12,10 @@ using Pomp.Ui;
 namespace Pomp.Features
 {
     /// <summary>
-    /// The chat tabs of a workspace (docs/architecture.md §8.8), in <c>.pomp/local/chat-tabs.json</c>: the Default (POMP) tab's current
-    /// conversation and every agent or team conversation with its partner; <c>open</c> marks the current conversation of an open tab (one per
-    /// partner). A conversation that is not listed is a POMP conversation. The omp extension reads the partners from this file
-    /// (lib/conversation-partner.ts) to give an agent conversation that agent's instructions, model and tools.
+    /// Workspace chat ownership in <c>.pomp/local/chat-tabs.json</c>. <c>main</c> is exclusively the native OMP main.
+    /// Native agent/team entries retain their partners; ACP entries retain opaque, prefixed IDs with explicit backend ownership.
+    /// Closing an ACP tab preserves its resume metadata, not provider deletion. Missing backend fields mean OMP.
+    /// The OMP extension reads native partner entries from this file (lib/conversation-partner.ts).
     /// </summary>
     internal sealed class ConversationTabStore
     {
@@ -30,13 +30,14 @@ namespace Pomp.Features
         internal sealed class Entry
         {
             public string SessionId { get; set; } = "";
+            public string Backend { get; set; } = "omp";
             public ConversationPartnerPayload Partner { get; set; } = new ConversationPartnerPayload();
             public bool Open { get; set; }
         }
         internal sealed class Snapshot
         {
             public string? Main { get; set; }
-            /// <summary>Agent and team conversations; the open ones in tab order.</summary>
+            /// <summary>Native partner conversations and independently selectable ACP conversations; open ones retain tab order.</summary>
             public List<Entry> Conversations { get; } = new List<Entry>();
         }
 
@@ -51,11 +52,36 @@ namespace Pomp.Features
 
         /// <summary>The partners of all agent and team conversations of the workspace, by conversation id (one read for a whole list).</summary>
         public Dictionary<string, ConversationPartnerPayload> All(string root) =>
-            Read(root).Conversations.ToDictionary(e => e.SessionId, e => Copy(e.Partner), StringComparer.Ordinal);
+            Read(root).Conversations.Where(e => e.Backend == "omp").ToDictionary(e => e.SessionId, e => Copy(e.Partner), StringComparer.Ordinal);
 
         /// <summary>The conversation of the open tab of <paramref name="partner"/>, or null.</summary>
         public string? OpenSession(string root, ConversationPartnerPayload partner) =>
-            Read(root).Conversations.FirstOrDefault(e => e.Open && Same(e.Partner, partner))?.SessionId;
+            Read(root).Conversations.FirstOrDefault(e => e.Backend == "omp" && e.Open && Same(e.Partner, partner))?.SessionId;
+
+        public string Backend(string root, string sessionId) =>
+            sessionId.StartsWith("antigravity-acp:", StringComparison.Ordinal) ? "antigravity-acp"
+                : Read(root).Conversations.FirstOrDefault(e => e.SessionId == sessionId)?.Backend ?? "omp";
+
+        /// <summary>ACP ownership is additive metadata; its main conversations never replace the native main.</summary>
+        public void ObserveBackend(string root, string sessionId, string backend)
+        {
+            Check(sessionId);
+            if (backend == "omp") { Observe(root, sessionId, null); return; }
+            if (backend != "antigravity-acp" || !sessionId.StartsWith("antigravity-acp:", StringComparison.Ordinal))
+                throw new ArgumentException("Invalid backend conversation identity.");
+            lock (Gate)
+            {
+                var file = FileFor(root); var data = Load(file);
+                var entry = data.Conversations.FirstOrDefault(e => e.SessionId == sessionId);
+                if (entry == null) data.Conversations.Add(new Entry { SessionId = sessionId, Backend = backend, Open = true });
+                else
+                {
+                    if (entry.Backend == backend && entry.Open) return;
+                    entry.Backend = backend; entry.Open = true;
+                }
+                Write(file, data);
+            }
+        }
 
         /// <summary>
         /// <paramref name="sessionId"/> became the current conversation. <paramref name="assign"/> (an agent or team) makes it that partner's new
@@ -65,6 +91,8 @@ namespace Pomp.Features
         public ConversationPartnerPayload Observe(string root, string sessionId, ConversationPartnerPayload? assign)
         {
             Check(sessionId);
+            if (sessionId.StartsWith("antigravity-acp:", StringComparison.Ordinal))
+                throw new ArgumentException("ACP conversations cannot become native conversations.");
             lock (Gate)
             {
                 var file = FileFor(root); var data = Load(file);
@@ -82,7 +110,7 @@ namespace Pomp.Features
                 else
                 {
                     var wasOpen = entry.Open && data.Conversations.Contains(entry);
-                    var replaced = data.Conversations.FirstOrDefault(e => e.Open && e != entry && Same(e.Partner, entry.Partner));
+                    var replaced = data.Conversations.FirstOrDefault(e => e.Backend == "omp" && e.Open && e != entry && Same(e.Partner, entry.Partner));
                     entry.Open = true;
                     if (!wasOpen)
                     {
@@ -136,7 +164,7 @@ namespace Pomp.Features
             ["main"] = data.Main == null ? JValue.CreateNull() : (JToken)data.Main,
             ["conversations"] = new JArray(data.Conversations.Select(e => new JObject
             {
-                ["sessionId"] = e.SessionId, ["partner"] = new JObject { ["kind"] = e.Partner.Kind, ["id"] = e.Partner.Id }, ["open"] = e.Open,
+                ["sessionId"] = e.SessionId, ["backend"] = e.Backend, ["partner"] = new JObject { ["kind"] = e.Partner.Kind, ["id"] = e.Partner.Id }, ["open"] = e.Open,
             })),
         };
         private static void Write(string file, Snapshot data)
@@ -167,9 +195,13 @@ namespace Pomp.Features
                 foreach (var row in rows)
                 {
                     var id = (string?)(row as JObject)?["sessionId"]; var kind = (string?)row["partner"]?["kind"]; var target = (string?)row["partner"]?["id"];
-                    if (id == null || (kind != "agent" && kind != "team") || !AgentRoster.IsValidName(target ?? "") || row["open"]?.Type != JTokenType.Boolean) throw new InvalidDataException("Invalid chat tab entry.");
+                    var backend = (string?)row["backend"] ?? "omp";
+                    if (id == null || row["open"]?.Type != JTokenType.Boolean
+                        || (backend == "omp" ? ((kind != "agent" && kind != "team") || !AgentRoster.IsValidName(target ?? ""))
+                            : backend != "antigravity-acp" || kind != "main" || !id.StartsWith("antigravity-acp:", StringComparison.Ordinal)))
+                        throw new InvalidDataException("Invalid chat tab entry.");
                     Check(id); if (!seen.Add(id)) throw new InvalidDataException("Duplicate chat tab entry.");
-                    data.Conversations.Add(new Entry { SessionId = id, Partner = new ConversationPartnerPayload { Kind = kind!, Id = target }, Open = (bool)row["open"]! });
+                    data.Conversations.Add(new Entry { SessionId = id, Backend = backend, Partner = new ConversationPartnerPayload { Kind = kind!, Id = target }, Open = (bool)row["open"]! });
                 }
                 return data;
             }

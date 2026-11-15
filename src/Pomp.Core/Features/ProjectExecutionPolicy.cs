@@ -83,7 +83,7 @@ namespace Pomp.Features
                 {
                     if((string?)rule["tool"]!="*" && (string?)rule["tool"]!=tool)continue;
                     var deny=(string?)rule["effect"]=="deny";
-                    if(rule["paths"] is JArray paths && !PathsMatch(root,paths,args,deny))continue;
+                    if(rule["paths"] is JArray paths && !PathsMatch(root,paths,tool,args,deny))continue;
                     if(rule["commands"] is JArray commands && (args["command"]?.Type!=JTokenType.String || !commands.Values<string>().Contains((string)args["command"]!,StringComparer.Ordinal)))continue;
                     if(deny)return "Denied by a matching .pomp/permissions.json rule.";
                     allowed=true;
@@ -108,12 +108,64 @@ namespace Pomp.Features
             var prefix=folder.TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar)+Path.DirectorySeparatorChar;
             return SamePath(folder,target)||target.StartsWith(prefix,Path.DirectorySeparatorChar=='\\'?StringComparison.OrdinalIgnoreCase:StringComparison.Ordinal);
         }
-        private static bool PathsMatch(string root,JArray folders,JObject args,bool deny)
+        private static readonly Regex HashlineTag=new Regex(@"#[0-9a-fA-F]{4}\z",RegexOptions.CultureInvariant);
+        private static string Unquote(string value)
+        {
+            var text=value.Trim();
+            return text.Length>=2&&(text[0]=='"'||text[0]=='\'')&&text[text.Length-1]==text[0]?text.Substring(1,text.Length-2):text;
+        }
+        /// <summary>Every path a textual edit payload names (hashline headers and <c>MV</c>, apply_patch file and <c>Move to</c> headers). The same reading as the engine guard's (Pomp.OmpExtension lib/tool-targets.ts).</summary>
+        private static void CollectPatchPaths(string text,Action<string?> add)
+        {
+            if(text.Length>0&&text[0]=='\uFEFF')text=text.Substring(1);
+            foreach(var rawLine in text.Split('\n'))
+            {
+                var line=(rawLine.EndsWith("\r",StringComparison.Ordinal)?rawLine.Substring(0,rawLine.Length-1):rawLine).TrimEnd();
+                if(line.StartsWith("[",StringComparison.Ordinal)&&line.EndsWith("]",StringComparison.Ordinal)){add(Unquote(HashlineTag.Replace(line.Substring(1,line.Length-2).Trim(),string.Empty)));continue;}
+                var lead=line.TrimStart();
+                if(lead.StartsWith("\u00B6",StringComparison.Ordinal)){add(Unquote(HashlineTag.Replace(lead.TrimStart('\u00B6').Trim(),string.Empty)));continue;}
+                var move=Regex.Match(line,@"\A\s*MV\s+(.+)\z");
+                if(move.Success){add(Unquote(move.Groups[1].Value));continue;}
+                var header=Regex.Match(line,@"\A[ \t]*\*{3}[ \t]+(?:Add File|Update File|Delete File|Move to|Edit File):[ \t]*(.+)\z",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant);
+                if(!header.Success)continue;
+                var value=Unquote(header.Groups[1].Value);add(value);
+                var all=Regex.Match(value,@"\A(.+?)[ \t]+all\z",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant);
+                if(all.Success)add(Unquote(all.Groups[1].Value));
+            }
+        }
+        /// <summary>
+        /// A move or rename writes its destination too (hashline <c>MV</c>, <c>*** Move to</c>, <c>edits[].rename</c>, <c>lsp rename_file</c>):
+        /// a path rule judges it like the file it starts from. Mirrors targetPaths in the engine guard (Pomp.OmpExtension extensions/permissions.ts).
+        /// </summary>
+        private static void AddMoveTargets(string tool,JObject args,List<string> targets)
+        {
+            if(tool=="lsp")
+            {
+                if(args["action"]?.Type==JTokenType.String&&(string?)args["action"]=="rename_file"&&args["new_name"]?.Type==JTokenType.String)targets.Add((string)args["new_name"]!);
+                return;
+            }
+            if(tool!="edit"&&tool!="apply_patch")return;
+            void Add(string? value)
+            {
+                // Past the limit the rule is refused anyway (PathsMatch), so nothing more needs collecting.
+                if(value==null||targets.Count>100)return;
+                var text=value.Trim();
+                var header=Regex.Match(text,@"\A\[(.+)#[0-9a-fA-F]{4}\]\z");
+                if(header.Success)text=Unquote(header.Groups[1].Value);
+                if(text.Length>0&&!targets.Contains(text))targets.Add(text);
+            }
+            foreach(var key in new[]{"path","_path"})if(args[key]?.Type==JTokenType.String)Add((string?)args[key]);
+            if(args["paths"] is JArray paths)foreach(var value in paths)if(value.Type==JTokenType.String)Add((string?)value);
+            if(args["edits"] is JArray edits)foreach(var edit in edits)if(edit is JObject item&&item["rename"]?.Type==JTokenType.String)Add((string?)item["rename"]);
+            foreach(var key in new[]{"input","_input"})if(args[key]?.Type==JTokenType.String)CollectPatchPaths((string)args[key]!,Add);
+        }
+        private static bool PathsMatch(string root,JArray folders,string tool,JObject args,bool deny)
         {
             var targets=new List<string>();
             foreach(var key in new[]{"path","file","file_path","filePath","source","destination","oldPath","newPath"})if(args[key]?.Type==JTokenType.String)targets.Add((string)args[key]!);
             if(args["files"] is JArray files)foreach(var file in files.Take(101)) { if(file.Type==JTokenType.String)targets.Add((string)file!);else if(file is JObject item&&item["path"]?.Type==JTokenType.String)targets.Add((string)item["path"]!); }
             if(args["paths"] is JArray paths)foreach(var value in paths.Take(101))if(value.Type==JTokenType.String)targets.Add((string)value!);
+            AddMoveTargets(tool,args,targets);
             if(targets.Count==0||targets.Count>100)return deny;
             root=Path.GetFullPath(root);
             bool Match(string value)

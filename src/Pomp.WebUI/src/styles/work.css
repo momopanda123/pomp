@@ -29,6 +29,8 @@ button.view-section-toggle { display: flex; align-items: center; gap: 6px; width
 .work-page-status, .view-section-status { flex: 0 1 auto; min-width: 0; max-width: 45%; padding: 2px 5px;
   border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius-sm); color: var(--pomp-muted-fg);
   font-size: .85em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+/* A state badge is a pill already: it is not drawn inside the count frame. */
+.view-section-status:has(> .ui-badge) { max-width: 60%; padding: 0; border: 0; }
 .view-section-actions { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; margin-left: auto; }
 .view-section-actions .tools-actions { margin: 0; }
 .view-section-actions .icon-btn { width: var(--pomp-control-height); height: var(--pomp-control-height); padding: 0; flex: none; }

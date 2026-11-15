@@ -70,11 +70,12 @@ export function ViewSection({ sectionKey, title, status, actions, active = false
   </section>;
 }
 
-export function SectionRefresh({ onClick, disabled = false, testId, label }: {
-  onClick: () => void; disabled?: boolean; testId?: string; label?: string;
+/** The refresh action of a section header; `busy` shows the request in flight (a spinner) and takes no further press. */
+export function SectionRefresh({ onClick, disabled = false, busy = false, testId, label }: {
+  onClick: () => void; disabled?: boolean; busy?: boolean; testId?: string; label?: string;
 }) {
   const t = useT(); const name = label ?? t('tools.refresh');
-  return <button type="button" className="icon-btn section-refresh" disabled={disabled} data-testid={testId} title={name} aria-label={name} onClick={onClick}>
-    <Icon name="restart" size={13} /><span className="sr-only">{name}</span>
+  return <button type="button" className="icon-btn" disabled={disabled || busy} aria-busy={busy || undefined} data-testid={testId} title={name} aria-label={name} onClick={onClick}>
+    {busy ? <span className="spinner" aria-hidden="true" /> : <Icon name="restart" size={13} />}<span className="sr-only">{name}</span>
   </button>;
 }

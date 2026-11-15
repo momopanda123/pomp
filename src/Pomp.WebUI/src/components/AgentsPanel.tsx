@@ -17,7 +17,7 @@ import {
   type TeamScope,
 } from '../protocol';
 import type { SetupReply, SetupState } from '../setup';
-import { REPLY_TIMEOUT_MS, useSetupCommands } from '../setupCommands';
+import { REPLY_TIMEOUT_MS, type SetupCommands } from '../setupCommands';
 import { effectiveRoles, effectiveTeams } from '../teamsCache';
 import { AgentDialog } from './AgentDialog';
 import { AgentRulesView } from './AgentRulesView';
@@ -36,6 +36,7 @@ export function normalizeAgentsView(view: AgentsView): typeof agentsViews[number
 import { RoleModelPicker } from './RoleModelPicker';
 import { Icon } from './Icon';
 import { revealControls } from './RevealControls';
+import { ScopeChoice } from './tools/InPageDialog';
 import { ViewChips } from './tools/ViewChips';
 import { useViewChoice } from '../useViewChoice';
 import { usableKnowledge } from '../knowledge';
@@ -55,106 +56,48 @@ function validateSlug(slug: string, existingNames: string[] = [], builtinName = 
   return null;
 }
 
-interface TemplateDef {
-  key: string;
-  name: string;
-  titleKo: string;
-  titleEn: string;
-  jobKo: string;
-  jobEn: string;
-  descKo: string;
-  descEn: string;
-  instrKo: string;
-  instrEn: string;
-  tools: RoleTools;
-}
-
+type TemplateKey = 'architect' | 'implementer' | 'reviewer' | 'tester' | 'doc-writer' | 'explorer';
+/** A starting point for a new role; its texts are the `agents.template.<key>.*` entries of the localization table. */
+interface TemplateDef { key: TemplateKey; name: string; tools: RoleTools }
 const TEMPLATES: TemplateDef[] = [
-  {
-    key: 'architect',
-    name: 'architect',
-    titleKo: '설계자',
-    titleEn: 'Architect',
-    jobKo: '기능 아키텍처 및 인터페이스 설계',
-    jobEn: 'Architecture & interface design',
-    descKo: '요구사항을 분석하고 모듈 구조와 계약 인터페이스를 설계한다.',
-    descEn: 'Analyzes requirements and designs module structure and contracts.',
-    instrKo: '기존 아키텍처와 코딩 컨벤션을 준수하고, 모듈 경계와 공개 인터페이스를 명확히 정의하세요.',
-    instrEn: 'Follow existing architecture and conventions, clearly defining module boundaries.',
-    tools: 'readOnly',
-  },
-  {
-    key: 'implementer',
-    name: 'implementer',
-    titleKo: '구현자',
-    titleEn: 'Implementer',
-    jobKo: '코드 작성 및 리팩토링',
-    jobEn: 'Code implementation & refactoring',
-    descKo: '설계된 사양에 따라 깔끔하고 안전한 코드를 작성한다.',
-    descEn: 'Writes clean, safe code following the designed specifications.',
-    instrKo: '단일 책임 원칙을 준수하고, 오류 처리를 철저히 하며, 불필요한 의존성을 만들지 마세요.',
-    instrEn: 'Follow single responsibility, handle errors thoroughly, avoid unnecessary dependencies.',
-    tools: 'all',
-  },
-  {
-    key: 'reviewer',
-    name: 'reviewer-custom',
-    titleKo: '리뷰어',
-    titleEn: 'Reviewer',
-    jobKo: '변경 코드 리뷰',
-    jobEn: 'Code review',
-    descKo: '변경된 코드의 버그·예외 처리·보안 문제를 근거와 함께 찾는다. 코드는 바꾸지 않는다.',
-    descEn: 'Finds bugs, exception handling, and security issues in changed code. Does not edit code.',
-    instrKo: '코드를 직접 변경하지 말고, 문제가 있는 위치와 구체적인 개선안을 제시하세요.',
-    instrEn: 'Do not edit code directly; report issues with location and clear rationales.',
-    tools: 'readOnly',
-  },
-  {
-    key: 'tester',
-    name: 'tester',
-    titleKo: '테스터',
-    titleEn: 'Tester',
-    jobKo: '테스트 작성 및 검증',
-    jobEn: 'Testing & verification',
-    descKo: '단위 테스트 및 회귀 테스트 케이스를 작성하고 실행 결과를 검증한다.',
-    descEn: 'Writes unit/regression tests and verifies execution outcomes.',
-    instrKo: '경계 조건과 실패 케이스를 빠짐없이 검증하고, 재현 가능한 테스트 코드를 작성하세요.',
-    instrEn: 'Thoroughly test edge cases and failures, writing reproducible test code.',
-    tools: 'all',
-  },
-  {
-    key: 'doc-writer',
-    name: 'doc-writer',
-    titleKo: '문서 작성자',
-    titleEn: 'Doc writer',
-    jobKo: '문서 및 주석 작성',
-    jobEn: 'Documentation',
-    descKo: '기능 사양서, README, API 문서를 명확하고 일관되게 정리한다.',
-    descEn: 'Documents specifications, READMEs, and API docs clearly and consistently.',
-    instrKo: '간결하고 명확한 문장을 사용하며, 사용자 및 개발자 관점의 예제를 포함하세요.',
-    instrEn: 'Use concise, clear language and include practical examples.',
-    tools: 'all',
-  },
-  {
-    key: 'explorer',
-    name: 'explorer',
-    titleKo: '탐색자',
-    titleEn: 'Explorer',
-    jobKo: '코드베이스 조사',
-    jobEn: 'Codebase exploration',
-    descKo: '코드베이스의 구조와 참조 관계를 빠르게 파악한다.',
-    descEn: 'Quickly analyzes codebase structure and reference relationships.',
-    instrKo: '읽기 전용 도구만 사용하고, 필요한 핵심 파일과 심볼 위치를 신속하게 요약 보고하세요.',
-    instrEn: 'Use read-only tools and summarize key files and symbol locations quickly.',
-    tools: 'readOnly',
-  },
+  { key: 'architect', name: 'architect', tools: 'readOnly' },
+  { key: 'implementer', name: 'implementer', tools: 'all' },
+  { key: 'reviewer', name: 'reviewer-custom', tools: 'readOnly' },
+  { key: 'tester', name: 'tester', tools: 'all' },
+  { key: 'doc-writer', name: 'doc-writer', tools: 'all' },
+  { key: 'explorer', name: 'explorer', tools: 'readOnly' },
 ];
+
+/**
+ * The longest text the host saves per field (AgentRoster.cs). A file edited outside the page can hold more: the editors then name the
+ * field and refuse to save instead of cutting the text off.
+ */
+const ROLE_LIMITS = { title: 40, job: 80, description: 1000, instructions: 24000 } as const;
+const TEAM_LIMITS = { title: 40, goal: 400, instructions: 8000 } as const;
+type RoleTextField = keyof typeof ROLE_LIMITS;
+type TeamTextField = keyof typeof TEAM_LIMITS;
+const ROLE_FIELD_IDS: Record<RoleTextField, string> = { title: 'role-title-input', job: 'role-job-input', description: 'role-desc-input', instructions: 'role-instr-input' };
+const TEAM_FIELD_IDS: Record<TeamTextField, string> = { title: 'team-title-input', goal: 'team-goal-input', instructions: 'team-instr-input' };
+/** Save was pressed while a field is too long: the keyboard goes to it and its message comes into view. */
+function showField(inputId: string): void {
+  const input = document.getElementById(inputId);
+  input?.focus({ preventScroll: true });
+  input?.parentElement?.scrollIntoView?.({ block: 'nearest' });
+}
+/** Under a field: its text is longer than can be saved. Shown as soon as that is so, also for a text that was already too long when the editor opened. */
+function TooLong({ label, length, max, testId }: { label: string; length: number; max: number; testId: string }) {
+  const t = useT();
+  if (length <= max) return null;
+  return <span className="field-error" role="alert" data-testid={testId}>{t('agents.fieldTooLong', { field: label, max: max.toLocaleString(), count: length.toLocaleString() })}</span>;
+}
 
 interface AgentsPanelProps {
   agents: AgentsStatePayload | null;
   replies: AgentsReplyPayload[];
   setup: SetupState | null;
   setupReplies: SetupReply[];
+  /** The setup commands of the Accounts, Remote and Agents pages (one for all, created in `App`). */
+  cmd: SetupCommands;
   locale: string;
   connected: boolean;
   inert: boolean;
@@ -172,7 +115,7 @@ interface AgentsPanelProps {
   onShowPermissions: () => void;
 }
 
-export function AgentsPanel({ agents, replies, setup, setupReplies, locale, connected, inert, onSelectTarget, sessionId, view: requestedView, onViewChange, workspaceKey, busy, newSessionPending, onShowPermissions }: AgentsPanelProps) {
+export function AgentsPanel({ agents, replies, setup, setupReplies, cmd, locale, connected, inert, onSelectTarget, sessionId, view: requestedView, onViewChange, workspaceKey, busy, newSessionPending, onShowPermissions }: AgentsPanelProps) {
   const t = useT();
   const [automationCount, setAutomationCount] = useState<number | undefined>(undefined);
   const advisors = useAdvisorsController({ root: workspaceKey, sessionId, connected });
@@ -180,7 +123,7 @@ export function AgentsPanel({ agents, replies, setup, setupReplies, locale, conn
   // POMP's own role heads the roles list. Running: the chip counts what still runs; the view is empty only when nothing ran.
   const counts = { roles: agents ? agents.roles.length + 1 : 0, teams: agents?.teams.length ?? 0, advisors: advisorCount(advisors.state), hooks: automationCount, running: observed.jobs.length };
   const [view, chooseView] = useViewChoice({ views: agentsViews, requested: normalizeAgentsView(requestedView), active: !inert, scope: (workspaceKey ?? '') + ':' + (sessionId ?? ''), count: item => counts[item], onChange: onViewChange });
-  const { post: postSetup, feedback: setupFeedback } = useSetupCommands(setupReplies);
+  const { post: postSetup, feedback: setupFeedback } = cmd;
   const modelsRequested = useRef(false);
   const modelsAnswer = setupFeedback('models');
   useEffect(() => {
@@ -249,11 +192,13 @@ export function AgentsPanel({ agents, replies, setup, setupReplies, locale, conn
       } else if (pending.action === 'builtin') {
         setOpenPending(false);
         if (!rep.ok || !rep.role) setActionError(rep.error || t('agents.saveFailed'));
-        else {
+        else if (editingTeam === null && exportingTeam === null && !importingTeam && deleteTarget === null && avatarRole === null && !editingMain) {
           // Editing a built-in role writes a role file of its name, which the engine then uses in its place.
+          // The answer can take a while: a role editor that is open by now keeps its own role, and no second dialog opens over another one.
           const role = pending.role;
-          setEditingRole({ isNew: true, role: { scope: 'project', name: role.name, nameLocked: true, builtin: true, title: roleTitle(role, t), job: roleJob(role, t),
-            description: rep.role.description, instructions: rep.role.instructions, model: rep.role.model, thinkingLevel: rep.role.thinkingLevel, tools: rep.role.tools } as Partial<Role> & { scope: RoleScope } });
+          const builtin = { isNew: true, role: { scope: 'project', name: role.name, nameLocked: true, builtin: true, title: roleTitle(role, t), job: roleJob(role, t),
+            description: rep.role.description, instructions: rep.role.instructions, model: rep.role.model, thinkingLevel: rep.role.thinkingLevel, tools: rep.role.tools } as Partial<Role> & { scope: RoleScope } };
+          setEditingRole(current => current ?? builtin);
         }
       } else if (pending.action === 'delete') {
         setDeletePending(false);
@@ -349,7 +294,7 @@ export function AgentsPanel({ agents, replies, setup, setupReplies, locale, conn
       )}
 
       <section id="agents-teams" role="tabpanel" aria-labelledby="agents-tab-teams" className="agents-section" data-testid="agents-teams-section" hidden={view !== 'teams'}>
-        <TeamsCard agents={agents} teams={teams} effective={effective} locale={locale} connected={connected} inert={inert}
+        <TeamsCard agents={agents} teams={teams} effective={effective} connected={connected} inert={inert}
           editorOpen={editingTeam !== null} exportOpen={exportingTeam !== null} importOpen={importingTeam}
           onNew={() => setEditingTeam({ isNew: true, team: { scope: 'project', mode: 'lead', members: [], membersOnly: true, instructions: '' } })}
           onImport={() => setImportingTeam(true)}
@@ -360,8 +305,8 @@ export function AgentsPanel({ agents, replies, setup, setupReplies, locale, conn
       </section>
 
       <section id="agents-roles" role="tabpanel" aria-labelledby="agents-tab-roles" className="agents-section" data-testid="agents-roles-section" hidden={view !== 'roles'}>
-        <RolesCard roles={agents?.roles ?? []} hidden={agents?.rolesHidden} effective={effective} main={agents?.main} setup={setup} locale={locale} connected={connected} inert={inert} busy={busy}
-          dialogOpen={editingRole !== null || avatarRole !== null || editingMain} openPending={openPending} modelUnavailable={configuredModelUnavailable}
+        <RolesCard roles={agents?.roles ?? []} hidden={agents?.rolesHidden} effective={effective} main={agents?.main} setup={setup} connected={connected} inert={inert} busy={busy}
+          dialogOpen={editingRole !== null || avatarRole !== null || editingMain || openPending} openPending={openPending} modelUnavailable={configuredModelUnavailable}
           onEditMain={() => setEditingMain(true)}
           onNew={() => setEditingRole({ isNew: true, role: { scope: 'project', tools: 'all', instructions: '' } })}
           onMessage={role => onSelectTarget({ kind: 'agent', id: role.name })}
@@ -372,7 +317,7 @@ export function AgentsPanel({ agents, replies, setup, setupReplies, locale, conn
               // The built-in instructions live in the engine and are not copied.
               name: `${role.name}-copy`,
               nameLocked: true,
-              title: locale.startsWith('ko') ? `${roleTitle(role, t)} (사본)` : `${roleTitle(role, t)} (copy)`,
+              title: t('agents.copyTitle', { title: roleTitle(role, t) }),
               job: roleJob(role, t),
               description: roleDescription(role, t),
               model: role.model,
@@ -408,7 +353,6 @@ export function AgentsPanel({ agents, replies, setup, setupReplies, locale, conn
           setupReplies={setupReplies}
           disabled={!connected || inert}
           existingNames={agents?.roles.map(role => `${role.scope}:${role.name}`) || []}
-          locale={locale}
           replies={replies}
           onClose={() => setEditingRole(null)}
           onAssignFailed={setActionError}
@@ -522,7 +466,6 @@ function RoleEditorDialog({
   setupReplies,
   disabled,
   existingNames,
-  locale,
   replies,
   onClose,
   onAssignFailed,
@@ -533,14 +476,12 @@ function RoleEditorDialog({
   setupReplies: SetupReply[];
   disabled: boolean;
   existingNames: string[];
-  locale: string;
   replies: AgentsReplyPayload[];
   onClose: () => void;
   /** The role was saved, but its knowledge could not be assigned. */
   onAssignFailed: (message: string) => void;
 }) {
   const t = useT();
-  const ko = locale.startsWith('ko');
   const [scope, setScope] = useState<RoleScope>(editingRole.role.scope || 'project');
   const [title, setTitle] = useState(editingRole.role.title || '');
   const [name, setName] = useState(editingRole.role.name || '');
@@ -608,12 +549,12 @@ function RoleEditorDialog({
   };
 
   const applyTemplate = (tpl: TemplateDef) => {
-    setTitle(ko ? tpl.titleKo : tpl.titleEn);
+    setTitle(t(`agents.template.${tpl.key}.title`));
     setName(tpl.name);
     setNameEdited(true);
-    setJob(ko ? tpl.jobKo : tpl.jobEn);
-    setDescription(ko ? tpl.descKo : tpl.descEn);
-    setInstructions(ko ? tpl.instrKo : tpl.instrEn);
+    setJob(t(`agents.template.${tpl.key}.job`));
+    setDescription(t(`agents.template.${tpl.key}.desc`));
+    setInstructions(t(`agents.template.${tpl.key}.instr`));
     setTools(tpl.tools);
   };
 
@@ -621,18 +562,22 @@ function RoleEditorDialog({
     const names = existingNames.filter(value => value.startsWith(`${scope}:`)).map(value => value.slice(scope.length + 1));
     return validateSlug(name, editingRole.isNew ? names : names.filter(value => value !== editingRole.role.name), builtinEdit || !editingRole.isNew);
   }, [name, scope, existingNames, editingRole, builtinEdit]);
-  const descriptionError = !description.trim() || description.length > 1000;
-  const invalid = !!nameError || !title.trim() || descriptionError || (modelType === 'specific' && !specificModel) || (tools === 'custom' && !ownTools) || disabled;
+  const descriptionError = !description.trim();
+  // What a save would write (trimmed), against the host's limits: text over a limit is never cut off, the save waits until it fits.
+  const lengths: Record<RoleTextField, number> = { title: title.trim().length, job: job.trim().length, description: description.trim().length, instructions: instructions.trim().length };
+  const tooLong = (Object.keys(ROLE_LIMITS) as RoleTextField[]).find(field => lengths[field] > ROLE_LIMITS[field]);
+  const invalid = !!nameError || !title.trim() || descriptionError || !!tooLong || (modelType === 'specific' && !specificModel) || (tools === 'custom' && !ownTools) || disabled;
   // Save was pressed: from then on empty required fields say so (not while the role is being written).
   const [attempted, setAttempted] = useState(false);
   const empty = !title.trim() || nameError === 'slugRequired' || !description.trim();
   const shownNameError = nameError && (nameError !== 'slugRequired' || attempted) ? nameError : null;
-  const shownDescriptionError = descriptionError && (description.trim() !== '' || attempted);
-  // Save stays pressable while only empty fields stand in the way, so pressing it can name them.
-  const blocked = (!!nameError && nameError !== 'slugRequired') || description.length > 1000 || (modelType === 'specific' && !specificModel) || (tools === 'custom' && !ownTools) || disabled;
+  const shownDescriptionError = descriptionError && attempted;
+  // Save stays pressable while only empty or too long fields stand in the way, so pressing it can name them.
+  const blocked = (!!nameError && nameError !== 'slugRequired') || (modelType === 'specific' && !specificModel) || (tools === 'custom' && !ownTools) || disabled;
 
   const save = () => {
     if (empty) setAttempted(true);
+    if (tooLong) showField(ROLE_FIELD_IDS[tooLong]);
     if (invalid || saving) return;
     setSaving(true);
     setError(null);
@@ -641,10 +586,10 @@ function RoleEditorDialog({
     const modelValue = modelType === 'same' ? undefined : modelType === 'smol' ? '@smol' : modelType === 'alias' ? modelAlias : specificModel;
     const rolePayload: Role & { builtin?: boolean } = {
       name: name.trim(),
-      title: title.trim().slice(0, 40),
-      job: job.trim().slice(0, 80),
-      description: description.trim().slice(0, 1000),
-      instructions: instructions.trim().slice(0, 24000),
+      title: title.trim(),
+      job: job.trim(),
+      description: description.trim(),
+      instructions: instructions.trim(),
       model: modelValue,
       thinkingLevel: thinkingLevel === 'auto' ? undefined : thinkingLevel,
       tools,
@@ -666,10 +611,10 @@ function RoleEditorDialog({
   };
 
   return (
-    <AgentDialog testId="role-editor" className="editor-dialog" labelledBy="role-editor-title" returnFocus={returnFocus} onClose={() => { if (!saving) onClose(); }}>
+    <AgentDialog testId="role-editor" labelledBy="role-editor-title" returnFocus={returnFocus} onClose={() => { if (!saving) onClose(); }}>
         <div className="dialog-head">
           <h4 id="role-editor-title">{editingRole.isNew && !builtinEdit ? t('agents.createRole') : t('agents.editRole')}</h4>
-          <button type="button" className="icon-btn" disabled={saving} aria-label={t('agents.close')} onClick={onClose}><Icon name="x" size={13} /></button>
+          <IconButton icon="x" label={t('agents.close')} disabled={saving} onClick={onClose} />
         </div>
 
         {editingRole.isNew && !builtinEdit && (
@@ -683,7 +628,7 @@ function RoleEditorDialog({
                 data-testid={`template-${tpl.key}`}
                 onClick={() => applyTemplate(tpl)}
               >
-                {ko ? tpl.titleKo : tpl.titleEn}
+                {t(`agents.template.${tpl.key}.title`)}
               </button>
             ))}
           </div>
@@ -703,12 +648,9 @@ function RoleEditorDialog({
 
         <div className="dialog-form">
           {editingRole.isNew && (
-            <div className="form-field">
-              <label htmlFor="role-scope-select">{t('agents.scopeLabel')}</label>
-              <select id="role-scope-select" value={scope} onChange={(e) => setScope(e.target.value as RoleScope)}>
-                <option value="project">{t('agents.scope.project')}</option>
-                <option value="user">{t('agents.scope.user')}</option>
-              </select>
+            <div className="form-field" role="group" aria-labelledby="role-scope-label">
+              <label id="role-scope-label">{t('agents.scopeLabel')}</label>
+              <ScopeChoice t={t} label={t('agents.scopeLabel')} value={scope === 'user' ? 'user' : 'project'} onChange={setScope} testId="role-scope" />
             </div>
           )}
 
@@ -718,12 +660,13 @@ function RoleEditorDialog({
               id="role-title-input"
               data-testid="role-title-input"
               type="text"
-              maxLength={40}
+              maxLength={ROLE_LIMITS.title}
               value={title}
               onChange={(e) => handleTitleChange(e.target.value)}
-              aria-invalid={attempted && !title.trim()}
+              aria-invalid={(attempted && !title.trim()) || lengths.title > ROLE_LIMITS.title}
             />
-            {attempted && !title.trim() && <span className="field-error" data-testid="role-title-error">{t('agents.titleRequired')}</span>}
+            {attempted && !title.trim() && <span className="field-error" role="alert" data-testid="role-title-error">{t('agents.titleRequired')}</span>}
+            <TooLong label={t('agents.titleLabel')} length={lengths.title} max={ROLE_LIMITS.title} testId="role-title-length-error" />
           </div>
 
           <div className="form-field">
@@ -741,7 +684,7 @@ function RoleEditorDialog({
               }}
             />
             {shownNameError && (
-              <span className="field-error" data-testid="role-name-error">
+              <span className="field-error" role="alert" data-testid="role-name-error">
                 {t(`agents.slugErrors.${shownNameError}` as MessageKey)}
               </span>
             )}
@@ -753,34 +696,39 @@ function RoleEditorDialog({
               id="role-job-input"
               data-testid="role-job-input"
               type="text"
-              maxLength={80}
+              maxLength={ROLE_LIMITS.job}
               value={job}
               onChange={(e) => setJob(e.target.value)}
+              aria-invalid={lengths.job > ROLE_LIMITS.job}
             />
+            <TooLong label={t('agents.jobLabel')} length={lengths.job} max={ROLE_LIMITS.job} testId="role-job-length-error" />
           </div>
 
           <div className="form-field">
             <label htmlFor="role-desc-input">{t('agents.descLabel')}</label>
             <textarea
               id="role-desc-input"
-              maxLength={1000}
+              maxLength={ROLE_LIMITS.description}
               rows={2}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              required aria-invalid={shownDescriptionError}
+              required aria-invalid={shownDescriptionError || lengths.description > ROLE_LIMITS.description}
             />
-            {shownDescriptionError && <span className="field-error" data-testid="role-description-error">{t('agents.descriptionRequired')}</span>}
+            {shownDescriptionError && <span className="field-error" role="alert" data-testid="role-description-error">{t('agents.descriptionRequired')}</span>}
+            <TooLong label={t('agents.descLabel')} length={lengths.description} max={ROLE_LIMITS.description} testId="role-description-length-error" />
           </div>
 
           <div className="form-field">
             <label htmlFor="role-instr-input">{t('agents.instrLabel')}</label>
             <textarea
               id="role-instr-input"
-              maxLength={24000}
+              maxLength={ROLE_LIMITS.instructions}
               rows={4}
               value={instructions}
               onChange={(e) => setInstructions(e.target.value)}
+              aria-invalid={lengths.instructions > ROLE_LIMITS.instructions}
             />
+            <TooLong label={t('agents.instrLabel')} length={lengths.instructions} max={ROLE_LIMITS.instructions} testId="role-instructions-length-error" />
           </div>
 
           <div className="form-field">
@@ -842,7 +790,7 @@ function RoleEditorDialog({
             disabled={blocked || saving}
             onClick={save}
           >
-            {saving ? <span className="spinner" /> : t('agents.save')}
+            {saving ? <span className="spinner" role="status" aria-label={t('tools.pending')} /> : t('agents.save')}
           </button>
         </div>
     </AgentDialog>
@@ -991,20 +939,24 @@ function TeamEditorDialog({
   const shownMembersError = membersError && (!tooFew || attempted) ? membersError : null;
   const shownIdError = idError && (idError !== 'slugRequired' || attempted) ? idError : null;
   const membersPaged = usePaged(members, editingTeam.team.id ?? '');
+  // What a save would write (trimmed), against the host's limits: text over a limit is never cut off, the save waits until it fits.
+  const lengths: Record<TeamTextField, number> = { title: title.trim().length, goal: goal.trim().length, instructions: instructions.trim().length };
+  const tooLong = (Object.keys(TEAM_LIMITS) as TeamTextField[]).find(field => lengths[field] > TEAM_LIMITS[field]);
   const save = () => {
     if (tooFew || !title.trim() || idError === 'slugRequired') setAttempted(true);
-    if (idError || membersError || !title.trim() || saving || disabled) return;
+    if (tooLong) showField(TEAM_FIELD_IDS[tooLong]);
+    if (idError || membersError || !title.trim() || tooLong || saving || disabled) return;
     setSaving(true);
     setError(null);
     setConflict(false);
 
     const teamPayload: Team = {
       id: id.trim(),
-      title: title.trim().slice(0, 40),
-      goal: goal.trim().slice(0, 400),
+      title: title.trim(),
+      goal: goal.trim(),
       members,
       mode,
-      instructions: instructions.trim().slice(0, 8000),
+      instructions: instructions.trim(),
       membersOnly,
       isolation,
       scope: editingTeam.isNew ? scope : editingTeam.team.scope,
@@ -1027,10 +979,10 @@ function TeamEditorDialog({
   const availableRolesToAdd = useMemo(() => roles.filter((r) => !members.includes(r.name) && !r.error), [roles, members]);
 
   return (
-    <AgentDialog testId="team-editor" className="editor-dialog" labelledBy="team-editor-title" returnFocus={returnFocus} onClose={() => { if (!saving) onClose(); }}>
+    <AgentDialog testId="team-editor" labelledBy="team-editor-title" returnFocus={returnFocus} onClose={() => { if (!saving) onClose(); }}>
         <div className="dialog-head">
           <h4 id="team-editor-title">{editingTeam.isNew ? t('agents.createTeam') : t('agents.editTeam')}</h4>
-          <button type="button" className="icon-btn" disabled={saving} aria-label={t('agents.close')} onClick={onClose}><Icon name="x" size={13} /></button>
+          <IconButton icon="x" label={t('agents.close')} disabled={saving} onClick={onClose} />
         </div>
 
         {error && (
@@ -1047,12 +999,9 @@ function TeamEditorDialog({
 
         <div className="dialog-form">
           {editingTeam.isNew && (
-            <div className="form-field">
-              <label htmlFor="team-scope-select">{t('agents.scopeLabel')}</label>
-              <select id="team-scope-select" value={scope} onChange={(e) => setScope(e.target.value as TeamScope)}>
-                <option value="project">{t('agents.scope.project')}</option>
-                <option value="user">{t('agents.scope.user')}</option>
-              </select>
+            <div className="form-field" role="group" aria-labelledby="team-scope-label">
+              <label id="team-scope-label">{t('agents.scopeLabel')}</label>
+              <ScopeChoice t={t} label={t('agents.scopeLabel')} value={scope} onChange={setScope} testId="team-scope" />
             </div>
           )}
 
@@ -1062,12 +1011,13 @@ function TeamEditorDialog({
               id="team-title-input"
               data-testid="team-title-input"
               type="text"
-              maxLength={40}
+              maxLength={TEAM_LIMITS.title}
               value={title}
               onChange={(e) => handleTitleChange(e.target.value)}
-              aria-invalid={attempted && !title.trim()}
+              aria-invalid={(attempted && !title.trim()) || lengths.title > TEAM_LIMITS.title}
             />
-            {attempted && !title.trim() && <span className="field-error" data-testid="team-title-error">{t('agents.titleRequired')}</span>}
+            {attempted && !title.trim() && <span className="field-error" role="alert" data-testid="team-title-error">{t('agents.titleRequired')}</span>}
+            <TooLong label={t('agents.titleLabel')} length={lengths.title} max={TEAM_LIMITS.title} testId="team-title-length-error" />
           </div>
 
           <div className="form-field">
@@ -1085,7 +1035,7 @@ function TeamEditorDialog({
               }}
             />
             {shownIdError && (
-              <span className="field-error" data-testid="team-id-error">
+              <span className="field-error" role="alert" data-testid="team-id-error">
                 {t(`agents.slugErrors.${shownIdError}` as MessageKey)}
               </span>
             )}
@@ -1095,18 +1045,20 @@ function TeamEditorDialog({
             <label htmlFor="team-goal-input">{t('agents.goalLabel')}</label>
             <textarea
               id="team-goal-input"
-              maxLength={400}
+              maxLength={TEAM_LIMITS.goal}
               rows={2}
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
+              aria-invalid={lengths.goal > TEAM_LIMITS.goal}
             />
+            <TooLong label={t('agents.goalLabel')} length={lengths.goal} max={TEAM_LIMITS.goal} testId="team-goal-length-error" />
           </div>
 
           {/* Members (two or more, no upper limit), in order, a page at a time */}
-          <div className="form-field">
-            <label>{t('agents.membersLabel')}</label>
+          <div className="form-field" role="group" aria-labelledby="team-members-label">
+            <label id="team-members-label">{t('agents.membersLabel')}</label>
             {shownMembersError && (
-              <span className="field-error" data-testid="team-members-error">
+              <span className="field-error" role="alert" data-testid="team-members-error">
                 {shownMembersError}
               </span>
             )}
@@ -1120,34 +1072,9 @@ function TeamEditorDialog({
                     <span className="member-title">{revealControls(memberTitle)}</span>
                     <span className="member-slug">({memName})</span>
                     <div className="member-controls">
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        data-testid={`team-member-up-${memName}`}
-                        disabled={idx === 0}
-                        onClick={() => moveMember(idx, -1)}
-                        title={t('agents.moveUp')}
-                      >
-                        <Icon name="arrowUp" size={11} />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        data-testid={`team-member-down-${memName}`}
-                        disabled={idx === members.length - 1}
-                        onClick={() => moveMember(idx, 1)}
-                        title={t('agents.moveDown')}
-                      >
-                        <Icon name="arrowDown" size={11} />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn danger"
-                        onClick={() => removeMember(idx)}
-                        title={t('dialog.cancel')}
-                      >
-                        <Icon name="x" size={11} />
-                      </button>
+                      <IconButton icon="arrowUp" label={t('agents.moveUp')} testId={`team-member-up-${memName}`} disabled={idx === 0} onClick={() => moveMember(idx, -1)} />
+                      <IconButton icon="arrowDown" label={t('agents.moveDown')} testId={`team-member-down-${memName}`} disabled={idx === members.length - 1} onClick={() => moveMember(idx, 1)} />
+                      <IconButton icon="x" tone="danger" label={t('agents.removeMember')} testId={`team-member-remove-${memName}`} onClick={() => removeMember(idx)} />
                     </div>
                   </div>
                 );
@@ -1171,11 +1098,13 @@ function TeamEditorDialog({
             <label htmlFor="team-instr-input">{t('agents.instrLabel')}</label>
             <textarea
               id="team-instr-input"
-              maxLength={8000}
+              maxLength={TEAM_LIMITS.instructions}
               rows={3}
               value={instructions}
               onChange={(e) => setInstructions(e.target.value)}
+              aria-invalid={lengths.instructions > TEAM_LIMITS.instructions}
             />
+            <TooLong label={t('agents.instrLabel')} length={lengths.instructions} max={TEAM_LIMITS.instructions} testId="team-instructions-length-error" />
           </div>
 
           <div className="form-field switch-field">
@@ -1195,7 +1124,7 @@ function TeamEditorDialog({
             disabled={(!!idError && idError !== 'slugRequired') || (!!membersError && !tooFew) || saving || disabled}
             onClick={save}
           >
-            {saving ? <span className="spinner" /> : t('agents.save')}
+            {saving ? <span className="spinner" role="status" aria-label={t('tools.pending')} /> : t('agents.save')}
           </button>
         </div>
     </AgentDialog>
@@ -1289,19 +1218,19 @@ function TeamExportDialog({
   };
 
   return (
-    <AgentDialog testId="team-export-dialog" className="editor-dialog" labelledBy="team-export-title" returnFocus={returnFocus} onClose={() => { if (!pending) onClose(); }}>
+    <AgentDialog testId="team-export-dialog" labelledBy="team-export-title" returnFocus={returnFocus} onClose={() => { if (!pending) onClose(); }}>
       <div className="dialog-head">
         <h4 id="team-export-title">{t('agents.exportTitle')}</h4>
-        <button type="button" className="icon-btn" disabled={pending} aria-label={t('agents.close')} onClick={onClose}><Icon name="x" size={13} /></button>
+        <IconButton icon="x" label={t('agents.close')} disabled={pending} onClick={onClose} />
       </div>
       {error && <div className="dialog-error" role="alert"><Icon name="error" size={12} /><span>{revealControls(error)}</span></div>}
       {template === null ? (
-        <div className="dialog-form dialog-loading">{pending ? <span className="spinner" role="status" /> : null}</div>
+        <div className="dialog-form dialog-loading">{pending ? <span className="spinner" role="status" aria-label={t('tools.pending')} /> : null}</div>
       ) : (
         <>
           <div className="dialog-form">
             <div className="form-field">
-              <textarea data-testid="team-export-text" rows={12} readOnly value={template} onFocus={(e) => e.target.select()} />
+              <textarea data-testid="team-export-text" aria-labelledby="team-export-title" rows={12} readOnly value={template} onFocus={(e) => e.target.select()} />
             </div>
           </div>
           {copied && <p className="dialog-status" role="status" data-testid="team-export-copied">{t('agents.templateCopied')}</p>}
@@ -1398,24 +1327,21 @@ function TeamImportDialog({
     preview.roles.some((r) => r.status === 'conflict');
 
   return (
-    <AgentDialog testId="team-import-dialog" className="editor-dialog" labelledBy="team-import-title" returnFocus={returnFocus} onClose={() => { if (!pending) onClose(); }}>
+    <AgentDialog testId="team-import-dialog" labelledBy="team-import-title" returnFocus={returnFocus} onClose={() => { if (!pending) onClose(); }}>
       <div className="dialog-head">
         <h4 id="team-import-title">{t('agents.importTitle')}</h4>
-        <button type="button" className="icon-btn" disabled={pending} aria-label={t('agents.close')} onClick={onClose}><Icon name="x" size={13} /></button>
+        <IconButton icon="x" label={t('agents.close')} disabled={pending} onClick={onClose} />
       </div>
       {error && <div className="dialog-error" role="alert"><Icon name="error" size={12} /><span>{revealControls(error)}</span></div>}
       <div className="dialog-form">
         <div className="form-field">
           <label htmlFor="team-import-text">{t('agents.templatePasteHint')}</label>
           <textarea id="team-import-text" data-testid="team-import-text" rows={8} value={text} onChange={(e) => { setText(e.target.value); setPreview(null); }} />
-          {textError && text.trim() && <span className="field-error" data-testid="team-import-text-error">{textError}</span>}
+          {textError && text.trim() && <span className="field-error" role="alert" data-testid="team-import-text-error">{textError}</span>}
         </div>
-        <div className="form-field">
-          <label htmlFor="team-import-scope">{t('agents.templateScope')}</label>
-          <select id="team-import-scope" data-testid="team-import-scope" value={scope} onChange={(e) => { setScope(e.target.value as TeamScope); setPreview(null); }}>
-            <option value="project">{t('agents.scope.project')}</option>
-            <option value="user">{t('agents.scope.user')}</option>
-          </select>
+        <div className="form-field" role="group" aria-labelledby="team-import-scope-label">
+          <label id="team-import-scope-label">{t('agents.templateScope')}</label>
+          <ScopeChoice t={t} label={t('agents.templateScope')} value={scope} onChange={next => { setScope(next); setPreview(null); }} testId="team-import-scope" />
         </div>
         {preview && (
           <div className="form-field template-preview" data-testid="team-import-preview-result">
@@ -1438,7 +1364,7 @@ function TeamImportDialog({
                 {preview.problems.map((p, i) => <p key={i}>{revealControls(p)}</p>)}
               </div>
             )}
-            {blocked && <span className="field-error" data-testid="team-import-blocked">{t('agents.importBlocked')}</span>}
+            {blocked && <span className="field-error" role="alert" data-testid="team-import-blocked">{t('agents.importBlocked')}</span>}
           </div>
         )}
       </div>
@@ -1446,7 +1372,7 @@ function TeamImportDialog({
         <button type="button" className="btn subtle" disabled={pending} onClick={onClose}>{t('dialog.cancel')}</button>
         <button type="button" className="btn subtle" data-testid="team-import-preview" disabled={pending || !!textError || disabled} onClick={doPreview}>{t('agents.templatePreview')}</button>
         <button type="button" className="btn primary" data-testid="team-import-confirm" disabled={pending || blocked || disabled} onClick={doImport}>
-          {importing ? <span className="spinner" /> : t('agents.templateImport')}
+          {importing ? <span className="spinner" role="status" aria-label={t('tools.pending')} /> : t('agents.templateImport')}
         </button>
       </div>
     </AgentDialog>

@@ -27,16 +27,27 @@ namespace Pomp.Hosting
         /// </summary>
         private async Task RestoreTranscriptAsync(OmpConnection connection, CancellationToken token)
         {
+            string root; string? sessionId;
+            lock (_stateLock) { root = _workingDirectory; sessionId = _info.SessionId; }
+            void CheckCurrent()
+            {
+                token.ThrowIfCancellationRequested();
+                lock (_stateLock)
+                    if (!ReferenceEquals(connection, _epochConnection) || root != _workingDirectory || sessionId != _info.SessionId)
+                        throw new OperationCanceledException(token);
+            }
+            CheckCurrent();
             var response = await connection.SendCommandAsync(new JObject { ["type"] = "get_messages" }, TimeSpan.FromSeconds(20), token).ConfigureAwait(false);
+            CheckCurrent();
             if (!response.Success || !(response.Data?["messages"] is JArray all))
             {
                 PostNotice("warning", SetupText.Get("이전 대화 내용을 불러오지 못했어요.", "The earlier conversation could not be shown here."));
-                return;
+                throw new InvalidOperationException(response.Error ?? "Could not read the conversation transcript.");
             }
 
-            string root;
-            lock (_stateLock) root = _workingDirectory;
-            var shown = new List<(string Role, string Text, ChatEditorContext? EditorContext, ChatAdvisorNotesPayload? Notes)>();
+            var shown = new List<(string Role, string Text, ChatEditorContext? EditorContext, ChatAdvisorNotesPayload? Notes, object? Relay)>();
+            // What this conversation sent to other agents and teams, and how it ended ("pomp-relay" custom messages, PompSession.Relay.cs).
+            var relaySent = new HashSet<string>(StringComparer.Ordinal); var relayResults = new Dictionary<string, ChatRelayResultPayload>(StringComparer.Ordinal);
             foreach (var message in all.OfType<JObject>())
             {
                 var role = message.GetString("role");
@@ -44,7 +55,16 @@ namespace Pomp.Hosting
                 {
                     // The notes advisors gave, where they came in the conversation.
                     var notes = AdvisorNotesPayload(message);
-                    if (notes.Notes.Count > 0) shown.Add(("advisor", string.Empty, null, notes));
+                    if (notes.Notes.Count > 0) shown.Add(("advisor", string.Empty, null, notes, null));
+                    continue;
+                }
+
+                if (role == "custom" && message.GetString("customType") == RelayCustomType)
+                {
+                    // Each once, where the engine has it: a record written twice (an unconfirmed write, sent again) is one entry.
+                    var details = message["details"] as JObject;
+                    if (RelaySentFromRecord(details) is ChatRelaySentPayload sent) { if (relaySent.Add(sent.RelayId)) shown.Add(("relay", string.Empty, null, null, sent)); }
+                    else if (RelayResultFromRecord(details) is ChatRelayResultPayload result && !relayResults.ContainsKey(result.RelayId)) { relayResults[result.RelayId] = result; shown.Add(("relay", string.Empty, null, null, result)); }
                     continue;
                 }
 
@@ -62,29 +82,47 @@ namespace Pomp.Hosting
 
                 if (text.Length > 0)
                 {
-                    shown.Add((role!, text.Length > RestoredTextLimit ? text.Substring(0, RestoredTextLimit) : text, editorContext, null));
+                    shown.Add((role!, text.Length > RestoredTextLimit ? text.Substring(0, RestoredTextLimit) : text, editorContext, null, null));
                 }
             }
 
             if (shown.Count == 0)
             {
+                CheckCurrent();
+                PostUnsavedRelay(sessionId, relaySent, relayResults.Keys);
                 return;
             }
 
             var skipped = Math.Max(0, shown.Count - RestoredMessageLimit);
-            token.ThrowIfCancellationRequested();
+            CheckCurrent();
             PostNotice("info", skipped > 0
                 ? SetupText.Get("이전 대화의 최근 메시지 " + RestoredMessageLimit + "개를 다시 표시했어요 (텍스트만).", "Showing the last " + RestoredMessageLimit + " messages of this conversation (text only).")
                 : SetupText.Get("이전 대화 내용을 다시 표시했어요 (텍스트만).", "Showing this conversation again (text only)."));
 
             string? openPrompt = null;
             var index = 0;
-            foreach (var (role, text, editorContext, notes) in shown.Skip(skipped))
+            foreach (var (role, text, editorContext, notes, relay) in shown.Skip(skipped))
             {
+                CheckCurrent();
                 index++;
                 if (notes != null)
                 {
                     _ui.Post(UiMessageTypes.ChatAdvisorNotes, notes);
+                    continue;
+                }
+
+                if (relay is ChatRelaySentPayload sent)
+                {
+                    // Ended: the kept outcome. Still on its way in this window: where it stands now. Else its outcome was never recorded.
+                    if (relayResults.TryGetValue(sent.RelayId, out var ended)) { sent.Status = ended.Status; sent.SessionId = ended.SessionId; }
+                    else ApplyLiveRelayState(sent);
+                    _ui.Post(UiMessageTypes.ChatRelaySent, sent);
+                    continue;
+                }
+
+                if (relay is ChatRelayResultPayload outcome)
+                {
+                    _ui.Post(UiMessageTypes.ChatRelayResult, outcome);
                     continue;
                 }
 
@@ -115,8 +153,23 @@ namespace Pomp.Hosting
 
             if (openPrompt != null)
             {
+                CheckCurrent();
                 _ui.Post(UiMessageTypes.ChatTurnEnd, new ChatTurnEndPayload { PromptId = openPrompt, Status = "completed" });
             }
+
+            CheckCurrent();
+            PostUnsavedRelay(sessionId, relaySent, relayResults.Keys);
+        }
+
+        /// <summary>After the restored messages: what the engine does not hold yet of this conversation's messages to other tabs, then the outcomes that arrived while it was not shown.</summary>
+        private void PostUnsavedRelay(string? sessionId, ISet<string> restoredSent, IEnumerable<string> restoredResults)
+        {
+            if (string.IsNullOrEmpty(sessionId)) return;
+            PostUnsavedRelayRecords(sessionId!, restoredSent, new HashSet<string>(restoredResults, StringComparer.Ordinal));
+            string root; var host = RelayHost;
+            lock (_stateLock) root = _workingDirectory;
+            if (host == null) return;
+            foreach (var update in host.TakeBacklog(root, sessionId!)) PostRelayUpdate(sessionId!, update);
         }
 
         private static string MessageText(JToken? content)

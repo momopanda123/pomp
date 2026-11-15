@@ -47,6 +47,11 @@
 .queue-list, .history-list, .history-members, .live-members { list-style: none; margin: 0; padding: 0; min-width: 0; }
 .queue-list > li, .queue-awaiting { display: flex; flex-direction: column; min-width: 0; gap: 4px; padding: 6px 0; border-top: 1px solid var(--pomp-border); }
 .queue-list p, .queue-awaiting p { margin: 0; white-space: pre-wrap; }
+/* The "clear" question opens in the strip under its button, like the conversation list's delete question. */
+.queue-clear-confirm.confirm-popover { position: static; width: auto; max-width: 100%; margin: 4px 0; }
+.queue-awaiting .composer-error { margin-top: 0; }
+.sessions-panel .picker-status { padding: 2px 0; }
+.sessions-panel .composer-error { margin: 4px 0; }
 .conversation-actions .btn, .live-progress-head .btn { max-width: 100%; white-space: normal; }
 .live-progress-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; flex-wrap: wrap; }
 .live-members { max-height: 18vh; overflow: auto; }
@@ -89,3 +94,37 @@
   .agents-dialog .role-options-row > .form-field { flex-basis: 100%; }
   .history-filters label { flex-basis: 100%; }
 }
+/* The conversation engine chip sits beside the header's buttons; its list drops down from the chip's right edge. In a narrow pane only
+   the icon and the caret stay (the tooltip names the engine), so the conversation name keeps its room. */
+.backend-picker { position: relative; flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.backend-picker .picker-pop.inline { position: absolute; right: 0; top: 100%; width: min(300px, calc(100vw - 24px)); max-height: min(50vh, 320px); margin-top: 2px; z-index: 30; }
+@media (max-width: 299px) {
+  .backend-picker .chip-text { display: none; }
+}
+/* On the Accounts page the same choice is a labelled full-width field above the account panel, which keeps the remaining height. */
+.accounts-page { display: flex; flex: 1; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+.accounts-page > .hint { margin: 0; padding: 0 8px; overflow-wrap: anywhere; }
+.backend-field { flex: none; padding: 8px 8px 0; }
+.tab-page > .hint { margin: 0; padding: 8px; overflow-wrap: anywhere; }
+/* An Antigravity conversation's strip under the session header: its connection in the banner's form, then one row of option chips
+   (the list of an option drops down over the chat from under the row). */
+.acp-controls { display: flex; flex: none; flex-direction: column; min-width: 0; }
+.acp-options { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; padding: 3px 8px; border-bottom: 1px solid var(--pomp-border); }
+.acp-options .picker-pop.inline { position: absolute; left: 6px; right: 6px; top: 100%; max-height: min(50vh, 320px); margin-top: 0; z-index: 30; }
+.acp-notice { margin: 0; padding: 4px 8px; border-bottom: 1px solid var(--pomp-border); }
+.acp-permission { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* A message sent to another agent or team runs in that partner's tab: the bubble follows its status, and one card brings back the answer. */
+.relay-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; margin-bottom: 4px; }
+.relay-status-detail { min-width: 0; color: var(--pomp-muted-fg); font-size: .78rem; overflow-wrap: anywhere; }
+.relay-open { margin-left: auto; }
+.relay-result { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 6px 10px; border: 1px solid var(--pomp-border); border-left: 3px solid var(--pomp-accent); border-radius: 4px; font-size: .92em; }
+.relay-result.failed { border-left-color: var(--pomp-error); }
+.relay-result.stopped { border-left-color: var(--pomp-muted-fg); }
+.relay-result-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.relay-result-head .message-target-badge { margin-bottom: 0; }
+.relay-result-text { min-width: 0; overflow-wrap: anywhere; }
+.relay-result-note { color: var(--pomp-muted-fg); font-size: .85em; }
+.relay-result-error { color: var(--pomp-error); overflow-wrap: anywhere; }
+/* The dot on a chat tab that is not on screen: work in it, or an approval or question that waits for the user. */
+.partner-tab-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--pomp-accent); }
+.partner-tab-dot.waiting { background: var(--pomp-warning); }

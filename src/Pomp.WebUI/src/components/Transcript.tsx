@@ -14,6 +14,12 @@ import { RequestRecord } from './Dialogs';
 import { ToolCard } from './ToolCard';
 import { CaseCards, caseProposalId } from './CaseCards';
 import { AdvisorNotesCard } from './AdvisorNotes';
+import { RelayResultCard } from './RelayResult';
+import { FindBar } from './FindBar';
+import { FIND_ITEM } from '../transcriptFind';
+import { useTranscriptFind } from '../useTranscriptFind';
+import { formatChord } from '../shortcuts';
+import type { PageShortcuts } from '../protocol';
 
 interface ItemViewProps {
   root?: string; sessionId?: string; controlsEnabled?: boolean;
@@ -43,6 +49,8 @@ const ItemView = memo(function ItemView({ item, canRetry, onRetry, root, session
       return <SessionResetNote item={item} />;
     case 'advisor':
       return <AdvisorNotesCard item={item} />;
+    case 'relayResult':
+      return <RelayResultCard item={item} />;
     case 'turnError':
       return <TurnErrorBanner item={item} canRetry={canRetry} onRetry={onRetry} />;
   }
@@ -81,13 +89,19 @@ interface TranscriptProps {
   onRetry: (item: TurnErrorItem) => void;
   /** The pending permission / dialog card, shown after the conversation (the oldest request only). */
   request?: ReactNode;
+  /** The chat tab is shown: Ctrl+F opens the find bar of this conversation. */
+  findEnabled?: boolean;
+  /** The page's shortcuts: a chord that is Ctrl+F stays with its own command. */
+  shortcuts?: PageShortcuts;
 }
 
 /** Scrollable message list. Follows the newest content until the user scrolls up; scrolling back down resumes it. */
-export function Transcript({ items, busy, replaying, replayRevision, replayTruncated, canRetry, onRetry, request, root, sessionId, controlsEnabled }: TranscriptProps) {
+export function Transcript({ items, busy, replaying, replayRevision, replayTruncated, canRetry, onRetry, request, root, sessionId, controlsEnabled, findEnabled = true, shortcuts }: TranscriptProps) {
   const t = useT();
+  const wrapRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const finder = useTranscriptFind({ wrap: wrapRef, scroller: scrollRef, content: contentRef, items, t, enabled: findEnabled, sessionId, reserved: shortcuts ? Object.values(shortcuts).map(chord => formatChord(chord)) : [] });
   const follow = useRef(true);
   const lastTop = useRef(0);
   const [away, setAway] = useState(false);
@@ -147,13 +161,16 @@ export function Transcript({ items, busy, replaying, replayRevision, replayTrunc
   const streaming = items.some((it) => (it.kind === 'assistant' && !it.done) || (it.kind === 'tool' && it.state === 'running'));
 
   return (
-    <div className={replaying ? 'transcript-wrap replaying' : 'transcript-wrap'}>
+    <div className={replaying ? 'transcript-wrap replaying' : 'transcript-wrap'} ref={wrapRef}>
       <div className="transcript" ref={scrollRef} onScroll={onScroll} aria-busy={replaying}>
         <div className="transcript-content" ref={contentRef}>
+          <FindBar finder={finder} />
           {replayTruncated && <div className="notice warning" role="status" data-testid="replay-truncated"><Icon name="warning" size={13} /><span>{t('msg.replayTruncated')}</span></div>}
           {items.length === 0 && !busy && !replayTruncated && !request ? <EmptyState /> : null}
           {items.map((item) => (
-            <ItemView key={item.key} item={item} canRetry={canRetry} onRetry={onRetry} root={root} sessionId={sessionId} controlsEnabled={controlsEnabled} />
+            <div key={item.key} className={FIND_ITEM} data-find-key={item.key}>
+              <ItemView item={item} canRetry={canRetry} onRetry={onRetry} root={root} sessionId={sessionId} controlsEnabled={controlsEnabled} />
+            </div>
           ))}
           {request}
           {busy && !streaming && !replaying && !request && <WorkingIndicator />}

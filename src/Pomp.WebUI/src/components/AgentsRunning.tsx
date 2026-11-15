@@ -31,14 +31,13 @@ export function useObservedAgents(sessionId: string | undefined): ObservedAgents
 export function RunningCard({ observed: { state, jobs, running }, sessionId, connected, inert }: { observed: ObservedAgents; sessionId?: string; connected: boolean; inert: boolean }) {
   const t = useT();
   const paged = usePaged(jobs, sessionId);
-  return <ViewSection sectionKey="agents-running" className="agents-card" headingLevel="h2" title={t('running.title')} status={<span data-testid="running-count">{running}</span>} active={running > 0} bodyClassName="ui-flush">
+  return <ViewSection sectionKey="agents-running" headingLevel="h2" title={t('running.title')} status={<span data-testid="running-count">{running}</span>} active={running > 0} bodyClassName="ui-flush">
     {state?.message && <p className="ui-note ui-muted" role="status" data-testid="running-message">{revealControls(state.message)}</p>}
     {state?.controlMessage && <p className="ui-note ui-muted" role="status" data-testid="running-control-message">{revealControls(state.controlMessage)}</p>}
     <DataTable columns="minmax(0, 1fr) auto auto auto" label={t('running.title')} testId="running-table" empty={!jobs.length} emptyRows={2}
       head={[t('running.agent'), t('running.status'), t('running.time'), '']}>
       {paged.slice.map(job => <RunningRow key={job.id} job={job} state={state} sessionId={sessionId} disabled={!connected || inert} />)}
     </DataTable>
-    {!jobs.length && <p className="ui-note ui-muted" data-testid="running-empty">{t('running.empty')}</p>}
     <Pager paged={paged} testId="running-pager" />
   </ViewSection>;
 }

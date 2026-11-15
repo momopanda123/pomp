@@ -84,7 +84,8 @@ namespace Pomp.Features
         public bool Matches(ProjectEvent value,string relativePath) => Enabled&&Event==value.Name&&(Event=="onBuild"||Pattern(Glob).IsMatch(relativePath.Replace('\\','/')));
         public string Command(ProjectEvent value)
         {
-            string Quote(string text) {if(text.Length>1024||text.Contains('\0')||text.Contains('\r')||text.Contains('\n'))throw new ArgumentException(PompLanguage.Pick("훅 이벤트 데이터가 올바르지 않아요.", "Invalid hook event data."));return "'"+text.Replace("'","''")+"'";}
+            // Windows PowerShell also ends a single-quoted string at the typographic quotes (U+2018, U+2019, U+201A, U+201B): each one is doubled like the ASCII quote.
+            string Quote(string text) {if(text.Length>1024||text.Contains('\0')||text.Contains('\r')||text.Contains('\n'))throw new ArgumentException(PompLanguage.Pick("훅 이벤트 데이터가 올바르지 않아요.", "Invalid hook event data."));return "'"+Regex.Replace(text,"['\u2018\u2019\u201A\u201B]",m=>m.Value+m.Value)+"'";}
             var command="$POMP_FILE = "+Quote(value.Path)+"; $POMP_EVENT = "+Quote(value.Name)+"; $POMP_EVENT_DETAIL = "+Quote(value.Detail)+";\n"+Script;
             if(command.Length>8000)throw new ArgumentException(PompLanguage.Pick("훅 명령이 너무 길어요.", "The hook command is too long."));return command;
         }

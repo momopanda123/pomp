@@ -1,7 +1,9 @@
 /* Shared page controls (components/ui.tsx). Colors come from the theme variables, so dark and light themes both work. */
 
-.ui-switch { display: inline-flex; align-items: center; gap: 6px; min-height: var(--pomp-bar-height); padding: 0 2px; border: 0; background: transparent;
+.ui-switch { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: var(--pomp-bar-height); padding: 0 2px; border: 0; background: transparent;
   color: var(--pomp-fg); font-size: .92em; cursor: pointer; white-space: nowrap; }
+/* A long label wraps inside a narrow view instead of pushing the track out of it. */
+.ui-switch-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .ui-switch:disabled { opacity: .45; cursor: default; }
 .ui-switch-track { position: relative; flex: none; width: 28px; height: 16px; border-radius: 8px;
   background: color-mix(in srgb, var(--pomp-fg) 32%, var(--pomp-bg)); transition: background .12s; }
@@ -22,7 +24,8 @@
 .ui-mono { font-family: var(--pomp-font-mono); }
 
 .ui-icon-btn { width: var(--pomp-bar-height); height: var(--pomp-bar-height); flex: none; }
-.ui-icon-btn-danger:hover:not(:disabled) { color: var(--pomp-error); }
+/* Wins over the base icon-button hover, which sets the plain text colour. */
+.icon-btn.ui-icon-btn-danger:hover:not(:disabled):not([aria-disabled='true']) { color: var(--pomp-error); }
 
 /* One grid for the whole table: rows (and row groups) are subgrids, so auto/max-content columns line up with the header across rows. */
 /* The 2px and 0px edge tracks (plus the column gap) are the row gutters: padding on a subgrid row would eat into a fixed first column. */
@@ -88,18 +91,22 @@
 .ui-field textarea { padding: 6px 8px; line-height: 1.45; resize: vertical; min-height: 72px; }
 .ui-field :is(input, select, textarea):focus { outline: 0; border-color: var(--pomp-focus-border); }
 .ui-field-error { color: var(--pomp-error); font-size: .92em; }
-.ui-field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+/* Paired fields share a row while each keeps 140px; a narrower form stacks them instead of clipping. */
+.ui-field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); gap: 10px; }
 .ui-form-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .ui-check { display: inline-flex; align-items: center; gap: 6px; }
 
 .ui-progress { height: 4px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--pomp-fg) 14%, transparent); }
-.ui-progress > i { display: block; height: 100%; background: var(--pomp-button-bg); }
-.ui-avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; border-radius: 50%;
-  color: #fff; font-size: 11px; font-weight: 600; }
+/* The filled share comes from the component as `--ui-progress` (a percentage). */
+.ui-progress > i { display: block; width: var(--ui-progress, 0%); height: 100%; background: var(--pomp-button-bg); }
+/* The size and the identity colour arrive as custom properties from the component; the box, the background and the letter follow them. */
+.ui-avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--avatar-size, 24px); height: var(--avatar-size, 24px);
+  border-radius: 50%; overflow: hidden; background: var(--avatar-color, transparent); color: #fff; font-size: max(10px, calc(var(--avatar-size, 24px) * .46)); font-weight: 600; line-height: 1; }
 .ui-status-icon { display: inline-flex; align-items: center; justify-content: center; overflow: visible; }
 .ui-ok { color: var(--pomp-success); } .ui-warn { color: var(--pomp-warning); } .ui-err { color: var(--pomp-error); } .ui-info { color: var(--pomp-accent); }
 .ui-muted { color: var(--pomp-muted-fg); }
-.ui-note { padding: 6px 10px; }
+/* A note is a line of the card it sits in (often a paragraph): no paragraph margins, on any page. */
+.ui-note { margin: 0; padding: 6px 10px; }
 .ui-note[role='alert'] { color: var(--pomp-error); }
 .ui-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 6px 8px 10px; border-top: 1px solid var(--pomp-border); }
 .ui-card-foot > .ui-grow { flex: 1; min-width: 0; }
@@ -108,9 +115,10 @@
 /* Sections whose body is a table sit flush with the card edges. */
 .view-section-body.ui-flush { padding: 0; }
 
-/* Destructive confirm: outlined, so the red reads on both themes' backgrounds. */
-.btn.danger { background: transparent; border-color: var(--pomp-error); color: color-mix(in srgb, var(--pomp-error) 75%, var(--pomp-fg)); }
-.btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--pomp-error) 16%, transparent); }
+/* Destructive confirm: outlined, so the red reads on both themes' backgrounds. The doubled class wins over the other button variants
+   (`subtle`, `primary`) whatever order the stylesheets load in. */
+.btn.btn.danger { background: transparent; border-color: var(--pomp-error); color: color-mix(in srgb, var(--pomp-error) 75%, var(--pomp-fg)); }
+.btn.btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--pomp-error) 16%, transparent); }
 /* A labelled meter: label, bar, value. */
 .ui-usage-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: .92em; }
 .diff-add { color: var(--pomp-success); }

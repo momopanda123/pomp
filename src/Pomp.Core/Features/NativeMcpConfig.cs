@@ -19,6 +19,22 @@ namespace Pomp.Features
         private const int MaximumBytes = 1024 * 1024;
         private readonly string project, user;
         internal bool Changed { get; private set; }
+        private readonly List<string> written = new List<string>();
+        /// <summary>
+        /// Raised by <see cref="Announce"/> after a change made through one conversation was written: the files written and who announced
+        /// them. Every conversation's engine loaded the same files, so the others need a restart as well. Raised on the announcing thread;
+        /// a handler must neither block nor throw.
+        /// </summary>
+        internal static event Action<IReadOnlyList<string>, object?>? Saved;
+        /// <summary>Tells the other conversations which files this store wrote since the last call (nothing when it wrote none).</summary>
+        internal void Announce(object? origin)
+        {
+            string[] files;
+            lock (ToolResourceFiles.Gate) { files = written.ToArray(); written.Clear(); }
+            if (files.Length > 0) Saved?.Invoke(files, origin);
+        }
+        /// <summary>True when this store's project or user file is one of <paramref name="files"/>.</summary>
+        internal bool Reads(IEnumerable<string> files) => files.Any(f => string.Equals(f, project, StringComparison.OrdinalIgnoreCase) || string.Equals(f, user, StringComparison.OrdinalIgnoreCase));
         /// <summary>The workspace whose <c>.omp/mcp.json</c> this edits.</summary>
         internal string ProjectRoot { get; }
         /// <summary>The profile this edits (null = the default one); the catalog installs MCP entries into the same scope files.</summary>
@@ -81,7 +97,8 @@ namespace Pomp.Features
                         foreach (var property in (file.Json["mcpServers"] as JObject ?? new JObject()).Properties().OrderBy(p => p.Name, StringComparer.Ordinal))
                         {
                             try { ValidateName(property.Name); } catch { result.Message = PompLanguage.Pick("이름이 올바르지 않은 MCP 항목은 생략했어요.", "MCP entries with invalid names were omitted."); continue; }
-                            var server = property.Value as JObject; var type = (string?)server?["type"] ?? (server?["url"] == null ? "stdio" : "http");
+                            // A type that is not text is this row's own error (Validate refuses it below), never the whole scope's.
+                            var server = property.Value as JObject; var rawType = server?["type"] is JValue { Type: JTokenType.String } typeText ? (string?)typeText : null; var type = rawType ?? (server?["url"] == null ? "stdio" : "http");
                             var row = new McpServerPayload { Name = property.Name, Scope = scope, Type = type is "http" or "sse" ? type : "stdio", Hash = overrides == null ? null : RowHash(file, overrides, property.Name) };
                             try
                             {
@@ -140,7 +157,7 @@ namespace Pomp.Features
             // Only a file POMP creates gets the schema hint; existing files keep exactly their own keys.
             if (file.Hash == "missing" && file.Json["$schema"] == null) file.Json["$schema"] ="https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json";
             var text = file.Json.ToString(Formatting.Indented) + "\n"; if (Encoding.UTF8.GetByteCount(text) > MaximumBytes) throw new IOException(PompLanguage.Pick("MCP 설정이 너무 커요.", "The MCP configuration is too large."));
-            CheckpointStore.CheckDirectPath(file.Path); AtomicFile.WriteAllText(file.Path, text); Changed = true;
+            CheckpointStore.CheckDirectPath(file.Path); AtomicFile.WriteAllText(file.Path, text); Changed = true; written.Add(file.Path);
         }
         internal void Mutate(McpCommandPayload command)
         {

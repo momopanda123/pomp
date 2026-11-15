@@ -41,8 +41,8 @@ export function SessionHeader({ session, history, disabled, newDisabled, onNew, 
   useStatusReport(listOpen ? null : history.error);
   return <div className="session-header" data-testid="session-header">
     {editing ? <SessionRename name={realName} disabled={disabled || history.pending} onSave={value => history.command('rename', value)} onDone={restoreFocus => { setEditing(false); if (restoreFocus) window.requestAnimationFrame(() => nameButton.current?.focus()); }} />
-      : <button ref={nameButton} className="session-name" type="button" disabled={disabled || !session?.sessionId} title={t('session.rename')} data-testid="session-name" onClick={() => setEditing(true)}>{revealControls(realName || t('session.untitled'))}</button>}
-    <button className="icon-btn" type="button" data-testid="session-quick" aria-label={t('session.quick')} title={t('session.quick')} aria-controls="conversation-list" aria-expanded={listOpen} onClick={onToggleList}><Icon name="chevronDown" size={12} /></button>
+      : <button ref={nameButton} className="session-name" type="button" disabled={disabled || !session?.sessionId || !history.allowed('rename')} title={t('session.rename')} data-testid="session-name" onClick={() => setEditing(true)}>{revealControls(realName || t('session.untitled'))}</button>}
+    <button className="icon-btn" type="button" data-testid="session-quick" disabled={!history.allowed('refresh')} aria-label={t('session.quick')} title={t('session.quick')} aria-controls="conversation-list" aria-expanded={listOpen} onClick={onToggleList}><Icon name="chevronDown" size={12} /></button>
     <button className="icon-btn" type="button" data-testid="new-session" disabled={newDisabled} title={t('status.newSession')} aria-label={t('status.newSession')} onClick={onNew}><Icon name="plus" /></button>
     {children}
   </div>;

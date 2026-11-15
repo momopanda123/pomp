@@ -23,12 +23,11 @@ namespace Pomp.Hosting
         private const int MaxPlanTasks = 200;
         private const int MaxPlanNameChars = 200;
         private const int MaxPlanContentChars = 600;
-        private const int MaxPlanBlockerChars = 300;
         private const string PlanNoteCommand = "pomp-plan-note";
 
-        private static readonly HashSet<string> PlanStatuses = new HashSet<string>(StringComparer.Ordinal) { "pending", "in_progress", "completed", "abandoned", "blocked" };
+        private static readonly HashSet<string> PlanStatuses = new HashSet<string>(StringComparer.Ordinal) { "pending", "in_progress", "completed", "abandoned" };
 
-        private async Task HandleAgentPlanAsync(JObject args)
+        private async Task HandleAgentPlanAsync(JObject args, Action<UiMessage>? reply = null)
         {
             var requestId = args.GetString("requestId");
             string? error = null;
@@ -45,14 +44,19 @@ namespace Pomp.Hosting
                 JArray engine;
                 try { engine = PlanJson(ReadPlan(state["todoPhases"] ?? new JArray(), userEdit: false)); }
                 catch (ArgumentException) { throw new InvalidOperationException(PompLanguage.Pick("현재 계획에 화면에서 그대로 편집할 수 없는 항목이 있어요.", "The current plan has entries this editor cannot keep intact.")); }
-                if (!JToken.DeepEquals(engine, PlanJson(seen))) throw new InvalidOperationException(PompLanguage.Pick("그 사이 계획이 바뀌었어요.", "The plan changed meanwhile."));
+                if (!JToken.DeepEquals(engine, PlanJson(seen)))
+                {
+                    // The page edited a plan it no longer has: publish the engine's plan now, so the next edit starts from it.
+                    RequestInfoRefresh();
+                    throw new InvalidOperationException(PompLanguage.Pick("그 사이 계획이 바뀌었어요.", "The plan changed meanwhile."));
+                }
 
                 await SetPlanAsync(session, connection, epoch, PlanJson(phases)).ConfigureAwait(false);
                 _logger.Info("Agent plan edited by the user: " + phases.Count + " phase(s), " + phases.Sum(phase => phase.Tasks.Count) + " task(s).");
                 await RefreshAfterPlanSetAsync(connection, epoch).ConfigureAwait(false);
                 await TellModelAboutPlanEditAsync(connection, epoch, session, "replaced the whole plan (" + phases.Count + " phase(s), " + phases.Sum(phase => phase.Tasks.Count) + " task(s))").ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
+            catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested && reply == null)
             {
                 return;
             }
@@ -61,7 +65,7 @@ namespace Pomp.Hosting
                 error = PlanErrorText(ex);
             }
 
-            PostPlanResult(requestId, error);
+            PostPlanResult(requestId, error, reply);
         }
 
         /// <summary>
@@ -71,7 +75,7 @@ namespace Pomp.Hosting
         /// progress alone is taken (<see cref="PlanEdit.SafeWhileWorking"/>): the model names its tasks by their text, and the one it
         /// works on must stay as it knows it.
         /// </summary>
-        private async Task HandleAgentPlanEditAsync(JObject args)
+        private async Task HandleAgentPlanEditAsync(JObject args, Action<UiMessage>? reply = null)
         {
             var requestId = args.GetString("requestId");
             string? error = null;
@@ -87,7 +91,12 @@ namespace Pomp.Hosting
                 working |= PlanStateWorking(state);
                 var engine = state["todoPhases"] as JArray ?? new JArray();
                 var seen = args.GetString("revision");
-                if (PlanRevisionOf(engine) != (string.IsNullOrEmpty(seen) ? null : seen)) throw new InvalidOperationException(PompLanguage.Pick("그 사이 계획이 바뀌었어요.", "The plan changed meanwhile."));
+                if (PlanRevisionOf(engine) != (string.IsNullOrEmpty(seen) ? null : seen))
+                {
+                    // The page asked with a plan it no longer has: publish the engine's plan now, so the plan it reads again can be edited.
+                    RequestInfoRefresh();
+                    throw new InvalidOperationException(PompLanguage.Pick("그 사이 계획이 바뀌었어요.", "The plan changed meanwhile."));
+                }
                 List<AgentPlanPhasePayload> phases;
                 try { phases = ReadPlan(engine, userEdit: false, capped: false); }
                 catch (ArgumentException) { throw new InvalidOperationException(PompLanguage.Pick("현재 계획에 화면에서 그대로 편집할 수 없는 항목이 있어요.", "The current plan has entries this editor cannot keep intact.")); }
@@ -97,14 +106,17 @@ namespace Pomp.Hosting
                 edit.Apply(phases);
                 // The model may update its plan at any moment while it works: the plan is read once more just before it is replaced.
                 if (working && PlanRevisionOf((await ReadPlanStateAsync(connection, epoch, session, idle: false).ConfigureAwait(false))["todoPhases"]) != PlanRevisionOf(engine))
+                {
+                    RequestInfoRefresh();
                     throw new InvalidOperationException(PompLanguage.Pick("그 사이 계획이 바뀌었어요.", "The plan changed meanwhile."));
+                }
 
                 await SetPlanAsync(session, connection, epoch, PlanJson(phases), whileWorking: working).ConfigureAwait(false);
                 _logger.Info("Agent plan edited by the user" + (working ? " while the agent works" : "") + ": " + edit.Op + ", " + phases.Count + " phase(s), " + phases.Sum(phase => phase.Tasks.Count) + " task(s).");
                 await RefreshAfterPlanSetAsync(connection, epoch).ConfigureAwait(false);
                 await TellModelAboutPlanEditAsync(connection, epoch, session, change).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
+            catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested && reply == null)
             {
                 return;
             }
@@ -113,17 +125,18 @@ namespace Pomp.Hosting
                 error = PlanErrorText(ex);
             }
 
-            PostPlanResult(requestId, error);
+            PostPlanResult(requestId, error, reply);
         }
 
         private static string PlanErrorText(Exception ex) =>
             ex is OperationCanceledException ? PompLanguage.Pick("연결이 바뀌어 계획을 저장하지 못했어요.", "The connection changed; the plan was not saved.") : TextUtil.Truncate(ex.Message, 500);
 
-        private void PostPlanResult(string? requestId, string? error)
+        private void PostPlanResult(string? requestId, string? error, Action<UiMessage>? respond = null)
         {
             var reply = new JObject { ["requestId"] = requestId, ["ok"] = error == null };
             if (error != null) reply["error"] = error;
-            _ui.Post(UiMessageTypes.AgentPlanResult, reply, UiDelivery.State);
+            if (respond != null) respond(new UiMessage(UiMessageTypes.AgentPlanResult, reply));
+            else _ui.Post(UiMessageTypes.AgentPlanResult, reply, UiDelivery.State);
         }
 
         /// <summary>
@@ -213,7 +226,7 @@ namespace Pomp.Hosting
         /// <summary>
         /// Strict plan reader: the display bounds and statuses, no control characters, no unknown fields. Without
         /// <paramref name="userEdit"/> the plan is kept exactly (the engine's plan, or the copy the page showed); a user edit also
-        /// needs a non-blank name and content and at least one task per phase, and an empty blocker means none. Without
+        /// needs a non-blank name and content and at least one task per phase. Without
         /// <paramref name="capped"/> there is no limit on the number of phases and tasks (the per-row edits).
         /// </summary>
         private static List<AgentPlanPhasePayload> ReadPlan(JToken? token, bool userEdit, bool capped = true)
@@ -230,14 +243,12 @@ namespace Pomp.Hosting
                 foreach (var item in tasks)
                 {
                     if (capped && ++total > MaxPlanTasks) throw new ArgumentException(PompLanguage.Pick("작업이 너무 많아요.", "Too many tasks."));
-                    if (item is not JObject task || task.Properties().Any(p => p.Name != "content" && p.Name != "status" && p.Name != "blocker")
-                        || task["content"]?.Type != JTokenType.String || task["status"]?.Type != JTokenType.String
-                        || (task["blocker"] != null && task["blocker"]!.Type != JTokenType.String && task["blocker"]!.Type != JTokenType.Null))
+                    if (item is not JObject task || task.Properties().Any(p => p.Name != "content" && p.Name != "status")
+                        || task["content"]?.Type != JTokenType.String || task["status"]?.Type != JTokenType.String)
                         throw new ArgumentException(PompLanguage.Pick("작업 형식이 올바르지 않아요.", "The plan task is invalid."));
                     var status = (string)task["status"]!;
                     if (!PlanStatuses.Contains(status)) throw new ArgumentException(PompLanguage.Pick("알 수 없는 작업 상태예요.", "Unknown task status."));
-                    var blocker = task["blocker"]?.Type == JTokenType.String ? PlanText((string)task["blocker"]!, MaxPlanBlockerChars, required: false) : null;
-                    shown.Tasks.Add(new AgentPlanTaskPayload { Content = PlanText((string)task["content"]!, MaxPlanContentChars, required: userEdit), Status = status, Blocker = userEdit && string.IsNullOrEmpty(blocker) ? null : blocker });
+                    shown.Tasks.Add(new AgentPlanTaskPayload { Content = PlanText((string)task["content"]!, MaxPlanContentChars, required: userEdit), Status = status });
                 }
 
                 phases.Add(shown);
@@ -253,16 +264,11 @@ namespace Pomp.Hosting
             return text;
         }
 
-        /// <summary>The engine's own shape (omp drops unknown fields and omits a missing blocker).</summary>
+        /// <summary>The engine's own shape: each task has content and status.</summary>
         private static JArray PlanJson(IEnumerable<AgentPlanPhasePayload> phases) => new JArray(phases.Select(phase => new JObject
         {
             ["name"] = phase.Name,
-            ["tasks"] = new JArray(phase.Tasks.Select(task =>
-            {
-                var row = new JObject { ["content"] = task.Content, ["status"] = task.Status };
-                if (task.Blocker != null) row["blocker"] = task.Blocker;
-                return row;
-            })),
+            ["tasks"] = new JArray(phase.Tasks.Select(task => new JObject { ["content"] = task.Content, ["status"] = task.Status })),
         }));
     }
 }

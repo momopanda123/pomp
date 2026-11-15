@@ -1,4 +1,5 @@
 import { createMockPermissions } from './mockPermissions';
+import type { AntigravityMcpState } from '../toolsProtocol';
 import { MASKED_ENV, type CatalogCommand, type CatalogEntry, type CatalogStatePayload, type ConversationTool, type HooksCommand, type HooksStatePayload, type HookDraft, type HookInfo, type McpCommand, type McpServer, type ResourceDocument, type SkillImportPreview, type SkillInfo, type RulesCommand, type RulesStatePayload, type SkillsCommand, type SkillsStatePayload, type ToolsCommand, type ToolsDomain, type ToolsHostMessage, type ToolsStatePayload, type WorkflowsCommand, type WorkflowsStatePayload, type WorkflowDraft, type WorkflowInfo } from '../toolsProtocol';
 
 /**
@@ -98,12 +99,26 @@ export function createMockToolsHandler(emit: (message: ToolsHostMessage) => void
   for (const row of pompSkills) bodies.set(`skill:pomp:${row.name}`, { content: `---\nname: ${row.name}\ndescription: ${row.description}\n---\n# ${row.name}\nBuilt-in skill body.`, hash: `skill-pomp-${row.name}-doc` });
   bodies.set('skill:project:api-design', { content: '---\nname: api-design\ndescription: Design a stable HTTP API before writing it.\n---\n# API design\nA copy of the catalog skill.', hash: 'skill-copy-1-doc' });
   let restartRequired = false; let revision = 1;
+  // Preview-only scenarios: ?antigravity=missing|configured|error|stale|slow|no-workspace|no-engine (default: installed).
+  const antigravityMode = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('antigravity');
+  let antigravityStale = antigravityMode === 'stale';
+  let antigravity: AntigravityMcpState = {
+    installed: antigravityMode !== 'missing', configured: antigravityMode === 'configured',
+    canConfigure: !['missing', 'no-workspace', 'no-engine'].includes(antigravityMode ?? ''),
+    applicationPath: antigravityMode === 'missing' ? undefined : 'C:\\Users\\Mock\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe',
+    configPath: 'C:\\Users\\Mock\\.gemini\\config\\mcp_config.json',
+    workspaceRoot: antigravityMode === 'no-workspace' ? undefined : 'C:\\repo\\Pomp',
+    serverName: antigravityMode === 'no-workspace' ? undefined : 'pomp_mock_workspace',
+    configHash: 'antigravity-1',
+    message: antigravityMode === 'missing' ? 'Antigravity is not installed (preview).' : antigravityMode === 'no-workspace' ? 'Open a project before setup (preview).'
+      : antigravityMode === 'no-engine' ? 'The verified bundled engine is unavailable (preview).' : undefined,
+  };
   const pendingDomains = new Set<ToolsDomain>();
   const catalogState = (): CatalogStatePayload => ({ entries: catalogEntries.map(entry => ({ ...structuredClone(entry), installed: entry.kind === 'mcp' ? entry.scopes.filter(scope => servers.some(server => server.catalogId === entry.id && server.scope === scope)) : [] })) });
   function snapshot(domain?: ToolsDomain) {
     if (!domain || domain === 'tools') emit({ type: 'tools/state', payload: structuredClone(tools) });
     if (!domain || domain === 'skills') emit({ type: 'skills/state', payload: structuredClone(skills) });
-    if (!domain || domain === 'mcp') emit({ type: 'mcp/state', payload: { servers: structuredClone(servers), restartRequired } });
+    if (!domain || domain === 'mcp') emit({ type: 'mcp/state', payload: { servers: structuredClone(servers), restartRequired, antigravity: structuredClone(antigravity) } });
     if (!domain || domain === 'catalog') emit({ type: 'catalog/state', payload: catalogState() });
     if (!domain || domain === 'rules') {
       emit({ type: 'rules/state', payload: structuredClone(rules) });
@@ -121,7 +136,8 @@ export function createMockToolsHandler(emit: (message: ToolsHostMessage) => void
     const domain = message.type.split('/')[0] as ToolsDomain;
     const command = message.payload as ToolsCommand | SkillsCommand | McpCommand | CatalogCommand | RulesCommand | WorkflowsCommand | HooksCommand;
     if (!command || typeof command.requestId !== 'string' || typeof command.action !== 'string') return true;
-    if (pendingDomains.has(domain) || (options.busy?.() && command.action !== 'refresh')) { reply(domain, command.requestId, 'A previous request is still in progress.'); return true; }
+    const external = domain === 'mcp' && (command.action === 'antigravity-refresh' || command.action === 'antigravity-setup');
+    if (pendingDomains.has(domain) || (!external && options.busy?.() && command.action !== 'refresh')) { reply(domain, command.requestId, 'A previous request is still in progress.'); return true; }
     pendingDomains.add(domain);
     if (domain === 'tools') { tools = { ...tools, pending: true }; snapshot('tools'); }
     const namePattern = /^[a-z0-9-]{2,40}$/;
@@ -305,7 +321,17 @@ export function createMockToolsHandler(emit: (message: ToolsHostMessage) => void
         const p = command as McpCommand;
         const index = servers.findIndex(server => server.name === p.name && server.scope === p.scope);
         const existing = servers[index];
-        if (p.action === 'save') {
+        if (p.action === 'antigravity-setup') {
+          if (antigravityStale) { antigravityStale = false; antigravity = { ...antigravity, configHash: `antigravity-${++revision}` }; }
+          if (!antigravity.canConfigure) error = antigravity.message || 'Antigravity cannot be configured.';
+          else if (!p.name || p.name !== antigravity.serverName) error = 'The workspace changed. Check Antigravity again.';
+          else if (!p.expectedHash || p.expectedHash !== antigravity.configHash) error = 'Antigravity configuration changed. Refresh first.';
+          else if (antigravityMode === 'error') error = 'Antigravity configuration could not be written (preview). No file was changed.';
+          else {
+            if (!antigravity.configured) antigravity = { ...antigravity, configured: true, configHash: `antigravity-${++revision}` };
+            output = 'Preview: Antigravity MCP configuration saved. A live connection has not been verified.';
+          }
+        } else if (p.action === 'save') {
           if (!p.server?.name || !p.scope) error = 'Invalid MCP server.';
           else if (existing && p.expectedHash !== existing.hash) error = 'MCP hash conflict. Refresh first.';
           else {
@@ -328,7 +354,7 @@ export function createMockToolsHandler(emit: (message: ToolsHostMessage) => void
         } else if (p.action === 'restart') { restartRequired = false; tools = { ...tools, tools: tools.tools.map(tool => ({ ...tool, active: tool.defaultActive })) }; snapshot('tools'); }
       }
       pendingDomains.delete(domain); snapshot(domain); reply(domain, command.requestId, error, output, document, skillImport);
-    }, options.delay ?? 220);
+    }, options.delay ?? (external && antigravityMode === 'slow' ? 1500 : 220));
     return true;
   }
   return Object.assign(handle, { snapshot, setHooksPolicy(policy: HooksStatePayload['policy']) { hooksPolicy = policy; snapshot('hooks'); },

@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.Threading;
 using Pomp.Adapters;
+using Pomp.Diagnostics;
 using Pomp.Features;
 using Pomp.Hosting;
 using Pomp.Tools;
@@ -38,7 +39,7 @@ namespace Pomp.VisualStudio.Adapters
             var entries = new Dictionary<string, EditorChangeEntry>(StringComparer.OrdinalIgnoreCase);
             foreach (var path in await UnsavedAsync(guard, workspaceRoot, cancellationToken).ConfigureAwait(false)) entries[path] = new EditorChangeEntry(path, true);
             await TaskScheduler.Default;
-            var repository = await git.OpenRepositoryAsync(cancellationToken).ConfigureAwait(false);
+            var repository = await TryOpenRepositoryAsync(cancellationToken).ConfigureAwait(false);
             if (repository == null) return entries.Values.ToList();
             var status = await repository.GetStatusAsync(cancellationToken).ConfigureAwait(false);
             foreach (var change in status.Changes)
@@ -60,7 +61,7 @@ namespace Pomp.VisualStudio.Adapters
             var resolved = paths.Select(path => guard.Resolve(path)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             var unsaved = new HashSet<string>(await UnsavedAsync(guard, workspaceRoot, cancellationToken).ConfigureAwait(false), StringComparer.OrdinalIgnoreCase);
             await TaskScheduler.Default;
-            var repository = await git.OpenRepositoryAsync(cancellationToken).ConfigureAwait(false);
+            var repository = await TryOpenRepositoryAsync(cancellationToken).ConfigureAwait(false);
             var result = new List<EditorChangeText>();
             foreach (var path in resolved)
             {
@@ -81,6 +82,17 @@ namespace Pomp.VisualStudio.Adapters
             }
 
             return result;
+        }
+
+        /// <summary>The workspace's repository; null outside git and when git cannot be used (no git.exe, a refused folder): unsaved documents need no git.</summary>
+        private async Task<GitRepository?> TryOpenRepositoryAsync(CancellationToken cancellationToken)
+        {
+            try { return await git.OpenRepositoryAsync(cancellationToken).ConfigureAwait(false); }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            {
+                context.Log.Debug("Editor changes: git is unavailable, only unsaved documents are listed: " + ex.Message);
+                return null;
+            }
         }
 
         // Modified in the index or the work tree; added, deleted, renamed and copied files have no single HEAD original here.
