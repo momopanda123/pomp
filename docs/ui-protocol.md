@@ -294,9 +294,9 @@ Host text the page shows says what happened, the current state or a reason.
 | `workspace/trustState` | `{ requestId?, root, required, trusted, fingerprint, files: [{ path, kind, detail? }], truncated?, error? }` | Workspace engine configuration needing trust. See "Workspace trust". |
 | `theme/changed` | `{ kind: "dark"\|"light", colors: { [cssVar]: value }, fontFamily?, fontSizePx? }` | Apply every `colors` entry. |
 | `session/info` | `{ model?, thinkingLevel?, sessionId?, sessionName?, contextUsage?, isStreaming, workingDirectory?, fastMode? }` | Session state for the composer. See "session/info" below. |
-| `chat/turnStarted` | `{ promptId, clientMessageId?, text?, attachments?, editorContext?, team?, agent?, agentInstance?, main? }` | The host took a user message as a prompt. See "chat/turnStarted" below. |
-| `chat/steered` | `{ steerId, clientMessageId?, text, attachments?, editorContext? }` | A message steered into the running agent. See "Steering" below. |
-| `chat/subagentAccepted` | `{ messageId, clientMessageId?, text, agentInstance, attachments?, editorContext? }` | Existing subagent RPC acknowledged a direct message. It is acceptance, not that child's completion or a main turn. |
+| `chat/turnStarted` | `{ promptId, clientMessageId?, text?, attachments?, requestFiles?, editorContext?, team?, agent?, agentInstance?, main? }` | The host took a user message as a prompt. See "chat/turnStarted" below. |
+| `chat/steered` | `{ steerId, clientMessageId?, text, attachments?, requestFiles?, editorContext? }` | A message steered into the running agent. See "Steering" below. |
+| `chat/subagentAccepted` | `{ messageId, clientMessageId?, text, agentInstance, attachments?, requestFiles?, editorContext? }` | Existing subagent RPC acknowledged a direct message. It is acceptance, not that child's completion or a main turn. |
 | `chat/steerWithdrawn` | `{ steerIds }` | Stop took these steered messages back before the agent read them; their bubbles show 전달 안 됨 / Not delivered. See "Steering" below. |
 | `chat/assistantStart` | `{ messageId }` | New assistant bubble. |
 | `chat/assistantDelta` | `{ messageId, kind: "text"\|"thinking", delta }` | Append; render markdown incrementally. |
@@ -315,7 +315,7 @@ Host text the page shows says what happened, the current state or a reason.
 | `dialog/dismiss` | `{ requestId, reason? }` | |
 | `session/fastResult` | `{ requestId?, ok, error?, enabled, active }` | Exactly one answer per `session/fast`. |
 | `knowledge/draft` | `{ root, path, startLine, endLine, text }` | The editor's POMP ▸ Add to Knowledge. See "Knowledge". |
-| `composer/prefill` | `{ text?, files?: [{ path, fullPath }], includeEditorContext, send, target?, pickTarget? }` | Input from the code editor's POMP menu. See "composer/prefill" below. |
+| `composer/prefill` | `{ text?, files?: [{ path, fullPath }], requestFiles?: [{ path, fullPath }], includeEditorContext, send, target?, pickTarget? }` | Input from the editor or Solution Explorer's POMP menu. See "composer/prefill" below. |
 | `work/open` | `{ view }` | Open that view of the work tab. See "work/open" below. |
 | `engine/info` | `{ source: "bundled"\|"settings"\|"installed", version?, verified, expectedVersion?, path? }` | Which omp runs. See "Engine version" below. |
 | `session/newResult` | `{ requestId?, status: "completed"\|"failed"\|"cancelled", message? }` | Exactly one answer per `session/new`. See "session/newResult" below. |
@@ -532,12 +532,13 @@ Payload fields:
 
 ### composer/prefill
 
-It comes from the code editor's POMP menu: explain, review, ask, add file, and "to agent or team".
+It comes from the code editor or Solution Explorer's POMP menu: explain, review, ask, add references, request whole files, and "to agent or team".
 
 | field | meaning |
 |---|---|
 | `text` | text for the input |
 | `files: [{ path, fullPath }]` | files for the context basket |
+| `requestFiles: [{ path, fullPath }]` | replace whole-file targets, distinct from reference attachments |
 | `includeEditorContext` | turn the editor context on |
 | `send` | send once, right away |
 | `target` | `{ kind: "agent"\|"team", id }`, sent by "to agent or team" |
@@ -552,7 +553,9 @@ It comes from the code editor's POMP menu: explain, review, ask, add file, and "
 - It puts `text` into an empty input. An unsent draft is kept and the text appended, never sent.
 - `send` sends it once, right away, if the chat can take a message. Otherwise the text stays in the input.
 - A page that was not ready gets it once, at the end of its `ui/ready` snapshot, if within a minute.
-- Bounded: text ≤ 4000, ≤ 20 files.
+- Text is bounded to 4000 characters. Reference paths are at most 1024 characters, target paths 4096; there is no file-count truncation. Oversized prefill payloads are refused.
+- A nonempty `requestFiles` preserves the draft and references, replaces only the target set, disables editor selection context and never auto-sends, even if `send` was set. ACP refuses it without changing drafts.
+- Scope is conversation-local. Ordinary reference additions do not clear it; an explicit editor-context request does.
 
 ### work/open
 
@@ -660,8 +663,8 @@ A host-level error not tied to a turn. It is sent when:
 | `chat/steer` | same as `chat/send` | Send to the running agent now; an ordinary send when nothing runs. See "Steering". |
 | `btw/ask` | `{ requestId, question, recordId? }` | Ask a side question about this conversation. See "Side questions (/btw)". |
 | `btw/cancel` | `{ recordId? }` | Cancel the running side question. |
-| `workspace/countDraftTokens` | `{ requestId, root, sessionId, modelId, provider, text, attachments?: [{ path }] }` | Count the draft, attachments and knowledge with the local tokenizer. |
-| `workspace/countBasketTokens` | `{ requestId, root, sessionId?, includeEditorContext, attachments?: [{ path }] }` | Estimate what the next message adds beyond its text. |
+| `workspace/countDraftTokens` | `{ requestId, root, sessionId, modelId, provider, text, attachments?: [{ path }], requestFiles?: [{ path }] }` | Count the draft, reference/target path metadata and knowledge with the local tokenizer. |
+| `workspace/countBasketTokens` | `{ requestId, root, sessionId?, includeEditorContext, attachments?: [{ path }], requestFiles?: [{ path }] }` | Estimate what the next message adds beyond its text. |
 | `workspace/findFiles` | `{ requestId, query, limit? }` | Files for the `@` mention list. |
 | `workspace/pickFiles` | `{ requestId }` | Show a multi-select file dialog. |
 | `chat/stop` | `{}` | Abort the running turn (design: cancel). |
@@ -700,7 +703,7 @@ A host-level error not tied to a turn. It is sent when:
 Payload:
 
 ```
-{ clientMessageId, text, includeEditorContext, attachments?: [{ path }],
+{ clientMessageId, text, includeEditorContext, attachments?: [{ path }], requestFiles?: [{ path }],
   team?: string, agent?: string, agentInstance?: string, main?: true }
 ```
 
@@ -713,6 +716,14 @@ Payload:
 
 - `attachments` are full paths, taken from `workspace/files`.
 - The host lists them in the prompt for omp to read.
+
+**Whole-file targets**
+
+- `requestFiles` are existing physical files with absolute paths, separate from `attachments`. The host validates every path and refuses oversized prompts rather than truncating targets.
+- The prompt requests complete current contents, bounded reads as needed, and modifications limited to these targets. It omits active-selection context. `read_buffer` is preferred when available; disk-only recipients must disclose that unsaved changes are excluded.
+- This is task intent, not a sandbox or permission grant. Reference attachments are context, not extra targets.
+- Targets survive queue edit/reorder/dispatch, steering, direct delivery, cross-tab relay, history restoration and retry. Transcript metadata, relay records and run history carry `requestFiles: [{ path }]`.
+- Unsupported ACP and engine slash-command sends are rejected; correlated rejection restores the draft and scope.
 
 **Targets**
 
@@ -748,7 +759,7 @@ Payload:
 
 #### `workspace/countBasketTokens`
 
-- It covers what the next message adds beyond its text: the editor context and the attachment list.
+- It covers what the next message adds beyond its text: the editor context and reference/whole-file target metadata. File contents are not pre-attached or counted.
 - The editor context is gathered exactly as a send would, when it is on.
 - The result is a characters-based estimate: ASCII counts four per token, other characters one each.
 - It is not the model's tokenizer.
@@ -1226,7 +1237,7 @@ between turns, the message starts a new child turn. Codex children use the same 
 - Conversation settings hold the tools to use and the screen-input control.
 - A skill row's **채팅에서 사용** action puts the command into the chat input. It does not send it.
 - Rules are ordered **지금 적용 중 → 규칙**. The first section holds the rules that apply to the next prompt.
-- MCP is ordered **Antigravity · POMP 도구 → MCP 서버 → 추가할 수 있는 서버**. The first section configures an external official client; the last is the native server catalog.
+- MCP is ordered **MCP 서버 → 추가할 수 있는 서버**. Antigravity is an on/off row in the server table, included in search, pagination and counts; it is not a separate setup card.
 - The code search index handles lexical refresh automatically.
 - It also rebuilds or stops the vector index automatically when the local embedding option changes.
 - Sub-screen chips show the item count. A count of 0 is dimmed but still clickable.
@@ -1711,19 +1722,20 @@ mcp/state:   { servers: [{ name, scope: "project"|"user", type: "stdio"|"http"|"
                            command?, args?, env?: { [name]: "••••" }, url?,
                            enabled, error?, hash? }],
                restartRequired, message?, antigravity? }
-mcp/command: { requestId, action: "refresh"|"save"|"delete"|"enable"|"disable"|"test"|"restart"|"antigravity-refresh"|"antigravity-setup",
-               scope?, name?, server?, expectedHash? }
+mcp/command: { requestId, action: "refresh"|"save"|"delete"|"enable"|"disable"|"test"|"restart"|"antigravity-refresh"|"antigravity-set",
+               scope?, name?, server?, expectedHash?, enabled? }
 ```
 
 **External Antigravity setup**
 
-- `antigravity` contains `{ installed, configured, canConfigure, applicationPath?, configPath?, workspaceRoot?, serverName?, configHash?, message? }`.
-- `antigravity-refresh` probes the official desktop app or `agy` CLI, the actual IDE workspace, the verified bundled engine and the shared `~/.gemini/config/mcp_config.json`. It never starts an application or reads OAuth credentials.
-- `antigravity-setup` sends `name: serverName` and `expectedHash: configHash` from that snapshot. The host re-resolves the actual workspace, rejects stale identity/revision or foreign entries, and atomically merges only that workspace's `pomp_<hash>` server. Empty config files are accepted; malformed/duplicate-key files remain unchanged.
-- Other servers, unknown fields and existing user controls are preserved. An identical setup is a byte-preserving no-op. The registered arguments are `mcp-server --cwd <workspace> --allow-write --allow-exec`; the UI discloses file/shell permissions and that cwd is not a sandbox.
-- These two actions bypass the inference command queue and engine-offline/busy gates, but retain UI inert/hidden/transition/pending guards. They do not set native `restartRequired`, restart the engine or alter provider settings.
-- Tools remains available before provider setup. The MCP section probes once when shown; it never automatically runs setup.
-- `configured` means the file matches the bundled command and arguments, not that the official client is logged in or connected. The client must reload MCP or restart as needed.
+- `antigravity` contains `{ installed, configured, enabled, canConfigure, canDisable, applicationPath?, configPath?, workspaceRoot?, serverName?, configHash?, message? }`.
+- `antigravity-refresh` probes the official desktop app or `agy` CLI, the actual IDE workspace, the verified bundled engine and shared `~/.gemini/config/mcp_config.json`. It never starts an application or reads OAuth credentials.
+- `antigravity-set` requires `enabled`, `name: serverName` and `expectedHash: configHash` from the snapshot. The host re-resolves the workspace and refuses stale, malformed or foreign entries unchanged.
+- Enabling atomically merges only that workspace's owned `pomp_<hash>` entry. Other servers and unknown fields are preserved. The registered arguments are `mcp-server --cwd <workspace> --allow-write --allow-exec`; the row discloses file/shell permissions and that cwd is not a sandbox.
+- Disabling removes only the owned workspace entry, even if the app or bundled engine is unavailable. Repeated off and identical on are byte-preserving no-ops.
+- These actions bypass the inference queue and engine-offline/busy gates, but retain UI inert/hidden/transition/pending guards. They do not set native `restartRequired`, restart the engine or alter provider settings.
+- Tools remains available before provider setup. The MCP section probes when shown; it never automatically enables the connection.
+- `enabled` means an owned entry exists; `configured` means it matches the current verified bundle. Neither proves login or a live connection. The official client may need an MCP reload or restart.
 
 **Official ACP conversation backend**
 

@@ -45,7 +45,7 @@ namespace Pomp.Hosting
                 throw new InvalidOperationException(response.Error ?? "Could not read the conversation transcript.");
             }
 
-            var shown = new List<(string Role, string Text, ChatEditorContext? EditorContext, ChatAdvisorNotesPayload? Notes, object? Relay)>();
+            var shown = new List<(string Role, string Text, ChatEditorContext? EditorContext, ChatAdvisorNotesPayload? Notes, object? Relay, List<ChatAttachment>? RequestFiles)>();
             // What this conversation sent to other agents and teams, and how it ended ("pomp-relay" custom messages, PompSession.Relay.cs).
             var relaySent = new HashSet<string>(StringComparer.Ordinal); var relayResults = new Dictionary<string, ChatRelayResultPayload>(StringComparer.Ordinal);
             foreach (var message in all.OfType<JObject>())
@@ -55,7 +55,7 @@ namespace Pomp.Hosting
                 {
                     // The notes advisors gave, where they came in the conversation.
                     var notes = AdvisorNotesPayload(message);
-                    if (notes.Notes.Count > 0) shown.Add(("advisor", string.Empty, null, notes, null));
+                    if (notes.Notes.Count > 0) shown.Add(("advisor", string.Empty, null, notes, null, null));
                     continue;
                 }
 
@@ -63,8 +63,8 @@ namespace Pomp.Hosting
                 {
                     // Each once, where the engine has it: a record written twice (an unconfirmed write, sent again) is one entry.
                     var details = message["details"] as JObject;
-                    if (RelaySentFromRecord(details) is ChatRelaySentPayload sent) { if (relaySent.Add(sent.RelayId)) shown.Add(("relay", string.Empty, null, null, sent)); }
-                    else if (RelayResultFromRecord(details) is ChatRelayResultPayload result && !relayResults.ContainsKey(result.RelayId)) { relayResults[result.RelayId] = result; shown.Add(("relay", string.Empty, null, null, result)); }
+                    if (RelaySentFromRecord(details) is ChatRelaySentPayload sent) { if (relaySent.Add(sent.RelayId)) shown.Add(("relay", string.Empty, null, null, sent, null)); }
+                    else if (RelayResultFromRecord(details) is ChatRelayResultPayload result && !relayResults.ContainsKey(result.RelayId)) { relayResults[result.RelayId] = result; shown.Add(("relay", string.Empty, null, null, result, null)); }
                     continue;
                 }
 
@@ -75,14 +75,15 @@ namespace Pomp.Hosting
 
                 var text = MessageText(message["content"]);
                 var editorContext = role == "user" ? PromptDisplay.EditorContext(text, root) : null;
+                var requestFiles = role == "user" ? PromptDisplay.RequestFiles(text) : null;
                 if (role == "user")
                 {
                     text = PromptDisplay.UserText(text, keepRoutingBrief: true);
                 }
 
-                if (text.Length > 0)
+                if (text.Length > 0 || requestFiles?.Count > 0)
                 {
-                    shown.Add((role!, text.Length > RestoredTextLimit ? text.Substring(0, RestoredTextLimit) : text, editorContext, null, null));
+                    shown.Add((role!, text.Length > RestoredTextLimit ? text.Substring(0, RestoredTextLimit) : text, editorContext, null, null, requestFiles));
                 }
             }
 
@@ -101,7 +102,7 @@ namespace Pomp.Hosting
 
             string? openPrompt = null;
             var index = 0;
-            foreach (var (role, text, editorContext, notes, relay) in shown.Skip(skipped))
+            foreach (var (role, text, editorContext, notes, relay, requestFiles) in shown.Skip(skipped))
             {
                 CheckCurrent();
                 index++;
@@ -135,7 +136,7 @@ namespace Pomp.Hosting
                     }
 
                     openPrompt = id;
-                    _ui.Post(UiMessageTypes.ChatTurnStarted, new ChatTurnStartedPayload { PromptId = id, Text = text, EditorContext = editorContext });
+                    _ui.Post(UiMessageTypes.ChatTurnStarted, new ChatTurnStartedPayload { PromptId = id, Text = text, EditorContext = editorContext, RequestFiles = requestFiles });
                     continue;
                 }
 

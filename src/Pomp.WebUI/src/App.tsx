@@ -235,10 +235,15 @@ export function App() {
   /** A message while a reply runs is queued, also a question sent from the code editor. */
   const sending = useRef(false); const queueSubmitting = useRef<string | undefined>(undefined);
   /** `toMain`: a request that belongs to the Default (POMP) tab's conversation (editor menu): from another tab it waits in the input while the page switches there. */
-  const sendMessage = useCallback((text: string, attachments: WorkspaceFile[] = [], clearDraft = false, target?: SendTarget | null, preserveDraftTarget = false, includeEditorContext?: boolean, toMain = false): SendResult => {
+  const sendMessage = useCallback((text: string, attachments: WorkspaceFile[] = [], clearDraft = false, target?: SendTarget | null, preserveDraftTarget = false, includeEditorContext?: boolean, toMain = false, requestFiles: WorkspaceFile[] = []): SendResult => {
     const current = latest.current;
     const currentBackend = backendId(current.session, current.backend);
     const allowed = capabilities(current.session, currentBackend);
+    if (requestFiles.length && !allowed.nativeOmp) {
+      dispatch({ type: 'localNotice', level: 'warning', message: makeTranslate(current.locale)('composer.filesUnsupported') });
+      return { ok: false, reason: 'notified' };
+    }
+    if (requestFiles.length && !text.trim()) return { ok: false, reason: 'notified' };
     if (!allowed.editorContext && includeEditorContext === true) {
       dispatch({ type: 'localNotice', level: 'warning', message: makeTranslate(current.locale)('acp.noEditorContext') });
       return { ok: false, reason: 'notified' };
@@ -259,13 +264,14 @@ export function App() {
     if (current.session?.recoveryStatus === 'restoring' || current.session?.recoveryStatus === 'failed') return { ok: false, reason: 'busy' };
     if (toMain && destination?.kind === 'main' && latestPartnerTab()) { showPomp(); return { ok: false, reason: 'busy' }; }
     const id = newId();
-    const message = { clientMessageId: id, text, includeEditorContext: allowed.editorContext && (includeEditorContext ?? current.includeEditorContext),
+    const message = { clientMessageId: id, text, includeEditorContext: !requestFiles.length && allowed.editorContext && (includeEditorContext ?? current.includeEditorContext),
+      ...(requestFiles.length ? { requestFiles: requestFiles.map(file => ({ path: file.fullPath })) } : {}),
       ...(attachments.length > 0 ? { attachments: attachments.map(file => ({ path: file.fullPath })) } : {}), ...(allowed.nativeOmp ? targetPayload(destination) : {}) };
     const rejection = promptRejection(text, { type: 'chat/send', payload: message }, attachments.map(file => file.fullPath));
     if (rejection) return { ok: false, ...rejection };
     if (queued) queueSubmitting.current = id; else sending.current = true;
     if (!send('chat/send', message)) { sending.current = false; queueSubmitting.current = undefined; return { ok: false, reason: 'hostUnavailable' }; }
-    dispatch({ type: 'userSend', id, text, attachments, clearDraft, target: destination, preserveDraftTarget, queued });
+    dispatch({ type: 'userSend', id, text, attachments, requestFiles, clearDraft, target: destination, preserveDraftTarget, queued });
     rememberPrompt(current.session?.workingDirectory ?? '', text); // every sent prompt, also one an editor command composed
     return { ok: true };
   }, []);
@@ -281,22 +287,28 @@ export function App() {
    * `/steer`: while the agent works the text goes to it now (`chat/steer`), else it is an ordinary send. No bubble before the host's
    * `chat/steered`; until then the message is tracked like a queued send, so a refusal or a lost answer gives the text and files back.
    */
-  const steerMessage = useCallback((text: string, attachments: WorkspaceFile[] = []): SendResult => {
+  const steerMessage = useCallback((text: string, attachments: WorkspaceFile[] = [], requestFiles: WorkspaceFile[] = []): SendResult => {
     const current = latest.current;
     const allowed = capabilities(current.session, backendId(current.session, current.backend));
+    if (requestFiles.length && (!allowed.nativeOmp || !text.trim())) {
+      if (!allowed.nativeOmp) dispatch({ type: 'localNotice', level: 'warning', message: makeTranslate(current.locale)('composer.filesUnsupported') });
+      return { ok: false, reason: 'notified' };
+    }
     if (!allowed.steer) return { ok: false, reason: 'hostUnavailable' };
     if (!allowed.nativeOmp && attachments.some(file => /\.(png|jpe?g|gif|webp|bmp)$/i.test(file.fullPath) ? !allowed.images : !allowed.editorContext)) {
       dispatch({ type: 'localNotice', level: 'warning', message: makeTranslate(current.locale)('acp.noAttachments') });
       return { ok: false, reason: 'notified' };
     }
-    if (!(current.phase === 'running' || current.session?.isStreaming === true)) return sendMessage(text, attachments, true);
+    if (!(current.phase === 'running' || current.session?.isStreaming === true)) return sendMessage(text, attachments, true, undefined, false, undefined, false, requestFiles);
     if (allowed.nativeOmp ? current.bridge.state !== 'running' : current.acp?.connected !== true || !current.acp.sessionId || current.acp.authRequired) return { ok: false, reason: 'hostUnavailable' };
     if (pendingSwitch.current || current.replaying || current.pendingNewSession !== undefined || current.session?.recoveryStatus === 'restoring' || current.session?.recoveryStatus === 'failed') return { ok: false, reason: 'busy' };
-    const message = { clientMessageId: newId(), text, includeEditorContext: allowed.editorContext && current.includeEditorContext, ...(attachments.length > 0 ? { attachments: attachments.map(file => ({ path: file.fullPath })) } : {}) };
+    const message = { clientMessageId: newId(), text, includeEditorContext: !requestFiles.length && allowed.editorContext && current.includeEditorContext,
+      ...(requestFiles.length ? { requestFiles: requestFiles.map(file => ({ path: file.fullPath })) } : {}),
+      ...(attachments.length > 0 ? { attachments: attachments.map(file => ({ path: file.fullPath })) } : {}) };
     const rejection = promptRejection(text, { type: 'chat/send', payload: message }, attachments.map(file => file.fullPath));
     if (rejection) return { ok: false, ...rejection };
     if (!send('chat/steer', message)) return { ok: false, reason: 'hostUnavailable' };
-    dispatch({ type: 'userSend', id: message.clientMessageId, text, attachments, clearDraft: true, queued: true, preserveDraftTarget: true });
+    dispatch({ type: 'userSend', id: message.clientMessageId, text, attachments, requestFiles, clearDraft: true, queued: true, preserveDraftTarget: true });
     rememberPrompt(current.session?.workingDirectory ?? '', text);
     return { ok: true };
   }, [sendMessage]);
@@ -325,7 +337,7 @@ export function App() {
   const closeBtw = (): void => { cancelBtw(); dispatch({ type: 'btwClose' }); window.requestAnimationFrame(() => inputRef.current?.focus()); };
   const retryTurn = useCallback((item: TurnErrorItem) => {
     if (item.retryText === undefined) return;
-    const result = sendMessage(item.retryText, item.retryAttachments, false, item.retryTarget ?? null, true);
+    const result = sendMessage(item.retryText, item.retryAttachments, false, item.retryTarget ?? null, true, undefined, false, item.retryRequestFiles);
     if (!result.ok && result.reason !== 'busy') dispatch({ type: 'localNotice', level: 'error', message: makeTranslate(latest.current.locale)('error.hostUnavailable') });
   }, [sendMessage]);
 
@@ -434,6 +446,7 @@ export function App() {
     prefillTarget.current = undefined;
     setTab('chat'); setListOpen(false);
     const payload = state.prefill?.payload;
+    if (payload?.requestFiles?.length) return;
     if (payload?.target && latestPartnerTab()) prefillTarget.current = { target: payload.target, from: sessionId };
     if (payload?.send || payload?.target || payload?.pickTarget) showPomp();
   }, [prefillSeq]);
@@ -500,7 +513,6 @@ export function App() {
     <main className="main">
       <section id="page-chat" className="tab-page chat-page" role="tabpanel" aria-labelledby="tab-chat" hidden={activeTab !== 'chat'} inert={activeTab !== 'chat' || undefined}>
         <SessionHeader session={state.session} history={history} disabled={sessionBlocked} newDisabled={tabBlocked} onNew={newSession} listOpen={listOpen} onToggleList={() => { if (listOpen) closeList(); else openList(); }}>
-          <BackendPicker active={backend} state={state.backend} disabled={newSessionPending} onSelect={selectBackend} />
           <PartnerPicker native={native} key={workspaceKey} tabs={state.tabs && sameRoot(state.tabs.root, workspaceKey) ? state.tabs : null} agents={state.agents} replies={state.conversationReplies} sessionId={sessionId} disabled={tabBlocked} busy={busy || state.session?.hasPendingAsyncWork === true} lockedTitle={newSessionPending ? translate('partner.locked') : undefined} request={native ? partnerRequest : undefined} shortcuts={shortcuts} input={inputRef} onSwitch={switchTab} onRefreshRoster={() => { if (native && connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }} />
         </SessionHeader>
         <div className="conversation-list-anchor">{listOpen && <div ref={listRef} id="conversation-list" className="conversation-list"><SessionHistory locale={state.locale} sessionId={sessionId} sessionName={state.session?.sessionName} partner={scopedTabs?.partner ?? { kind: 'main' }} history={history} disabled={sessionBlocked} newDisabled={tabBlocked} switchDisabled={tabBlocked} onNew={newSession} onOpened={closeList} onClose={closeList} /></div>}</div>
@@ -544,7 +556,7 @@ export function App() {
         {native && activeTab === 'remote' && <RemotePanel setup={state.setup} replies={state.setupReplies} cmd={setupCmd} required={setupRequired} connected={connected} />}
       </section>
       <section id="page-accounts" className="tab-page" role="tabpanel" aria-labelledby="tab-accounts" hidden={activeTab !== 'accounts'} inert={activeTab !== 'accounts' || undefined}>
-        {activeTab === 'accounts' && <div className="accounts-page"><BackendPicker field active={backend} state={state.backend} disabled={newSessionPending} onSelect={selectBackend} />
+        {activeTab === 'accounts' && <div className="accounts-page"><BackendPicker active={backend} state={state.backend} disabled={newSessionPending} onSelect={selectBackend} />
           {native ? <SetupPanel setup={state.setup} replies={state.setupReplies} cmd={setupCmd} sessionModel={state.session?.model} required={setupRequired} connected={connected} locale={state.locale} inert={false} onOpenRemote={() => changeTab('remote')} /> : <p className="hint" data-testid="acp-accounts-note">{translate('acp.accountsPage')}</p>}
         </div>}
       </section>

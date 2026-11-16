@@ -73,7 +73,7 @@ export function useToolsState({ locale, connected, busy, active, workspaceKey, s
     const key = `${domain}.${payload.action}`;
     const t = toolsTranslate(current.locale);
     const inFlight = [...requests.current.values()].some(request => request.domain === domain);
-    const external = domain === 'mcp' && (payload.action === 'antigravity-refresh' || payload.action === 'antigravity-setup');
+    const external = domain === 'mcp' && (payload.action === 'antigravity-refresh' || payload.action === 'antigravity-set');
     // One text per refusal. `disabled` is a new conversation starting or another dialog open (the shell folds both into it).
     const refusal = !current.connected && !external ? 'tools.hostUnavailable' : !current.active || (external && current.view !== 'mcp') ? 'tools.inactive'
       : current.disabled && (external || payload.action !== 'refresh') ? 'tools.sessionPending'
@@ -83,20 +83,21 @@ export function useToolsState({ locale, connected, busy, active, workspaceKey, s
       // The domain's request in flight owns its pending state (keyed by action): a refused request never overwrites it.
       if (!inFlight) setActions(previous => {
         const next = { ...previous };
-        if (external) { delete next['mcp.antigravity-refresh']; delete next['mcp.antigravity-setup']; }
+        if (external) { delete next['mcp.antigravity-refresh']; delete next['mcp.antigravity-set']; }
         next[key] = { pending: false, ok: false, error };
         return next;
       });
       return Promise.resolve({ requestId: '', ok: false, error });
     }
     const requestId = newId(); const requestScope = scope.current;
+    if (external && payload.action === 'antigravity-refresh') antigravityProbed.current = true;
     const mcpPayload = domain === 'mcp' ? payload as ToolsCommandFor<'mcp'> : undefined;
     const tested = mcpPayload?.action === 'test' ? snapshots.current.mcp.servers.find(server => server.name === mcpPayload.name && server.scope === mcpPayload.scope) : undefined;
     const testServer = tested ? { name: tested.name, scope: tested.scope, configuration: mcpConfiguration(tested) } : undefined;
     setActions(previous => {
       const next: Record<string, ToolsActionState> = { ...previous, [key]: { requestId, pending: true, testServer } };
       if (external) {
-        delete next['mcp.antigravity-refresh']; delete next['mcp.antigravity-setup'];
+        delete next['mcp.antigravity-refresh']; delete next['mcp.antigravity-set'];
         next[key] = { requestId, pending: true };
       }
       const test = previous['mcp.test'];
@@ -169,8 +170,10 @@ export function useToolsState({ locale, connected, busy, active, workspaceKey, s
             const snapshot = { ...message.payload,
               antigravity: message.payload.antigravity ? {
                 installed: message.payload.antigravity.installed === true,
+                enabled: message.payload.antigravity.enabled === true,
                 configured: message.payload.antigravity.configured === true,
                 canConfigure: message.payload.antigravity.canConfigure === true,
+                canDisable: message.payload.antigravity.canDisable === true,
                 ...Object.fromEntries(Object.entries(message.payload.antigravity).filter(([key, value]) =>
                   ['applicationPath', 'configPath', 'workspaceRoot', 'serverName', 'configHash', 'message'].includes(key) && typeof value === 'string')),
               } : undefined,
@@ -265,7 +268,7 @@ export function useToolsState({ locale, connected, busy, active, workspaceKey, s
 
   const mcpPending = Object.entries(actions).some(([key, state]) => key.startsWith('mcp.') && state.pending);
   useEffect(() => {
-    // Wait for a native MCP refresh, but probe once even when the engine is stopped. Never auto-run setup or retry failures in a loop.
+    // Wait for a native MCP refresh, but probe once even when the engine is stopped. Never auto-enable or retry failures in a loop.
     if (!active || disabled || view !== 'mcp' || !owned.current.has('mcp') || mcpPending || antigravityProbed.current) return;
     let cancelled = false;
     // Showing the tab queues its list refresh in a microtask (useRefreshOnShow, declared above): the probe queues behind it, so the

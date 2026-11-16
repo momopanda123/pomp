@@ -3,7 +3,7 @@
 The omp-side pieces of pomp (Visual Studio 2019/2022/2026 host). Plain TypeScript, zero dependencies, no build step:
 omp (Bun) loads the `.ts` files directly.
 
-**Compatibility:** extension loading and command registration tested over RPC with omp **18.20.0** (and 18.18.9 / 18.15.0 / 18.12.6 before it); Visual Studio interaction last tested with 18.15.0 (earlier with 18.12.1, 18.10.4, 18.10.3, 18.8.6 and 18.4.3) (`can1357/oh-my-pi`); requires omp **>= 18.3.2** (`ctx.agent`, used to keep the
+**Compatibility:** extension loading, command registration and two completed RPC turns tested with omp **18.21.0** (and 18.20.0 / 18.18.9 / 18.15.0 / 18.12.6 before it); Visual Studio interaction last tested with 18.15.0 (earlier with 18.12.1, 18.10.4, 18.10.3, 18.8.6 and 18.4.3) (`can1357/oh-my-pi`); requires omp **>= 18.3.2** (`ctx.agent`, used to keep the
 guidance out of subagents; `tool_call` `additionalContext`, used by `warn` mode, exists since 18.3.1). The API facts below
 were read from the upstream docs and source (`main`, tree `33f887a`, the 18.4.x line). Loading the package into a real
 omp 18.8.6 was verified by an out-of-repo test: all modules load, every `/pomp-*` command (including `/pomp-context`, `/pomp-guard`) is registered,
@@ -183,6 +183,7 @@ fail open.
 
 ## Verification
 
+* **Loaded into the bundled patched omp 18.21.0 binary** over isolated RPC: 23 `pomp-*` commands registered, two loopback-provider conversation turns completed with `agent_end`, `prompt_result` and `session_settled`, and the session returned to idle without `extension_error`. Unknown-model thinking capability probes were separate from the conversation turns. Native smoke, embedded license matching, the shared-model reasoning-list regression, and four compiled MCP capability/edit/cancellation/disconnect regressions passed. No real-provider prompts or Visual Studio installation/login checks were performed for this engine update.
 * **Loaded into the bundled patched omp 18.20.0 binary** over isolated RPC with a loopback test provider (no external model calls): `get_available_commands` listed 23 `pomp-*` commands (including `pomp-context`, `pomp-team` and `pomp-stop`), read and approved `bash` turns completed, and no `extension_error` frame arrived. Thinking-level selection, unsupported fast-mode rejection, four-status plan updates, `/context` instruction-file rows, nonzero token usage, and the usage CLI envelope were checked. Host context-parser regression checks passed separately. The gateway advertised the configured reasoning ladder and an empty ladder for a non-reasoning model. The executable's version, hashes and embedded license notices matched the pinned build.
 * **Run in Visual Studio with the bundled omp 18.15.0**: a chat turn, an approved `bash` call, an agent tab's own turn, and model sharing (broker and gateway, a sign-in-less PC connecting and chatting) work; omp 18.12.1 before it (18.10.4, 18.10.3, 18.8.6 and 18.4.3 earlier, those by an out-of-repo test with no provider calls): both commands (`pomp-context`,
   `pomp-guard`) are present, `/pomp-context` completes and no `extension_error` frame appears.

@@ -75,7 +75,7 @@ interface ComposerProps {
   dispatch: Dispatch<Action>;
   /** `target` undefined: the chosen one-message target (else the tab's conversation); null: the tab's conversation, whatever is chosen. `toMain`:
    *  an editor request of the Default (POMP) tab's conversation (from another tab it waits in the input while the page switches there). */
-  onSend: (text: string, attachments: WorkspaceFile[], clearDraft?: boolean, target?: SendTarget | null, preserveDraftTarget?: boolean, includeEditorContext?: boolean, toMain?: boolean) => SendResult;
+  onSend: (text: string, attachments: WorkspaceFile[], clearDraft?: boolean, target?: SendTarget | null, preserveDraftTarget?: boolean, includeEditorContext?: boolean, toMain?: boolean, requestFiles?: WorkspaceFile[]) => SendResult;
   onStop: () => void;
   commands: CommandInfo[];
   /** Commands the host left out because the list passed its message size. */
@@ -84,7 +84,7 @@ interface ComposerProps {
   /** `/goal <text>`: open the goal card for that text (nothing starts before its answer). */
   onGoal?: (text: string) => void;
   /** `/steer <text>`: to the running agent now (with nothing running, an ordinary send) with the draft's attachments. */
-  onSteer?: (text: string, attachments: WorkspaceFile[]) => SendResult;
+  onSteer?: (text: string, attachments: WorkspaceFile[], requestFiles?: WorkspaceFile[]) => SendResult;
   /** Skills the Tools tab switched off: the command list leaves them out. */
   skillsOff?: readonly string[];
   /** The latest request of the code editor's POMP menu (composer/prefill). */
@@ -496,10 +496,12 @@ export function Composer({ capabilities: suppliedCapabilities, locale, workspace
   }, [basketRequest, requestPending]);
   const text = draft.text.trim();
   const sendPaths = useMemo(() => draft.attachments.map(file => file.fullPath), [draft.attachments]);
+  const scoped = !!draft.requestFiles?.length;
+  const requestPaths = useMemo(() => draft.requestFiles?.map(file => file.fullPath), [draft.requestFiles]);
   const rejection = useMemo(() => promptRejection(draft.text, {
-    type: 'chat/send', payload: { clientMessageId: 'draft', text, includeEditorContext, ...targetPayload(selectedTarget), attachments: sendPaths.map(path => ({ path })) },
-  }, sendPaths), [text, draft.text, sendPaths, includeEditorContext, selectedTarget]);
-  const canSend = connected && !queueBlocked && !requestPending && !newSessionPending && !draft.composing && !dictating && (text.length > 0 || draft.attachments.length > 0);
+    type: 'chat/send', payload: { clientMessageId: 'draft', text, includeEditorContext: !scoped && includeEditorContext, ...targetPayload(selectedTarget), attachments: sendPaths.map(path => ({ path })), ...(requestPaths?.length ? { requestFiles: requestPaths.map(path => ({ path })) } : {}) },
+  }, sendPaths), [text, draft.text, sendPaths, includeEditorContext, selectedTarget, scoped, requestPaths]);
+  const canSend = connected && !queueBlocked && !requestPending && !newSessionPending && !draft.composing && !dictating && (text.length > 0 || !scoped && draft.attachments.length > 0);
   const failureMessage = failure ? failureText(t, failure) : rejection ? failureText(t, rejection) : null;
   // The composer's notices go to the VS status bar (with errors in the POMP log), not as text between its controls.
   useStatusReport(failureMessage);
@@ -571,7 +573,7 @@ export function Composer({ capabilities: suppliedCapabilities, locale, workspace
         if (basketOpen) { setBasketOpen(false); inputRef.current?.focus({ preventScroll: true }); }
         else { setTargetOpen(false); closePermissionPopups(); basketByKey.current = true; focusBasketOnOpen.current = true; setBasketOpen(true); }
       } else if (forContext) {
-        onIncludeEditorContextChange(!includeEditorContext);
+        if (!scoped) onIncludeEditorContextChange(!includeEditorContext);
       } else if (step) {
         // -1 is the chat's partner (no one-message target).
         const index = choices.findIndex(item => targetKey(item.target) === targetKey(selectedTarget));
@@ -590,7 +592,7 @@ export function Composer({ capabilities: suppliedCapabilities, locale, workspace
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [native, caps.editorContext, hasTargets, shortcuts.sendTargetPicker, shortcuts.previousTarget, shortcuts.nextTarget, shortcuts.permissionMode, shortcuts.contextBasket, shortcuts.editorContext, connected, draft.composing, requestPending, mention, slash, permissionDisabled, permissionOpen, permissionConfirm, choices, selectedTarget, onSelectTarget, basketOpen, includeEditorContext, onIncludeEditorContextChange]);
+  }, [native, caps.editorContext, hasTargets, shortcuts.sendTargetPicker, shortcuts.previousTarget, shortcuts.nextTarget, shortcuts.permissionMode, shortcuts.contextBasket, shortcuts.editorContext, connected, draft.composing, requestPending, mention, slash, permissionDisabled, permissionOpen, permissionConfirm, choices, selectedTarget, onSelectTarget, basketOpen, includeEditorContext, onIncludeEditorContextChange, scoped]);
 
   const [stopping, setStopping] = useState(false);
   useEffect(() => {
@@ -667,6 +669,15 @@ export function Composer({ capabilities: suppliedCapabilities, locale, workspace
   useEffect(() => {
     if (!prefill) return;
     const { payload } = prefill;
+    autoSend.current = null;
+    deferredMain.current = null;
+    if (payload.requestFiles?.length) {
+      if (!native) dispatch({ type: 'localNotice', level: 'warning', message: t('composer.filesUnsupported') });
+      else dispatch({ type: 'requestFilesSet', files: payload.requestFiles });
+      window.requestAnimationFrame(() => inputRef.current?.focus());
+      return;
+    }
+    if (payload.includeEditorContext || payload.send) dispatch({ type: 'requestFilesSet', files: [] });
     const unsupportedTarget = !native && (payload.target !== undefined || payload.pickTarget === true);
     if (unsupportedTarget) dispatch({ type: 'localNotice', level: 'warning', message: 'Agent and team editor targets require OMP. The request was kept in this draft without sending.' });
     if (payload.files?.length) dispatch({ type: 'attachmentsAdd', files: payload.files });
@@ -714,6 +725,9 @@ export function Composer({ capabilities: suppliedCapabilities, locale, workspace
     if (rejection) { if (command) commandFailed(rejection); else setFailure(rejection); inputRef.current?.focus(); return; }
     // Alternate spellings are page commands too, not slash text for the engine's queue.
     const typed = command ? (native && Object.hasOwn(COMMAND_ALIASES, command[1]!) ? COMMAND_ALIASES[command[1]!] : command[1]!) : undefined;
+    if (scoped && (typed === 'btw' || typed === 'goal')) {
+      refuseCommand(t('composer.filesCommand')); return;
+    }
     const serverCommand = !native && typed && commands.some(item => item.name === typed);
     if (!native && command && typed && !serverCommand && !backendCommandAllowed(typed, caps)) {
       dispatch({ type: 'localNotice', level: 'warning', message: t('acp.noCommand', { name: typed }) }); return;
@@ -740,9 +754,9 @@ export function Composer({ capabilities: suppliedCapabilities, locale, workspace
       }
       else if (name === 'steer' || name === 'btw') {
         const rest = command[2]?.trim() ?? '';
-        if (name === 'steer' && !rest && draft.attachments.length === 0) { refuseCommand(t('steer.empty'), 'slash.args.steer'); return; }
+        if (name === 'steer' && !rest && (scoped || draft.attachments.length === 0)) { refuseCommand(t('steer.empty'), 'slash.args.steer'); return; }
         setTargetError(null);
-        result = name === 'steer' ? onSteer?.(rest, draft.attachments) ?? { ok: false, reason: 'hostUnavailable' } : onCommand(name, rest);
+        result = name === 'steer' ? onSteer?.(rest, draft.attachments, draft.requestFiles) ?? { ok: false, reason: 'hostUnavailable' } : onCommand(name, rest);
       }
       else if (name === 'agent' || name === 'team') {
         const args = /^(\S+)(?:\s+([\s\S]*))?$/u.exec(command[2]?.trim() ?? '');
@@ -755,8 +769,8 @@ export function Composer({ capabilities: suppliedCapabilities, locale, workspace
         // A name alone switches the conversation partner (a tab); with a message it is a one-message target.
         if (!args?.[2]?.trim() && onOpenPartner && target.kind !== 'instance') { onOpenPartner(target); result = { ok: true }; }
         // The tab's own partner is this conversation already: the message goes to it as usual, not relayed to a second tab of it.
-        else if (partnerTab && args?.[2]?.trim() && target.kind === partnerTab.kind && target.id.toLowerCase() === partnerTab.id.toLowerCase()) result = onSend(args[2].trim(), draft.attachments, true, null);
-        else { onSelectTarget(target); result = args?.[2]?.trim() ? onSend(args[2].trim(), draft.attachments, true, target) : { ok: true }; }
+        else if (partnerTab && args?.[2]?.trim() && target.kind === partnerTab.kind && target.id.toLowerCase() === partnerTab.id.toLowerCase()) result = onSend(args[2].trim(), draft.attachments, true, null, false, undefined, false, draft.requestFiles);
+        else { onSelectTarget(target); result = args?.[2]?.trim() ? onSend(args[2].trim(), draft.attachments, true, target, false, undefined, false, draft.requestFiles) : { ok: true }; }
       }
       else result = onCommand(name, command[2]?.trim() ?? '');
       setFailure(null);
@@ -765,9 +779,9 @@ export function Composer({ capabilities: suppliedCapabilities, locale, workspace
       if (result.ok) dispatch({ type: 'composerEdit', text: '', caret: 0, selectionEnd: 0 });
     } else {
       // A slash command takes the basket's checked files when it hands its text to the model; any other command leaves the basket for the next message.
-      const keepBasket = native && command !== null && !slashTakesReferences(text, commands);
+      const keepBasket = !scoped && native && command !== null && !slashTakesReferences(text, commands);
       const destination = override ?? (mainPending ? MAIN_TARGET : undefined);
-      const result = onSend(text, keepBasket ? [] : draft.attachments, !keepBasket, destination, false, undefined, destination?.kind === 'main');
+      const result = onSend(text, keepBasket ? [] : draft.attachments, !keepBasket, destination, false, undefined, destination?.kind === 'main', draft.requestFiles);
       // A slash command's failure is told in the chat; a message that waits for the switch to the Default (POMP) tab is not a failure.
       if (!result.ok && command && !(result.reason === 'busy' && destination?.kind === 'main')) { setFailure(null); commandFailed(result); }
       else setFailure(result.ok ? null : result);
@@ -977,7 +991,7 @@ export function Composer({ capabilities: suppliedCapabilities, locale, workspace
   const selectedKnowledge = native ? usableKnowledge(knowledge.items).filter(item => knowledge.selected.includes(item.id)).length : 0;
   const basketCount = draft.attachments.length + selectedKnowledge;
   const attachmentPaths = useMemo(() => draft.attachments.map(file => file.path), [draft.attachments]);
-  const placeholder = !connected ? t('composer.placeholderOffline') : dictating ? t('composer.placeholderDictation') : newSessionPending ? t('composer.placeholderNewSession') : requestPending ? t('composer.placeholderPending') : busy ? t('composer.placeholderBusy') : t('composer.placeholder');
+  const placeholder = !connected ? t('composer.placeholderOffline') : dictating ? t('composer.placeholderDictation') : newSessionPending ? t('composer.placeholderNewSession') : requestPending ? t('composer.placeholderPending') : scoped ? t('composer.filesHint') : busy ? t('composer.placeholderBusy') : t('composer.placeholder');
 
   // Right-click on the composer background: which controls it shows (checked = shown). Text fields keep their edit menu.
   const hiddenControls = useHiddenComposerControls();
@@ -1033,15 +1047,23 @@ export function Composer({ capabilities: suppliedCapabilities, locale, workspace
                 setBasketOpen(!basketOpen);
               }}><Icon name="paperclip" size={12} /><span className="context-count-value">{basketCount}</span></button>
             <div ref={basketPop} className="context-popover" data-testid="context-popover" hidden={!basketOpen} tabIndex={-1}>
-              <ContextBasket native={native} visible={basketOpen} files={draft.attachments} text={draft.text} dispatch={dispatch} locale={locale} workspaceKey={workspaceKey} sessionId={sessionId} model={model} connected={native && connected} disabled={requestPending || newSessionPending || draft.composing} />
+              <ContextBasket native={native} visible={basketOpen} files={draft.attachments} requestFiles={requestPaths} text={draft.text} dispatch={dispatch} locale={locale} workspaceKey={workspaceKey} sessionId={sessionId} model={model} connected={native && connected} disabled={requestPending || newSessionPending || draft.composing} />
             </div>
           </div>
           {native && <LiveEditorControls state={editorFollow} disabled={requestPending || newSessionPending || draft.composing} shortcuts={shortcuts} inputRef={inputRef} t={t} />}
           {native && <ComputerToggle computer={computer} reply={computerReply} request={computerRequest} onCommandNotice={computerNotice} connected={connected} blocked={newSessionPending} inputRef={inputRef} />}
-          {caps.editorContext && <button type="button" className="icon-btn" data-testid="editor-context" aria-pressed={includeEditorContext} title={t('composer.includeContext')} aria-label={t('composer.includeContext')} onClick={() => onIncludeEditorContextChange(!includeEditorContext)}><Icon name="context" size={14} /></button>}
+          {caps.editorContext && <button type="button" className="icon-btn" data-testid="editor-context" disabled={scoped} aria-pressed={!scoped && includeEditorContext} title={t('composer.includeContext')} aria-label={t('composer.includeContext')} onClick={() => onIncludeEditorContextChange(!includeEditorContext)}><Icon name="context" size={14} /></button>}
         </span>
-        {native && <ContextMeter session={session} basketTokens={basketTokens} workspaceKey={workspaceKey} sessionId={sessionId} includeEditorContext={includeEditorContext} attachmentPaths={attachmentPaths} connected={connected} />}
+        {native && <ContextMeter session={session} basketTokens={basketTokens} workspaceKey={workspaceKey} sessionId={sessionId} includeEditorContext={!scoped && includeEditorContext} attachmentPaths={attachmentPaths} requestFiles={requestPaths} connected={connected} />}
       </div>
+      {scoped && <div className="request-files" data-testid="request-files" role="group" aria-label={t('composer.wholeFiles')}>
+        <strong>{t('composer.wholeFiles')}</strong>
+        {draft.requestFiles!.map(file => <span className="request-file" key={file.fullPath} title={file.fullPath} data-testid="request-file">
+          <span>{file.path.split(/[\\/]/u).pop() || file.path}</span>
+          <button type="button" className="icon-btn" data-testid="request-file-remove" aria-label={t('composer.removeFile', { name: file.path })} onClick={() => dispatch({ type: 'requestFilesSet', files: draft.requestFiles!.filter(other => other.fullPath !== file.fullPath) })}><Icon name="x" size={10} /></button>
+        </span>)}
+        <button type="button" className="icon-btn" data-testid="request-files-clear" title={t('composer.clearFiles')} aria-label={t('composer.clearFiles')} onClick={() => dispatch({ type: 'requestFilesSet', files: [] })}><Icon name="x" size={12} /></button>
+      </div>}
       {/* The notices are shown in the VS status bar; screen readers get them here (not drawn), and the input refers to the reason. */}
       <div className="sr-only" id={noticeId} role="alert" data-testid="composer-notice">
         {[failureMessage, draft.fileError, targetLost, targetError, permissionError].filter(Boolean).join(' ')}

@@ -26,6 +26,7 @@ namespace Pomp.VisualStudio.Commands
             }
 
             var actions = services.Commands;
+            await actions.InitializeFileSelectionAsync();
             Register(commandService, services, PompCommandIds.ShowChatView, "Show chat", () => actions.ShowChatAsync(focus: true));
             Register(commandService, services, PompCommandIds.OpenPomp, "Show chat", () => actions.ShowChatAsync(focus: true), ("POMP 열기", "Open POMP"));
             Register(commandService, services, PompCommandIds.NewSession, "New session", () => actions.NewSessionAsync(), ("새 대화", "New Conversation"));
@@ -36,6 +37,18 @@ namespace Pomp.VisualStudio.Commands
             Register(commandService, services, PompCommandIds.FixCode, "Fix code", () => actions.FixCodeAsync(), ("이 코드 고치기", "Fix This Code"));
             Register(commandService, services, PompCommandIds.WriteTests, "Write tests", () => actions.WriteTestsAsync(), ("테스트 작성", "Write Tests"));
             Register(commandService, services, PompCommandIds.AddFileToContext, "Add file to context", () => actions.AddFileToContextAsync(), ("컨텍스트 바구니에 추가", "Add to Context Basket"));
+            Register(commandService, services, PompCommandIds.RequestFiles, "Request whole files",
+                () => actions.RequestFilesAsync(FileCommandOrigin.ActiveWindow), ("파일 전체에 요청", "Request Whole Files"),
+                isEnabled: () => actions.CanSelectFiles(FileCommandOrigin.ActiveWindow));
+            Register(commandService, services, PompCommandIds.RequestEditorFiles, "Request whole editor file",
+                () => actions.RequestFilesAsync(FileCommandOrigin.EditorMenu), ("파일 전체에 요청", "Request Whole Files"),
+                isEnabled: () => actions.CanSelectFiles(FileCommandOrigin.EditorMenu));
+            Register(commandService, services, PompCommandIds.RequestExplorerFiles, "Request selected whole files",
+                () => actions.RequestFilesAsync(FileCommandOrigin.SolutionExplorerMenu), ("선택한 파일 전체에 요청", "Request Selected Whole Files"),
+                isEnabled: () => actions.CanSelectFiles(FileCommandOrigin.SolutionExplorerMenu));
+            Register(commandService, services, PompCommandIds.AddExplorerFilesToContext, "Add selected files to context",
+                () => actions.AddExplorerFilesToContextAsync(), ("컨텍스트 바구니에 추가", "Add to Context Basket"),
+                isEnabled: () => actions.CanSelectFiles(FileCommandOrigin.SolutionExplorerMenu));
             // The selected lines open the chat window's knowledge form, where the knowledge is picked by name or named.
             Register(commandService, services, PompCommandIds.KnowledgeTag, "Add to knowledge", () => actions.AddToKnowledgeAsync(),
                 ("지식에 추가", "Add to Knowledge"), isEnabled: () => services.KnowledgeEditor != null);

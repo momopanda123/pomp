@@ -44,12 +44,12 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
   const drain = () => {
     if (options.busy() || queue.paused || !queue.items.length || queue.sessionId !== options.sessionId()) return;
     const item = queue.items.shift()!; if (!queue.items.length) queue.sessionId = null;
-    publishQueue(); options.start({ clientMessageId: `queued-${item.id}`, text: item.text, attachments: item.attachments, includeEditorContext: item.includeEditorContext, team: item.team, agent: item.agent, agentInstance: item.agentInstance });
+    publishQueue(); options.start({ clientMessageId: `queued-${item.id}`, text: item.text, attachments: item.attachments, requestFiles: item.requestFiles, includeEditorContext: item.includeEditorContext, team: item.team, agent: item.agent, agentInstance: item.agentInstance });
   };
   const enqueue = (input: UiToHost['chat/send'], canSteer = false): boolean => {
     if (queue.items.length && queue.sessionId !== options.sessionId()) { post('error', { code: 'queue_rejected', message: 'This queue belongs to another conversation.', retryable: false }); return false; }
     const id = `queue-${++counter}`;
-    queue.sessionId = options.sessionId(); queue.items.push({ id, text: input.text, includeEditorContext: input.includeEditorContext, attachments: input.attachments, team: input.team ?? undefined, agent: input.agent ?? undefined, agentInstance: input.agentInstance ?? undefined, createdAt: new Date().toISOString(), canSteer });
+    queue.sessionId = options.sessionId(); queue.items.push({ id, text: input.text, includeEditorContext: input.includeEditorContext, attachments: input.attachments, requestFiles: input.requestFiles, team: input.team ?? undefined, agent: input.agent ?? undefined, agentInstance: input.agentInstance ?? undefined, createdAt: new Date().toISOString(), canSteer });
     post('chat/queued', { clientMessageId: input.clientMessageId, itemId: id }); publishQueue(); return true;
   };
   // Like the host, a steering wrapper is message text; other slash commands cannot be sent in-flight.
@@ -89,7 +89,7 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
   const start = (input: UiToHost['chat/send'], promptId: string) => {
     const target = input.team ? { kind: 'team' as const, id: input.team, title: '기능 개발팀' } : input.agent ? { kind: 'agent' as const, id: input.agent, title: input.agent } : input.agentInstance ? { kind: 'dm' as const, id: input.agentInstance, title: input.agentInstance } : undefined;
     if (!target) return;
-    history.unshift({ id: `history-${++counter}`, sessionId: options.sessionId(), promptId, target, text: input.text, startedAt: new Date().toISOString(), status: 'running', pinned: false, members: [] }); history = history.slice(0, 200); publishHistory();
+    history.unshift({ id: `history-${++counter}`, sessionId: options.sessionId(), promptId, target, text: input.text, requestFiles: input.requestFiles, startedAt: new Date().toISOString(), status: 'running', pinned: false, members: [] }); history = history.slice(0, 200); publishHistory();
   };
   /** The run record of a relayed message follows its relay; the queue of this conversation is not involved. */
   const record = (promptId: string, status: string) => {
@@ -116,7 +116,7 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
       else if (p.action === 'steer') {
         const item = queue.items[index]!;
         if (!item.canSteer) error = 'A message with a chosen recipient or a command cannot be sent now.';
-        else { queue.items.splice(index, 1); window.setTimeout(() => options.steer({ clientMessageId: `queued-${item.id}`, text: steerText(item.text), attachments: item.attachments, includeEditorContext: item.includeEditorContext }), 0); }
+        else { queue.items.splice(index, 1); window.setTimeout(() => options.steer({ clientMessageId: `queued-${item.id}`, text: steerText(item.text), attachments: item.attachments, requestFiles: item.requestFiles, includeEditorContext: item.includeEditorContext }), 0); }
       }
       if (!queue.items.length) queue.sessionId = null;
       post('chat/queueReply', { requestId: p.requestId, ok: !error, error }); publishQueue(); if (!error && p.action === 'resume') drain(); return true;
@@ -128,7 +128,7 @@ export function createMockConversations(post: <K extends HostMessageType>(type: 
       else if (entry && p.action === 'delete') history = history.filter(item => item !== entry);
       else if (entry && (p.action === 'pin' || p.action === 'unpin')) entry.pinned = p.action === 'pin';
       else if (entry && p.action === 'label') { if ((p.label?.length ?? 0) > 80) error = 'Label limit: 80 characters.'; else entry.label = p.label || undefined; }
-      else if (entry && p.action === 'rerun') { const target = entry.target.kind === 'team' ? { team: entry.target.id } : entry.target.kind === 'agent' ? { agent: entry.target.id } : { agentInstance: entry.target.id }; if (!enqueue({ clientMessageId: `rerun-${++counter}`, text: entry.text, includeEditorContext: true, ...target })) error = 'Could not queue this run.'; else window.setTimeout(drain, 0); }
+      else if (entry && p.action === 'rerun') { const target = entry.target.kind === 'team' ? { team: entry.target.id } : entry.target.kind === 'agent' ? { agent: entry.target.id } : { agentInstance: entry.target.id }; if (!enqueue({ clientMessageId: `rerun-${++counter}`, text: entry.text, requestFiles: entry.requestFiles, includeEditorContext: !entry.requestFiles?.length, ...target })) error = 'Could not queue this run.'; else window.setTimeout(drain, 0); }
       post('agents/historyReply', { requestId: p.requestId, ok: !error, error }); publishHistory(); return true;
     }
     return false;

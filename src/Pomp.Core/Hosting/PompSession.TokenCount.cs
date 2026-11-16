@@ -37,12 +37,13 @@ namespace Pomp.Hosting
                 if (draft == null || draft.Length > 128000 || string.IsNullOrEmpty(session) || session!.Length > 128 || string.IsNullOrEmpty(model) || model!.Length > 512 || string.IsNullOrEmpty(provider) || provider!.Length > 512) throw new ArgumentException(PompLanguage.Pick("모델, 세션 또는 초안 텍스트가 올바르지 않아요.", "The model, session or draft text is invalid."));
                 var paths = (args["attachments"] as JArray ?? new JArray()).OfType<JObject>().Select(item => item.GetString("path") ?? string.Empty)
                     .Where(path => path.Length > 0 && path.Length <= 4096 && !path.Any(char.IsControl)).ToList();
+                var requestFiles = PromptDisplay.RequestFilesArgument(args["requestFiles"]);
                 if (_bridge.State != BridgeState.Running) throw new InvalidOperationException(PompLanguage.Pick("POMP가 연결되지 않았어요.", "POMP is not connected."));
                 var connection = _epochConnection;
                 lock (_stateLock) if (_sessionSwitchUncertain || session != _info.SessionId || model != _info.Model?.Id || provider != _info.Model?.Provider) throw new InvalidOperationException(PompLanguage.Pick("대화가 바뀌었거나 확인되지 않았어요.", "Conversation changed or is unconfirmed."));
                 var root = await _environment.GetWorkspaceRootAsync(request.Token).ConfigureAwait(false);
                 if (!string.Equals(root, (string?)args["root"], StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException(PompLanguage.Pick("작업 영역이 바뀌었어요.", "Workspace changed."));
-                var text = BasketText(draft, paths, root, session!);
+                var text = BasketText(draft, paths, root, session!, requestFiles);
                 // Read before the state lock: the hub's lock is never taken inside it (the page's ready handler nests them the other way).
                 var asking = _ui.PendingRequestCount > 0;
                 bool localEstimate;
@@ -86,9 +87,10 @@ namespace Pomp.Hosting
         };
 
         /// <summary>The draft, the attachment list and the conversation's knowledge block, each as the model receives it.</summary>
-        private string BasketText(string draft, IReadOnlyList<string> paths, string root, string session)
+        private string BasketText(string draft, IReadOnlyList<string> paths, string root, string session, IReadOnlyList<Pomp.Ui.ChatAttachment>? requestFiles = null)
         {
             var parts = new List<string>();
+            if (requestFiles?.Count > 0) parts.Add(PromptDisplay.RequestFilesPrefix(requestFiles, CanReadBuffer()));
             if (paths.Count > 0) parts.Add(PromptDisplay.AttachmentsHeader(CanReadBuffer()) + "\n" + string.Join("\n", paths.Select(path => "- " + path)));
             if (draft.Length > 0) parts.Add(draft);
             try

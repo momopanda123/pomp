@@ -17,6 +17,11 @@
         <Strings><ButtonText>POMP</ButtonText><CommandName>POMP</CommandName></Strings>
       </Menu>
 
+      <Menu guid="guidPompCmdSet" id="PompExplorerMenu" priority="0x0300" type="Menu">
+        <Parent guid="guidPompCmdSet" id="PompExplorerContextGroup" />
+        <Strings><ButtonText>POMP</ButtonText><CommandName>Pomp.ExplorerMenu</CommandName></Strings>
+      </Menu>
+
       <!-- POMP > To Agent or Team: one entry per agent role and team of the workspace (dynamic items, PompCommands); the text follows the language option. -->
       <Menu guid="guidPompCmdSet" id="PompEditorTargetMenu" priority="0x0100" type="Menu">
         <Parent guid="guidPompCmdSet" id="PompEditorTargetGroup" />
@@ -53,6 +58,12 @@
       </Group>
       <Group guid="guidPompCmdSet" id="PompEditorTargetItemsGroup" priority="0x0100">
         <Parent guid="guidPompCmdSet" id="PompEditorTargetMenu" />
+      </Group>
+      <Group guid="guidPompCmdSet" id="PompExplorerContextGroup" priority="0x0300">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_ITEMNODE" />
+      </Group>
+      <Group guid="guidPompCmdSet" id="PompExplorerFileGroup" priority="0x0100">
+        <Parent guid="guidPompCmdSet" id="PompExplorerMenu" />
       </Group>
     </Groups>
 
@@ -135,6 +146,39 @@
         <Strings><ButtonText>Write Tests</ButtonText><CommandName>Pomp.WriteTests</CommandName><CanonicalName>Pomp.WriteTests</CanonicalName><LocCanonicalName>Pomp.WriteTests</LocCanonicalName></Strings>
       </Button>
 
+      <!-- The configurable canonical command chooses the active editor or Explorer. Menu commands retain their explicit origin. -->
+      <Button guid="guidPompCmdSet" id="cmdidRequestFiles" priority="0x0100" type="Button">
+        <CommandFlag>TextChanges</CommandFlag>
+        <Strings>
+          <ButtonText>Request Whole Files</ButtonText>
+          <ToolTipText>Prepare a request for whole selected files, keeping your draft. Does not send automatically.</ToolTipText>
+          <CommandName>Pomp.RequestFiles</CommandName><CanonicalName>Pomp.RequestFiles</CanonicalName><LocCanonicalName>Pomp.RequestFiles</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidPompCmdSet" id="cmdidRequestEditorFiles" priority="0x0050" type="Button">
+        <Parent guid="guidPompCmdSet" id="PompEditorFileContextGroup" />
+        <CommandFlag>TextChanges</CommandFlag>
+        <Strings>
+          <ButtonText>Request Whole Files</ButtonText>
+          <ToolTipText>Prepare a request for the whole editor file, keeping your draft. Does not send automatically.</ToolTipText>
+          <CommandName>Pomp.RequestEditorFiles</CommandName><CanonicalName>Pomp.RequestEditorFiles</CanonicalName><LocCanonicalName>Pomp.RequestEditorFiles</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidPompCmdSet" id="cmdidRequestExplorerFiles" priority="0x0100" type="Button">
+        <Parent guid="guidPompCmdSet" id="PompExplorerFileGroup" />
+        <CommandFlag>TextChanges</CommandFlag>
+        <Strings>
+          <ButtonText>Request Selected Whole Files</ButtonText>
+          <ToolTipText>Prepare a request for whole selected files, keeping your draft. Does not send automatically.</ToolTipText>
+          <CommandName>Pomp.RequestExplorerFiles</CommandName><CanonicalName>Pomp.RequestExplorerFiles</CanonicalName><LocCanonicalName>Pomp.RequestExplorerFiles</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidPompCmdSet" id="cmdidAddExplorerFilesToContext" priority="0x0200" type="Button">
+        <Parent guid="guidPompCmdSet" id="PompExplorerFileGroup" />
+        <CommandFlag>TextChanges</CommandFlag>
+        <Strings><ButtonText>Add to Context Basket</ButtonText><ToolTipText>Add selected files as references, not whole-file request targets.</ToolTipText><CommandName>Pomp.AddExplorerFilesToContext</CommandName><CanonicalName>Pomp.AddExplorerFilesToContext</CanonicalName><LocCanonicalName>Pomp.AddExplorerFilesToContext</LocCanonicalName></Strings>
+      </Button>
+
       <Button guid="guidPompCmdSet" id="cmdidAddFileToContext" priority="0x0100" type="Button">
         <Parent guid="guidPompCmdSet" id="PompEditorFileContextGroup" />
         <CommandFlag>TextChanges</CommandFlag>
@@ -203,6 +247,12 @@
     </Buttons>
   </Commands>
 
+  <CommandPlacements>
+    <CommandPlacement guid="guidPompCmdSet" id="PompExplorerContextGroup" priority="0x0300">
+      <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_XPROJ_MULTIITEM" />
+    </CommandPlacement>
+  </CommandPlacements>
+
   <!--
     docs/architecture.md section 7. VS silently drops an extension binding that is already taken in the same scope.
     Ctrl+K is a chord prefix, Ctrl+L and Ctrl+Alt+K/L/J/Q are taken. Alt+M/J and the Alt+Q chord prefix are unbound in the live
@@ -227,8 +277,11 @@
       <IDSymbol name="PompEditorFileContextGroup" value="0x1034" />
       <IDSymbol name="PompEditorTargetGroup" value="0x1035" />
       <IDSymbol name="PompEditorTargetItemsGroup" value="0x1036" />
+      <IDSymbol name="PompExplorerContextGroup" value="0x1037" />
+      <IDSymbol name="PompExplorerFileGroup" value="0x1038" />
       <IDSymbol name="PompEditorMenu" value="0x1101" />
       <IDSymbol name="PompEditorTargetMenu" value="0x1102" />
+      <IDSymbol name="PompExplorerMenu" value="0x1103" />
       <IDSymbol name="cmdidShowChatView" value="0x0100" />
       <IDSymbol name="cmdidOpenPomp" value="0x0101" />
       <IDSymbol name="cmdidNewSession" value="0x0102" />
@@ -247,6 +300,10 @@
       <IDSymbol name="cmdidToggleLiveChanges" value="0x0112" />
       <IDSymbol name="cmdidCleanupPompBookmarks" value="0x0113" />
       <IDSymbol name="cmdidClearLiveChanges" value="0x0114" />
+      <IDSymbol name="cmdidRequestFiles" value="0x0115" />
+      <IDSymbol name="cmdidRequestEditorFiles" value="0x0116" />
+      <IDSymbol name="cmdidRequestExplorerFiles" value="0x0117" />
+      <IDSymbol name="cmdidAddExplorerFilesToContext" value="0x0118" />
       <IDSymbol name="cmdidSendToTargetStart" value="0x2000" />
     </GuidSymbol>
 

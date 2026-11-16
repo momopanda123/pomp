@@ -15,6 +15,7 @@ export interface TabsState { root: string; backend?: BackendId; plans: Conversat
 export interface CommandReply { requestId: string; ok: boolean; error?: string }
 export interface QueueItem {
   id: string; text: string; attachments?: { path: string }[]; includeEditorContext: boolean;
+  requestFiles?: { path: string }[];
   team?: string; agent?: string; agentInstance?: string; createdAt: string;
   /** Message text for this conversation (including a /steer or /stear wrapper), not a targeted message or engine command. */
   canSteer?: boolean;
@@ -25,6 +26,7 @@ export interface AgentHistoryMember { agent: string; jobId: string; status: stri
 export interface AgentHistoryEntry {
   id: string; sessionId: string; promptId?: string; target: { kind: 'team' | 'agent' | 'dm'; id: string; title: string };
   text: string; startedAt: string; endedAt?: string; status: string; pinned: boolean; label?: string; members: AgentHistoryMember[];
+  requestFiles?: { path: string }[];
 }
 export interface AgentHistoryState { entries: AgentHistoryEntry[]; truncated: boolean }
 export interface ConversationHostToUi {

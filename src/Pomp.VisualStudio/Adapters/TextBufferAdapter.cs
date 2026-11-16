@@ -121,7 +121,7 @@ namespace Pomp.VisualStudio.Adapters
                         return WorkspaceChanged();
                     }
 
-                    // The contract says an edit target that is not open gets opened in the editor first.
+                    // Load the edit buffer without navigating; only Live may follow a successfully applied change.
                     OpenEditTarget(fullPath);
                     buffer = DocumentTable.TryGetTextBuffer(context, fullPath);
                     if (buffer == null)
@@ -409,13 +409,9 @@ namespace Pomp.VisualStudio.Adapters
         private void OpenEditTarget(string path)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            var settings = Composition.PompServices.Current?.Settings;
-            // Live keeps the chat focused: open without activation, but as a visible tab, so an edited file never sits in a hidden
-            // frame when the follow is skipped (the user is busy in an editor) or superseded by a later edit.
-            if (settings?.AppliedLiveFollowEnabled == true || settings?.AppliedLiveBookmarksEnabled == true)
-                Editor.EditorFollowService.OpenDocumentNoActivate(context, path, show: true);
-            else
-                EditorAdapter.OpenDocumentOnUiThread(context, path, null);
+            // Editing needs a buffer, not navigation. Live alone decides whether to show a committed edit;
+            // bookmarks, background conversations and failed edits must not select a document or take focus.
+            Editor.EditorFollowService.OpenDocumentNoActivate(context, path);
         }
 
         /// <summary>Whether <paramref name="buffer"/> moved past <paramref name="before"/> (only this synchronous UI-thread edit can have done it).</summary>

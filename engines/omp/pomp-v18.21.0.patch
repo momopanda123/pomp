@@ -223,14 +223,14 @@ diff --git a/packages/coding-agent/src/edit/index.ts b/packages/coding-agent/src
 index ca61be7..4bb93a9 100644
 --- a/packages/coding-agent/src/edit/index.ts
 +++ b/packages/coding-agent/src/edit/index.ts
-@@ -704,6 +704,7 @@ export class EditTool implements AgentTool<TInput> {
- 	}
- 
- 	async #write(request: EditWriteRequest, signal?: AbortSignal): Promise<EditWriteResponse> {
+@@ -717,6 +717,7 @@ export class EditTool implements AgentTool<TInput> {
+ 				beforeMtimeMs: snapshot.mtimeMs,
+ 			});
+ 		};
 +		signal?.throwIfAborted();
  		if (request.op === "delete") {
  			await deleteFileWithFallback(request.path, Bun.file(request.path));
- 			if (this.session.enableLsp ?? true) {
+ 			journal(request.path, null);
 diff --git a/packages/coding-agent/src/exec/bash-executor.ts b/packages/coding-agent/src/exec/bash-executor.ts
 index 884592b..7b44736 100644
 --- a/packages/coding-agent/src/exec/bash-executor.ts
@@ -294,19 +294,29 @@ index 97b5f96..5e47d89 100644
  					env: sessionEnv,
  					sessionKey: sessionId,
  					minimize: !nativeShapingOff(this.session),
-@@ -1889,10 +1892,12 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+@@ -2060,15 +2063,17 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
  					signal,
  					gitGuard: cfgBashGitGuard.get(this.session.settings),
  					ovnfs: ovnfsCommand(this.session.settings),
--					filesystem: this.#urlFilesystem(signal, approvalTier, text => {
--						replies.push(text);
--						emitFrame?.();
+-					filesystem: this.#urlFilesystem(signal, {
+-						tier: approvalTier,
+-						onReply: text => {
+-							replies.push(text);
+-							emitFrame?.();
+-						},
+-						onWrite: noticeUrlWrites(pendingNotices),
+-						toolCallId,
 -					}).shellFilesystem(),
 +					filesystem: this.session.isolatedShell
 +						? undefined
-+						: this.#urlFilesystem(signal, approvalTier, text => {
-+								replies.push(text);
-+								emitFrame?.();
++						: this.#urlFilesystem(signal, {
++								tier: approvalTier,
++								onReply: text => {
++									replies.push(text);
++									emitFrame?.();
++								},
++								onWrite: noticeUrlWrites(pendingNotices),
++								toolCallId,
 +							}).shellFilesystem(),
  					artifactPath,
  					artifactId,

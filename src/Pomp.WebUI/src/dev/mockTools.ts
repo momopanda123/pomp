@@ -99,19 +99,23 @@ export function createMockToolsHandler(emit: (message: ToolsHostMessage) => void
   for (const row of pompSkills) bodies.set(`skill:pomp:${row.name}`, { content: `---\nname: ${row.name}\ndescription: ${row.description}\n---\n# ${row.name}\nBuilt-in skill body.`, hash: `skill-pomp-${row.name}-doc` });
   bodies.set('skill:project:api-design', { content: '---\nname: api-design\ndescription: Design a stable HTTP API before writing it.\n---\n# API design\nA copy of the catalog skill.', hash: 'skill-copy-1-doc' });
   let restartRequired = false; let revision = 1;
-  // Preview-only scenarios: ?antigravity=missing|configured|error|stale|slow|no-workspace|no-engine (default: installed).
+  // Preview-only: ?antigravity=missing|configured|error|stale|slow|no-workspace|no-engine|missing-enabled|no-engine-enabled|stale-disable|error-disable.
   const antigravityMode = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('antigravity');
-  let antigravityStale = antigravityMode === 'stale';
+  let antigravityStale = antigravityMode === 'stale' || antigravityMode === 'stale-disable';
+  const antigravityEnabled = ['configured', 'missing-enabled', 'no-engine-enabled', 'stale-disable', 'error-disable'].includes(antigravityMode ?? '');
+  const antigravityMissing = antigravityMode === 'missing' || antigravityMode === 'missing-enabled';
+  const antigravityNoEngine = antigravityMode === 'no-engine' || antigravityMode === 'no-engine-enabled';
   let antigravity: AntigravityMcpState = {
-    installed: antigravityMode !== 'missing', configured: antigravityMode === 'configured',
-    canConfigure: !['missing', 'no-workspace', 'no-engine'].includes(antigravityMode ?? ''),
-    applicationPath: antigravityMode === 'missing' ? undefined : 'C:\\Users\\Mock\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe',
+    installed: !antigravityMissing, enabled: antigravityEnabled,
+    configured: antigravityEnabled && !antigravityNoEngine, canDisable: antigravityEnabled,
+    canConfigure: !antigravityMissing && !antigravityNoEngine && antigravityMode !== 'no-workspace',
+    applicationPath: antigravityMissing ? undefined : 'C:\\Users\\Mock\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe',
     configPath: 'C:\\Users\\Mock\\.gemini\\config\\mcp_config.json',
     workspaceRoot: antigravityMode === 'no-workspace' ? undefined : 'C:\\repo\\Pomp',
     serverName: antigravityMode === 'no-workspace' ? undefined : 'pomp_mock_workspace',
     configHash: 'antigravity-1',
-    message: antigravityMode === 'missing' ? 'Antigravity is not installed (preview).' : antigravityMode === 'no-workspace' ? 'Open a project before setup (preview).'
-      : antigravityMode === 'no-engine' ? 'The verified bundled engine is unavailable (preview).' : undefined,
+    message: antigravityMissing ? 'Install Antigravity or agy CLI, then refresh the list (preview).' : antigravityMode === 'no-workspace' ? 'Open a project before enabling (preview).'
+      : antigravityNoEngine ? 'Restore the verified bundled engine, then refresh the list (preview).' : undefined,
   };
   const pendingDomains = new Set<ToolsDomain>();
   const catalogState = (): CatalogStatePayload => ({ entries: catalogEntries.map(entry => ({ ...structuredClone(entry), installed: entry.kind === 'mcp' ? entry.scopes.filter(scope => servers.some(server => server.catalogId === entry.id && server.scope === scope)) : [] })) });
@@ -136,7 +140,7 @@ export function createMockToolsHandler(emit: (message: ToolsHostMessage) => void
     const domain = message.type.split('/')[0] as ToolsDomain;
     const command = message.payload as ToolsCommand | SkillsCommand | McpCommand | CatalogCommand | RulesCommand | WorkflowsCommand | HooksCommand;
     if (!command || typeof command.requestId !== 'string' || typeof command.action !== 'string') return true;
-    const external = domain === 'mcp' && (command.action === 'antigravity-refresh' || command.action === 'antigravity-setup');
+    const external = domain === 'mcp' && (command.action === 'antigravity-refresh' || command.action === 'antigravity-set');
     if (pendingDomains.has(domain) || (!external && options.busy?.() && command.action !== 'refresh')) { reply(domain, command.requestId, 'A previous request is still in progress.'); return true; }
     pendingDomains.add(domain);
     if (domain === 'tools') { tools = { ...tools, pending: true }; snapshot('tools'); }
@@ -321,15 +325,17 @@ export function createMockToolsHandler(emit: (message: ToolsHostMessage) => void
         const p = command as McpCommand;
         const index = servers.findIndex(server => server.name === p.name && server.scope === p.scope);
         const existing = servers[index];
-        if (p.action === 'antigravity-setup') {
+        if (p.action === 'antigravity-set') {
           if (antigravityStale) { antigravityStale = false; antigravity = { ...antigravity, configHash: `antigravity-${++revision}` }; }
-          if (!antigravity.canConfigure) error = antigravity.message || 'Antigravity cannot be configured.';
+          if (typeof p.enabled !== 'boolean') error = 'An enabled state is required.';
           else if (!p.name || p.name !== antigravity.serverName) error = 'The workspace changed. Check Antigravity again.';
           else if (!p.expectedHash || p.expectedHash !== antigravity.configHash) error = 'Antigravity configuration changed. Refresh first.';
-          else if (antigravityMode === 'error') error = 'Antigravity configuration could not be written (preview). No file was changed.';
+          else if (p.enabled ? !antigravity.canConfigure : !antigravity.canDisable) error = antigravity.message || 'Antigravity configuration cannot be changed.';
+          else if (antigravityMode === 'error' || antigravityMode === 'error-disable') error = 'Antigravity configuration could not be written (preview). No file was changed.';
           else {
-            if (!antigravity.configured) antigravity = { ...antigravity, configured: true, configHash: `antigravity-${++revision}` };
-            output = 'Preview: Antigravity MCP configuration saved. A live connection has not been verified.';
+            antigravity = { ...antigravity, enabled: p.enabled, configured: p.enabled, canDisable: p.enabled, configHash: `antigravity-${++revision}` };
+            output = p.enabled ? 'Preview: POMP workspace entry saved. Reload Antigravity MCP settings; live connection unverified.'
+              : 'Preview: POMP workspace entry removed. Reload Antigravity MCP settings.';
           }
         } else if (p.action === 'save') {
           if (!p.server?.name || !p.scope) error = 'Invalid MCP server.';

@@ -95,6 +95,11 @@ namespace Pomp.Hosting
         public void PrefillComposer(ComposerPrefillPayload prefill)
         {
             if (prefill == null) throw new ArgumentNullException(nameof(prefill));
+            if (prefill.RequestFiles?.Count > 0)
+            {
+                Notice("error", PompLanguage.Pick("전체 파일 요청은 기본 OMP 연결에서만 지원돼요. ACP에서는 지원되지 않아요.", "Whole-file requests require native OMP and are not supported by ACP."));
+                return;
+            }
             if (prefill.Target != null)
             {
                 Notice("error", PompLanguage.Pick("이 편집기 요청의 에이전트·팀 대상은 OMP 연결에서만 사용할 수 있어요.", "The editor request's agent/team destination requires an OMP connection."));
@@ -175,6 +180,8 @@ namespace Pomp.Hosting
             var result = new JObject { ["requestId"] = (string?)args["requestId"], ["estimated"] = true };
             try
             {
+                if (args["requestFiles"] is JArray requests && requests.Count > 0)
+                    throw new NotSupportedException(PompLanguage.Pick("전체 파일 요청은 기본 OMP 연결에서만 지원돼요. ACP에서는 지원되지 않아요.", "Whole-file requests require native OMP and are not supported by ACP."));
                 lock (_sync)
                     if (!SameRoot((string?)args["root"] ?? "", _root) || (string?)args["sessionId"] != PublicId(_agentSessionId))
                         throw new InvalidOperationException(PompLanguage.Pick("이 컨텍스트 추정은 다른 대화의 것이에요.", "The context estimate belongs to another conversation."));

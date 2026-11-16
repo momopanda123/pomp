@@ -37,7 +37,7 @@ export function ToolsTab({ locale, workspaceKey, sessionId, connected, busy, act
   // whose form was saved or cancelled does not open that form again in the next conversation.
   const knowledgeDraftDone = useRef(0);
   const controller = useToolsState({ locale, workspaceKey, sessionId, connected, busy, active, view: controllerView, disabled: inert || newSessionPending, domains: toolsTabDomains });
-  const counts: Partial<Record<ToolsView, number>> = { permissions: permissionsCount, conversation: controller.tools.tools.length, skills: controller.skills.skills.length, mcp: controller.mcp.servers.length, rules: controller.rules.rules.length, workflows: controller.workflows.workflows.length, knowledge: knowledge.items.filter(item => !item.candidate).length };
+  const counts: Partial<Record<ToolsView, number>> = { permissions: permissionsCount, conversation: controller.tools.tools.length, skills: controller.skills.skills.length, mcp: controller.mcp.servers.length + 1, rules: controller.rules.rules.length, workflows: controller.workflows.workflows.length, knowledge: knowledge.items.filter(item => !item.candidate).length };
   const [view, change] = useViewChoice({ views: toolsViews, requested: normalizeToolsView(requestedView), active: active && !inert, scope: workspaceKey + ':' + (sessionId ?? ''), count: item => counts[item], onChange: next => { setControllerView(next); onViewChange?.(next); } });
   useEffect(() => { setControllerView(view); }, [view]);
   // The editor's "Add to Knowledge" chose Knowledge: it stays open even while its list is still empty (a draft waiting when the page starts).

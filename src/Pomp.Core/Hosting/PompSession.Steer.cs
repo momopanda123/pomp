@@ -38,7 +38,7 @@ namespace Pomp.Hosting
         {
             if (!string.IsNullOrWhiteSpace(send.Team) || !string.IsNullOrWhiteSpace(send.Agent) || !string.IsNullOrWhiteSpace(send.AgentInstance)) return false;
             var text = SteerText(send.Text);
-            return !text.StartsWith("/", StringComparison.Ordinal) && (text.Length > 0 || send.Attachments?.Count > 0);
+            return !text.StartsWith("/", StringComparison.Ordinal) && (text.Length > 0 || send.Attachments?.Count > 0 || send.RequestFiles?.Count > 0);
         }
 
         private bool IsSteerableLocked(long generation) =>
@@ -47,6 +47,15 @@ namespace Pomp.Hosting
         /// <summary>chat/steer: to the running agent; otherwise use ordinary send/queue handling.</summary>
         private async Task HandleChatSteerAsync(ChatSendPayload send, long generation)
         {
+            if (send.RequestFiles?.Count > 0)
+            {
+                try { ValidateQueuedSend(send); }
+                catch (Exception ex)
+                {
+                    _ui.Post(UiMessageTypes.Error, new UiErrorInfo { Code = "queue_rejected", ClientMessageId = send.ClientMessageId, Message = ex.Message, Retryable = false }, UiDelivery.State);
+                    return;
+                }
+            }
             if (CanSteer(send) && await SteerAsync(send, generation).ConfigureAwait(false) != SteerOutcome.NotRunning) return;
             await HandleChatSendAsync(send, generation).ConfigureAwait(false);
         }
@@ -142,7 +151,7 @@ namespace Pomp.Hosting
                 }
                 using var sending = CancellationTokenSource.CreateLinkedTokenSource(requestToken, _disposeCts.Token, epoch);
                 // Captured context is displayed only after the child accepts the message.
-                if (send.IncludeEditorContext)
+                if (send.IncludeEditorContext && !(send.RequestFiles?.Count > 0))
                 {
                     try
                     {
@@ -153,7 +162,7 @@ namespace Pomp.Hosting
                     catch (Exception ex) when (!(ex is OperationCanceledException)) { _logger.Warn("Could not build the editor context: " + ex.Message); }
                 }
 
-                var message = await ComposeMessageAsync(editorContext?.Text, text, attachments, sending.Token).ConfigureAwait(false);
+                var message = await ComposeMessageAsync(editorContext?.Text, text, attachments, sending.Token, send.RequestFiles, childSession: true).ConfigureAwait(false);
                 ValidateAgentInstance(send.AgentInstance!);
                 var command = OmpCommands.SteerSubagent(send.AgentInstance!, message);
                 if (Pomp.Transport.NdjsonWriter.Encode(command).Length > MaxPromptFrameBytes - 128)
@@ -173,6 +182,7 @@ namespace Pomp.Hosting
                     MessageId = promptId, ClientMessageId = send.ClientMessageId, Text = text,
                     AgentInstance = send.AgentInstance!, EditorContext = editorContext?.EditorContext,
                     Attachments = attachments.Count == 0 ? null : attachments.Select(path => new ChatAttachment { Path = path }).ToList(),
+                    RequestFiles = PromptDisplay.CopyRequestFiles(send.RequestFiles),
                 });
                 return true;
             }
@@ -202,6 +212,7 @@ namespace Pomp.Hosting
                         PromptId = promptId, ClientMessageId = send.ClientMessageId, Text = text,
                         AgentInstance = send.AgentInstance, EditorContext = editorContext?.EditorContext,
                         Attachments = attachments.Count == 0 ? null : attachments.Select(path => new ChatAttachment { Path = path }).ToList(),
+                        RequestFiles = PromptDisplay.CopyRequestFiles(send.RequestFiles),
                     });
                     _ui.Post(UiMessageTypes.ChatTurnEnd, new ChatTurnEndPayload { PromptId = promptId, Status = status, Error = failure });
                 }
@@ -217,7 +228,7 @@ namespace Pomp.Hosting
         {
             var text = send.Text ?? string.Empty;
             var attachments = (send.Attachments ?? new List<ChatAttachment>()).Where(a => !string.IsNullOrWhiteSpace(a?.Path)).Select(a => a.Path).ToList();
-            if (string.IsNullOrWhiteSpace(text) && attachments.Count == 0) return SteerOutcome.Failed;
+            if (string.IsNullOrWhiteSpace(text) && attachments.Count == 0 && !(send.RequestFiles?.Count > 0)) return SteerOutcome.Failed;
             OmpConnection? connection;
             CancellationToken epoch;
             lock (_stateLock)
@@ -230,8 +241,9 @@ namespace Pomp.Hosting
             using var sending = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token, epoch);
             try
             {
+                ValidateQueuedSend(send);
                 EditorContextResult? editorContext = null;
-                if (send.IncludeEditorContext)
+                if (send.IncludeEditorContext && !(send.RequestFiles?.Count > 0))
                 {
                     try
                     {
@@ -242,7 +254,7 @@ namespace Pomp.Hosting
                     catch (Exception ex) when (!(ex is OperationCanceledException)) { _logger.Warn("Could not build the editor context: " + ex.Message); }
                 }
 
-                var message = await ComposeMessageAsync(editorContext?.Text, text, attachments, sending.Token).ConfigureAwait(false);
+                var message = await ComposeMessageAsync(editorContext?.Text, text, attachments, sending.Token, send.RequestFiles).ConfigureAwait(false);
                 var command = OmpCommands.Steer(message);
                 if (Pomp.Transport.NdjsonWriter.Encode(command).Length > MaxPromptFrameBytes)
                 {
@@ -283,6 +295,7 @@ namespace Pomp.Hosting
                     ClientMessageId = string.IsNullOrEmpty(send.ClientMessageId) ? null : send.ClientMessageId,
                     Text = text,
                     Attachments = attachments.Count == 0 ? null : attachments.Select(path => new ChatAttachment { Path = path }).ToList(),
+                    RequestFiles = PromptDisplay.CopyRequestFiles(send.RequestFiles),
                     EditorContext = editorContext?.EditorContext,
                 });
                 return SteerOutcome.Sent;

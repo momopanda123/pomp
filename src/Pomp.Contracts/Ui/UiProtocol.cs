@@ -388,6 +388,9 @@ namespace Pomp.Ui
 
         public string AddFileToContext { get; set; } = "Alt+Shift+I";
 
+        /// <summary>Requests work on the whole selected file(s); global so Solution Explorer can use it too.</summary>
+        public string RequestFiles { get; set; } = "Alt+Shift+L";
+
         public string InlineEdit { get; set; } = "Alt+M";
 
         public string KnowledgeTag { get; set; } = "Alt+/";
@@ -542,6 +545,7 @@ namespace Pomp.Ui
         public bool IncludeEditorContext { get; set; }
 
         public List<ChatAttachment>? Attachments { get; set; }
+        public List<ChatAttachment>? RequestFiles { get; set; }
     }
 
     /// <summary>Host → UI <c>workspace/basketTokens</c>: the estimate (characters-based, not the model's tokenizer).</summary>
@@ -689,6 +693,7 @@ namespace Pomp.Ui
         public string? Text { get; set; }
 
         public List<ChatAttachment>? Attachments { get; set; }
+        public List<ChatAttachment>? RequestFiles { get; set; }
 
         /// <summary>The editor reference actually composed for this turn; omitted when no active file context was included.</summary>
         public ChatEditorContext? EditorContext { get; set; }
@@ -716,6 +721,7 @@ namespace Pomp.Ui
         public string Text { get; set; } = string.Empty;
 
         public List<ChatAttachment>? Attachments { get; set; }
+        public List<ChatAttachment>? RequestFiles { get; set; }
 
         public ChatEditorContext? EditorContext { get; set; }
     }
@@ -728,6 +734,7 @@ namespace Pomp.Ui
         public string Text { get; set; } = string.Empty;
         public string AgentInstance { get; set; } = string.Empty;
         public List<ChatAttachment>? Attachments { get; set; }
+        public List<ChatAttachment>? RequestFiles { get; set; }
         public ChatEditorContext? EditorContext { get; set; }
     }
 
@@ -743,6 +750,7 @@ namespace Pomp.Ui
         /// <summary>The user's text as typed.</summary>
         public string Text { get; set; } = string.Empty;
         public List<ChatAttachment>? Attachments { get; set; }
+        public List<ChatAttachment>? RequestFiles { get; set; }
         /// <summary>The recipient: an agent (role name) or a team (id).</summary>
         public ConversationPartnerPayload Target { get; set; } = new ConversationPartnerPayload();
         /// <summary>"sending", "delivered", "working", "waiting", "done", "failed", "stopped", or "unknown" (a restored one whose outcome was never recorded).</summary>
@@ -1008,6 +1016,8 @@ namespace Pomp.Ui
         public bool IncludeEditorContext { get; set; } = true;
 
         public List<ChatAttachment>? Attachments { get; set; }
+        /// <summary>Whole-file request targets, distinct from reference attachments. Native OMP only.</summary>
+        public List<ChatAttachment>? RequestFiles { get; set; }
 
         /// <summary>
         /// A team id (docs/architecture.md §8.2). The conversation's own team: the message goes to it through <c>/pomp-team</c>. Any other
@@ -1287,6 +1297,9 @@ namespace Pomp.Ui
 
         /// <summary>Files added to the context basket (<c>{ path, fullPath }</c> like <c>workspace/files</c>).</summary>
         public System.Collections.Generic.List<ComposerPrefillFile>? Files { get; set; }
+
+        /// <summary>Whole-file task targets, distinct from reference attachments. Replaces the prior file scope, preserves the draft, and never auto-sends.</summary>
+        public System.Collections.Generic.List<ComposerPrefillFile>? RequestFiles { get; set; }
 
         /// <summary>Turns "include editor context" on (the selection or the code around the caret goes with the message).</summary>
         public bool IncludeEditorContext { get; set; }
@@ -1644,8 +1657,12 @@ namespace Pomp.Ui
     public sealed class AntigravityMcpStatePayload
     {
         public bool Installed { get; set; }
+        /// <summary>An owned workspace entry exists, even if its engine path is outdated or unavailable.</summary>
+        public bool Enabled { get; set; }
         public bool Configured { get; set; }
         public bool CanConfigure { get; set; }
+        /// <summary>The owned entry can be removed without an installed app or verified engine.</summary>
+        public bool CanDisable { get; set; }
         public string? ApplicationPath { get; set; }
         public string? ConfigPath { get; set; }
         public string? WorkspaceRoot { get; set; }
@@ -1745,6 +1762,8 @@ namespace Pomp.Ui
         public string? Name { get; set; }
         public JObject? Server { get; set; }
         public string? ExpectedHash { get; set; }
+        /// <summary>Required explicitly for antigravity-set; ordinary MCP commands retain their existing server payload.</summary>
+        public bool? Enabled { get; set; }
     }
     public sealed class McpReplyPayload
     {
@@ -1858,6 +1877,7 @@ namespace Pomp.Ui
         public string Id { get; set; } = string.Empty;
         public string Text { get; set; } = string.Empty;
         public List<ChatAttachment>? Attachments { get; set; }
+        public List<ChatAttachment>? RequestFiles { get; set; }
         public bool IncludeEditorContext { get; set; }
         public string? Team { get; set; }
         public string? Agent { get; set; }
@@ -1914,6 +1934,7 @@ namespace Pomp.Ui
         public string? PromptId { get; set; }
         public AgentRunTargetPayload Target { get; set; } = new AgentRunTargetPayload();
         public string Text { get; set; } = string.Empty;
+        public List<ChatAttachment>? RequestFiles { get; set; }
         public string StartedAt { get; set; } = string.Empty;
         public string? EndedAt { get; set; }
         public string Status { get; set; } = "running";

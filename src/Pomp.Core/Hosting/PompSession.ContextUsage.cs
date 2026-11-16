@@ -302,7 +302,9 @@ namespace Pomp.Hosting
                     .Where(path => path.Length > 0 && path.Length <= 4096 && !path.Any(char.IsControl)).ToList();
                 if (paths.Count > 0)
                     reply.Attachments = EstimateTokens(PromptDisplay.AttachmentsHeader(CanReadBuffer()) + "\n" + string.Join("\n", paths.Select(path => "- " + path)) + "\n\n");
-                if (args.GetBool("includeEditorContext") == true && _bridge.State == BridgeState.Running)
+                var requestFiles = PromptDisplay.RequestFilesArgument(args["requestFiles"]);
+                if (requestFiles?.Count > 0) reply.Attachments += EstimateTokens(PromptDisplay.RequestFilesPrefix(requestFiles, CanReadBuffer()) + "\n\n");
+                if (!(requestFiles?.Count > 0) && args.GetBool("includeEditorContext") == true && _bridge.State == BridgeState.Running)
                 {
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
                     // The builder may wait the editor-context timeout twice (the parallel queries, then the buffer read).

@@ -98,6 +98,9 @@ namespace Pomp.VisualStudio.Adapters
             var diff = LineDiff.Create(old, after, cancellationToken);
 
             await context.Jtf.SwitchToMainThreadAsync(cancellationToken);
+            // Settings may have changed while disk I/O and diffing ran. Do not open or modify a buffer after
+            // both features were switched off; ShowDiskEditAsync still releases any existing hold.
+            if (!services.Settings.AppliedLiveFollowEnabled && !services.Settings.AppliedLiveBookmarksEnabled) return;
             try
             {
                 var buffer = DocumentTable.TryGetTextBuffer(context, file);

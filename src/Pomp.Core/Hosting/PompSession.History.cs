@@ -226,14 +226,18 @@ namespace Pomp.Hosting
                     if (action == "messages" && cursor != null) pageCommand["cursor"] = cursor;
                     var page = await connection!.SendCommandAsync(pageCommand, TimeSpan.FromSeconds(20), token.Token).ConfigureAwait(false);
                     if (!page.Success) throw new InvalidOperationException(page.Error ?? PompLanguage.Pick("세션 메시지를 읽지 못했어요.", "Could not read session messages."));
-                    var texts = new JArray(); var remaining = 100000;
+                    var texts = new JArray(); var remaining = 100000; var messageBytes = 0;
                     foreach (var message in (page.Data?["messages"] as JArray ?? new JArray()).OfType<JObject>())
                     {
                         var role = message.GetString("role"); if (role != "user" && role != "assistant") continue;
                         var content = message["content"]; var text = content?.Type == JTokenType.String ? (string?)content : string.Join("\n", (content as JArray ?? new JArray()).OfType<JObject>().Select(p => p.AnswerText()).Where(t => t != null));
+                        var requestFiles = role == "user" ? PromptDisplay.RequestFiles(text) : null;
                         if (role == "user") text = PromptDisplay.UserText(text);
                         var length = Math.Min(remaining, Math.Min(text?.Length ?? 0, 12000));
-                        texts.Add(new JObject { ["role"] = role, ["text"] = (text ?? "").Substring(0,length), ["truncated"] = length < (text?.Length ?? 0) }); remaining -= length;
+                        var item = new JObject { ["role"] = role, ["text"] = (text ?? "").Substring(0,length), ["truncated"] = length < (text?.Length ?? 0), ["requestFiles"] = requestFiles == null ? null : new JArray(requestFiles.Select(file => new JObject { ["path"] = file.Path })) };
+                        messageBytes += System.Text.Encoding.UTF8.GetByteCount(item.ToString(Newtonsoft.Json.Formatting.None)) + 1;
+                        if (messageBytes > 1800 * 1024) throw new InvalidOperationException(PompLanguage.Pick("파일 범위를 포함한 기록 페이지가 너무 커요.", "This history page is too large to display with its complete file scopes."));
+                        texts.Add(item); remaining -= length;
                     }
                     answer["messages"] = texts; answer["nextCursor"] = page.Data?["nextCursor"]; answer["totalMessages"] = page.Data?["totalMessages"];
                     answer["sessionId"] = pageSession;

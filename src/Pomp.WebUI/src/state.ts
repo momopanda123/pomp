@@ -1,5 +1,5 @@
 import type { BackendState, AcpState, AcpReply } from './backend';
-import { addAttachments, dismissMention, emptyComposer, fileFromAttachment, fileIdentity, receiveFiles, selectMention, updateMention, withoutMentions, type ComposerState } from './composerState';
+import { addAttachments, dismissMention, emptyComposer, fileFromAttachment, fileIdentity, receiveFiles, restoreRequestFiles, selectMention, updateMention, withoutMentions, type ComposerState } from './composerState';
 import { localeFromHost, makeTranslate, type Locale } from './i18n';
 import { sameRoot } from './knowledge';
 import { dialogTitle, permissionTitle } from './requestTitle';
@@ -49,6 +49,7 @@ export interface UserItem {
   /** Page-selected or host-replayed destination badge. */
   target?: SendTarget;
   attachments?: WorkspaceFile[];
+  requestFiles?: WorkspaceFile[];
   /** Editor snapshot the host prepended to the composed prompt. */
   editorContext?: TurnStartedPayload['editorContext'];
   /** Set once the host reported `chat/turnStarted` for this message. */
@@ -117,6 +118,7 @@ export interface TurnErrorItem {
   /** Text of that user message: what "Retry" resends. Absent when it cannot be resolved (Retry is then disabled). */
   retryText?: string;
   retryAttachments?: WorkspaceFile[];
+  retryRequestFiles?: WorkspaceFile[];
   /** The failed message's destination; undefined means this conversation, never the current draft target. */
   retryTarget?: SendTarget;
 }
@@ -357,7 +359,7 @@ export interface Stamped {
 
 export type Action =
   | { type: 'host'; batch: Stamped[] }
-  | { type: 'userSend'; id: string; text: string; attachments?: WorkspaceFile[]; clearDraft?: boolean; target?: SendTarget; preserveDraftTarget?: boolean; queued?: boolean }
+  | { type: 'userSend'; id: string; text: string; attachments?: WorkspaceFile[]; requestFiles?: WorkspaceFile[]; clearDraft?: boolean; target?: SendTarget; preserveDraftTarget?: boolean; queued?: boolean }
   | { type: 'queueSendUnconfirmed'; id: string }
   | { type: 'recoverQueueSend'; id: string }
   | { type: 'composerEdit'; text: string; caret: number; selectionEnd: number }
@@ -370,6 +372,7 @@ export type Action =
   | { type: 'pickerRequested'; requestId: string }
   | { type: 'workspaceFailed'; requestId: string; message: string }
   | { type: 'attachmentsAdd'; files: WorkspaceFile[] }
+  | { type: 'requestFilesSet'; files: WorkspaceFile[] }
   | { type: 'attachmentReorder'; fullPath: string; beforePath?: string }
   | { type: 'attachmentRemove'; fullPath: string }
   | { type: 'dialogDraft'; requestId: string; text: string }
@@ -524,7 +527,7 @@ function draftFor(state: AppState, key: string): AppState {
     delete drafts[key];
     return { ...state, composer, composerTab: key, drafts, dictation: null, dictationReply: null };
   }
-  if (leaving.text || leaving.attachments.length > 0) drafts[state.composerTab] = leaving;
+  if (leaving.text || leaving.attachments.length > 0 || leaving.requestFiles?.length) drafts[state.composerTab] = leaving;
   else delete drafts[state.composerTab];
   const composer = drafts[key] ?? emptyComposer;
   delete drafts[key];
@@ -657,8 +660,9 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
       const payload = boundedPrefill(msg.payload);
       const native = (state.backend?.active ?? state.session?.backend ?? state.tabs?.backend ?? 'omp') === 'omp';
       // Only OMP editor requests redirect to its Default partner tab. ACP retains the selected conversation and its basket.
-      const base = native && (payload.send || payload.target || payload.pickTarget) ? draftFor(state, 'main') : state;
-      return { ...base, prefill: { payload, seq: (state.prefill?.seq ?? 0) + 1 }, selectedTarget: native ? payload.target ?? state.selectedTarget : undefined };
+      const scoped = !!payload.requestFiles?.length;
+      const base = native && !scoped && (payload.send || payload.target || payload.pickTarget) ? draftFor(state, 'main') : state;
+      return { ...base, prefill: { payload, seq: (state.prefill?.seq ?? 0) + 1 }, selectedTarget: scoped ? state.selectedTarget : native ? payload.target ?? state.selectedTarget : undefined };
     }
     case 'knowledge/draft': {
       const payload = boundedKnowledgeDraft(msg.payload);
@@ -769,7 +773,7 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
     }
 
     case 'chat/turnStarted': {
-      const { clientMessageId, promptId, text, attachments, editorContext, team, agent, agentInstance, main } = msg.payload;
+      const { clientMessageId, promptId, text, attachments, requestFiles, editorContext, team, agent, agentInstance, main } = msg.payload;
       // A restored one with no agent/team/instance went to the conversation itself.
       const target: SendTarget | undefined = team ? { kind: 'team', id: team } : agent ? { kind: 'agent', id: agent } : agentInstance ? { kind: 'instance', id: agentInstance } : main ? { kind: 'main', id: '' } : undefined;
       if (!promptId) return state;
@@ -786,6 +790,7 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
           next = withItem(next, (key) => ({
             kind: 'user', key, clientMessageId: clientMessageId ?? promptId, promptId, text: text ?? '', target, editorContext,
             attachments: attachments?.filter((entry) => typeof entry?.path === 'string').map((entry) => fileFromAttachment(entry.path)),
+            requestFiles: requestFiles?.map(entry => fileFromAttachment(entry.path)),
           }));
         }
       }
@@ -797,7 +802,7 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
     }
 
     case 'chat/subagentAccepted': {
-      const { messageId, clientMessageId, text, agentInstance, attachments, editorContext } = msg.payload;
+      const { messageId, clientMessageId, text, agentInstance, attachments, requestFiles, editorContext } = msg.payload;
       if (!messageId || !agentInstance || state.items.some(item => item.kind === 'user' && item.promptId === messageId)) return state;
       const target: SendTarget = { kind: 'instance', id: agentInstance };
       const index = findLastIndex(state.items, item => item.kind === 'user' && item.clientMessageId === clientMessageId);
@@ -805,7 +810,8 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
       const accepted: UserItem = index >= 0 && state.items[index]?.kind === 'user'
         ? { ...state.items[index] as UserItem, promptId: messageId, target, editorContext, subagentAccepted: true, failed: undefined }
         : { ...(pending ?? { kind: 'user', key: `u:${messageId}`, clientMessageId: clientMessageId ?? messageId, text, target,
-          attachments: attachments?.filter(entry => typeof entry?.path === 'string').map(entry => fileFromAttachment(entry.path)) }),
+          attachments: attachments?.filter(entry => typeof entry?.path === 'string').map(entry => fileFromAttachment(entry.path)),
+          requestFiles: requestFiles?.map(entry => fileFromAttachment(entry.path)) }),
           promptId: messageId, target, editorContext, subagentAccepted: true, failed: undefined };
       const pendingSends = state.pendingSends.filter(item => item.clientMessageId !== clientMessageId);
       const pendingQueued = state.pendingQueued.filter(item => item.clientMessageId !== clientMessageId);
@@ -815,14 +821,15 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
     }
 
     case 'chat/relaySent': {
-      const { relayId, clientMessageId, text, attachments, detail, sessionId } = msg.payload;
+      const { relayId, clientMessageId, text, attachments, requestFiles, detail, sessionId } = msg.payload;
       const status = relayStatusOf(msg.payload.status); const target = relayTargetOf(msg.payload.target);
       // Each delivery once: a repeated entry (a replay after a restore) changes nothing.
       if (typeof relayId !== 'string' || !relayId || typeof text !== 'string' || !status || !target || state.items.some(item => item.kind === 'user' && item.relay?.id === relayId)) return state;
       const index = clientMessageId ? findLastIndex(state.items, item => item.kind === 'user' && item.clientMessageId === clientMessageId && item.promptId === undefined) : -1;
       const pending = clientMessageId ? [...state.pendingSends, ...state.pendingQueued].find(item => item.clientMessageId === clientMessageId) : undefined;
       const base: UserItem = index >= 0 ? state.items[index] as UserItem : pending ?? { kind: 'user', key: `u:${relayId}`, clientMessageId: clientMessageId ?? relayId, text,
-        attachments: attachments?.filter(entry => typeof entry?.path === 'string').map(entry => fileFromAttachment(entry.path)) };
+        attachments: attachments?.filter(entry => typeof entry?.path === 'string').map(entry => fileFromAttachment(entry.path)),
+        requestFiles: requestFiles?.map(entry => fileFromAttachment(entry.path)) };
       // Its own id as promptId: never dimmed as pending and never matched by a turn's end. This conversation started no turn for it.
       const sent: UserItem = { ...base, promptId: relayId, target, failed: undefined,
         relay: { id: relayId, status, ...(typeof detail === 'string' && detail ? { detail } : {}), ...(typeof sessionId === 'string' && sessionId ? { sessionId } : {}) } };
@@ -858,14 +865,16 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
     }
 
     case 'chat/steered': {
-      const { steerId, clientMessageId, text, attachments, editorContext } = msg.payload;
+      const { steerId, clientMessageId, text, attachments, requestFiles, editorContext } = msg.payload;
       if (typeof steerId !== 'string' || !steerId || typeof text !== 'string' || state.items.some(item => item.kind === 'user' && item.promptId === steerId)) return state;
       // Its own id as promptId: never matched by the running turn's end, never dimmed as pending.
       // A tracked `/steer` (see App.steerMessage) is confirmed by this bubble.
+      const pending = [...state.pendingQueued, ...state.pendingSends].find(item => item.clientMessageId === clientMessageId);
       const steered = clientMessageId ? { ...state, pendingQueued: state.pendingQueued.filter(item => item.clientMessageId !== clientMessageId), pendingSends: state.pendingSends.filter(item => item.clientMessageId !== clientMessageId) } : state;
       return withItem(steered, (key) => ({
         kind: 'user', key, clientMessageId: clientMessageId ?? steerId, promptId: steerId, text, editorContext, steered: true,
         attachments: attachments?.filter((entry) => typeof entry?.path === 'string').map((entry) => fileFromAttachment(entry.path)),
+        requestFiles: requestFiles?.map(entry => fileFromAttachment(entry.path)) ?? pending?.requestFiles,
       }));
     }
 
@@ -1085,6 +1094,7 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
             clientMessageId: user?.clientMessageId,
             retryText: user?.text,
             retryAttachments: user?.attachments,
+            retryRequestFiles: user?.requestFiles,
             retryTarget: user?.target,
           }),
           items,
@@ -1198,7 +1208,7 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
           const draftText = state.composer.text ? `${state.composer.text}\n\n${rejected.text}` : rejected.text;
           return { ...state, pendingQueued: state.pendingQueued.filter(item => item !== rejected), pendingSends: state.pendingSends.filter(item => item !== rejected),
             items: state.items.filter(item => item.kind !== 'user' || item.clientMessageId !== rejected.clientMessageId),
-            composer: addAttachments({ ...state.composer, text: draftText }, rejected.attachments ?? []), selectedTarget: state.selectedTarget ?? rejected.target,
+            composer: restoreRequestFiles(addAttachments({ ...state.composer, text: draftText }, rejected.attachments ?? []), rejected.requestFiles), selectedTarget: state.selectedTarget ?? rejected.target,
             phase: state.phase === 'sending' ? 'idle' : state.phase, sendError: message };
         }
         return { ...state, sendError: message };
@@ -1245,10 +1255,15 @@ function boundedPrefill(payload: ComposerPrefill): ComposerPrefill {
     ? payload.files.filter((file) => file && typeof file.path === 'string' && typeof file.fullPath === 'string' && file.fullPath.length > 0 && file.fullPath.length <= 1024 && file.path.length <= 1024)
       .map((file) => ({ path: file.path, fullPath: file.fullPath }))
     : undefined;
+  const requestFiles = Array.isArray(payload?.requestFiles)
+    ? payload.requestFiles.filter(file => file && typeof file.path === 'string' && typeof file.fullPath === 'string' && file.fullPath.length > 0)
+      .filter((file, index, all) => all.findIndex(other => fileIdentity(other.fullPath) === fileIdentity(file.fullPath)) === index)
+      .map(file => ({ path: file.path, fullPath: file.fullPath }))
+    : undefined;
   const rawTarget = payload?.target;
   const target = rawTarget && (rawTarget.kind === 'agent' || rawTarget.kind === 'team') && typeof rawTarget.id === 'string' && rawTarget.id.length > 0 && rawTarget.id.length <= 200
     ? { kind: rawTarget.kind, id: rawTarget.id } : undefined;
-  return { text: text || undefined, files: files?.length ? files : undefined, includeEditorContext: payload?.includeEditorContext === true, send: payload?.send === true, target, ...(payload?.pickTarget === true && !target ? { pickTarget: true } : {}) };
+  return { text: text || undefined, files: files?.length ? files : undefined, requestFiles: requestFiles?.length ? requestFiles : undefined, includeEditorContext: payload?.includeEditorContext === true, send: payload?.send === true, target, ...(payload?.pickTarget === true && !target ? { pickTarget: true } : {}) };
 }
 
 /** The editor's knowledge draft as the page uses it: a workspace path, a line range and the text of those lines, kept verbatim so the anchor stays true; null when it is not usable. */
@@ -1265,7 +1280,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return action.batch.reduce((s, { msg, at }) => applyHost(s, msg, at), state);
 
     case 'userSend': {
-      const item: UserItem = { kind: 'user', key: `u:${action.id}`, clientMessageId: action.id, text: action.text, target: action.target, attachments: action.attachments?.slice() };
+      const item: UserItem = { kind: 'user', key: `u:${action.id}`, clientMessageId: action.id, text: action.text, target: action.target, attachments: action.attachments?.slice(), requestFiles: action.requestFiles?.slice() };
       // A message sent from an idle page starts a new turn; one sent during a running turn (a race) must not downgrade it.
       const idle = state.phase === 'idle';
       return {
@@ -1287,7 +1302,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const item = state.pendingQueued.find(entry => entry.clientMessageId === action.id);
       if (!item?.failed) return state;
       const text = state.composer.text ? `${state.composer.text}\n\n${item.text}` : item.text;
-      return { ...state, pendingQueued: state.pendingQueued.filter(entry => entry !== item), composer: addAttachments({ ...state.composer, text }, item.attachments ?? []), selectedTarget: state.selectedTarget ?? item.target };
+      return { ...state, pendingQueued: state.pendingQueued.filter(entry => entry !== item), composer: restoreRequestFiles(addAttachments({ ...state.composer, text }, item.attachments ?? []), item.requestFiles), selectedTarget: state.selectedTarget ?? item.target };
     }
     case 'selectTarget':
       return { ...state, selectedTarget: action.target };
@@ -1345,6 +1360,10 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'attachmentsAdd':
       return { ...state, composer: addAttachments(state.composer, action.files) };
+
+    case 'requestFilesSet':
+      return { ...state, composer: { ...state.composer, requestFiles: action.files.length ? action.files : undefined },
+        ...(action.files.length ? { includeEditorContext: false, contextChosen: true } : {}) };
 
     case 'attachmentReorder': {
       const current = state.composer.attachments;

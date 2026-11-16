@@ -256,6 +256,7 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
 
 - omp 18.4.3·18.8.6·18.10.3: 작업 폴더 프로브 확장은 로드되지 않고, 옵션을 켜면 로드된다.
 - omp 18.10.4·18.12.1·18.12.6·18.15.0·18.18.9·18.20.0: pomp 패키지의 명령과 `vs-project`가 로드된다(18.20.0: `pomp-*` 23개, `extension_error` 없음).
+- omp 18.21.0: 격리 RPC에서 `pomp-*` 명령 23개와 로컬 테스트 공급자 두 턴의 종료·유휴 복귀를 확인했다(`extension_error` 없음).
 
 ### 프로세스 작업 폴더
 
@@ -361,7 +362,7 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
 
 ### 작업 영역 신뢰
 
-omp(18.4.3부터 현재 18.20.0까지)는 프로젝트 신뢰를 확인하지 않는다(`isProjectTrusted: () => true`).
+omp 18.4.3–18.20.0에서 프로젝트 신뢰 확인을 하지 않는 것(`isProjectTrusted: () => true`)을 확인했다.
 작업 폴더에서 읽는 다음 구성은 시작과 동시에 코드를 실행하거나, 승인을 바꾸거나, 바깥 파일을 대화에 넣는다.
 MCP stdio 서버는 엔진 환경을 그대로 받는다. POMP가 넣은 API 키도 포함된다.
 
@@ -432,8 +433,8 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
 #### 버전 정의
 
 - `engines/omp/engine.props`가 버전, 패치 빌드 출처, 자산 이름, 크기, SHA-256과 고지 파일 SHA-256을 고정한다.
-- 현재 상위 omp **18.20.0**(커밋 `c308970263ae13744ea15ab67302e3dac840e266`)에 `engines/omp/pomp-v18.20.0.patch`를
-  적용하고 `src/Pomp.McpServer`를 함께 넣은 빌드다. 크기 **251,359,744바이트**, SHA-256 `b93b9d0406a6c0acddada887f1f365d1a21f2b4cbadba5f95b6b01593d0c3a7e`.
+- 현재 상위 omp **18.21.0**(커밋 `6f03614d761366972e80e84e25d1418ed678d2c7`)에 `engines/omp/pomp-v18.21.0.patch`를
+  적용하고 `src/Pomp.McpServer`를 함께 넣은 빌드다. 크기 **254,009,344바이트**, SHA-256 `64fe2f2d24176f7ff63b13149bae815dc44af027602ed46f46ee3f52b142c279`.
 - 라이선스는 MIT(`engines/omp/LICENSE.upstream`).
 
 #### 빌드 (`build/build-omp.ps1`, `Pomp.Vsix.Common.targets`의 `PompPrepareOmpEngine`)
@@ -544,7 +545,7 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
 ### 에이전트·팀과 컴퓨터 사용
 
 구현 계약은 §8 "에이전트·팀 구현 계약"에 있고, 사용 안내는 `docs/agent-teams.md`에 있다.
-엔진의 Win32 `takeover` 클릭과 창 활성화에 소스 패치가 필요하다(`engines/omp/pomp-v18.20.0.patch`).
+엔진의 Win32 `takeover` 클릭과 창 활성화에 소스 패치가 필요하다(`engines/omp/pomp-v18.21.0.patch`).
 열린 대화 탭마다 별도 omp 프로세스를 실행한다. 다른 탭의 응답·승인·대기열은 유지되며 전환을 기다리지 않는다.
 같은 탭의 새 대화·기록 전환은 해당 엔진이 바쁠 때 보류하고, 컴퓨터 입력 제어는 탭 전체에서 한 곳만 허용한다.
 기록 목록에서 지난 대화를 열 때도 그 대화 상대의 탭을 선택한 뒤 해당 엔진만 전환한다. 다른 탭에서 열린 대화는 먼저 탭을 닫아야 삭제할 수 있다.
@@ -1205,12 +1206,14 @@ WebView2 안의 키:
 ### Live와 엔진 파일 도구
 
 - Live(따라가기·변경 표시·책갈피)는 POMP가 버퍼에 넣은 편집을 기록한다. 호스트 도구 `edit_buffer_hashline`과 변경 검토 적용이 그 경로다.
+- 편집 대상의 버퍼 로드와 화면 이동은 분리한다. `OpenEditTarget`은 설정과 무관하게 `OpenDocumentNoActivate`로 버퍼만 불러온다. 성공한 편집을 기록한 뒤 `EditorFollowService`가 Live 활성 상태·현재 대화·사용자 입력 상태를 확인하고 이동한다. 북마크만 켠 경우나 실패한 편집은 대상 탭을 표시하지 않는다.
 - 엔진의 파일 도구(`edit`, `write`, `ast_edit`, `apply_patch`)는 디스크에 쓴다. 확장 모듈 `live-edits.ts`가 `tool_call`에서 대상 파일을 디스크에서 읽어 두고(2 MiB 이하), 끝난 `tool_result`에서 그 내용을 `pomp-disk-edit:` 알림으로 호스트에 보낸다(실패한 호출은 `error`). 하위 에이전트의 호출도 주 대화 채널로 보낸다.
 - 쓰기 전에 확장은 숨은 확인 요청 `pomp-disk-edit-hold`로 호스트에 이미 있는 대상 파일을 알리고 답을 기다린다(최대 3초). 호스트는 편집기에 열린 문서의 파일 변경 감지를 멈춘다(`IVsDocDataFileChangeControl.IgnoreFileChanges`). 그래서 VS가 도구의 쓰기를 보고 문서를 다시 읽거나 "외부에서 변경됨" 질문을 띄우지 않는다. 결과 알림을 받으면 `IVsFileChangeEx.SyncFile` 다음 감지를 다시 켠다. 이때 버퍼가 저장 안 한 변경 없이 디스크와 다르면 다시 읽는다. 거부·차단된 호출은 `tool_result`가 없으므로, 확장이 그 턴의 `turn_end`(또는 `agent_end`)에 남은 호출을 `error` 알림으로 보내 바로 풀게 한다. 그래도 알림이 오지 않으면(엔진이 끝남) 호스트가 2분 뒤에 푼다. Live와 책갈피가 모두 꺼져 있으면 멈추지 않는다.
 - 호스트(`TextBufferAdapter.ShowDiskEditAsync`)는 작업 영역 안 파일만 다룬다. 줄 단위 차이를 계산해 다음 중 하나로 보인다.
   - 열린 버퍼가 아직 고치기 전 내용이고 저장하지 않은 변경이 없으면, 그 차이를 POMP 편집 하나로 버퍼에 넣고 저장한다. 디스크에 이미 있는 내용을 다시 쓰는 저장이라 VS가 다시 읽거나 묻지 않는다. 이 저장은 "저장할 때까지" 유지 설정에서도 표시를 지우지 않는다.
   - 편집기가 이미 새 내용을 읽었거나 파일이 열려 있지 않았으면(열고 나서) 새 내용 위에 그 차이를 이 대화의 변경으로 기록한다.
   - 버퍼가 두 내용 어느 쪽도 아니면(사용자가 그 사이 고침) 표시하지 않는다.
+- 디스크 I/O·차이 계산 뒤 UI 스레드로 돌아오면 Live·북마크 설정을 다시 확인한다. 그 사이 둘 다 꺼졌으면 버퍼를 열거나 편집하지 않는다. 이미 잡은 파일 변경 감지 보류는 `finally`에서 반드시 해제한다.
 - 언어 제한은 없다. Live의 편집기 구성 요소는 모두 `text` 콘텐츠 형식에 등록되어 있다.
 
 ### 검증 환경과 범위

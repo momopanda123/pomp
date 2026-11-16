@@ -535,6 +535,8 @@ export interface FastMode {
 export interface ComposerPrefill {
   text?: string;
   files?: WorkspaceFile[];
+  /** Whole-file prompt targets, distinct from reference attachments; never auto-sent. */
+  requestFiles?: WorkspaceFile[];
   includeEditorContext?: boolean;
   send?: boolean;
   /** The one-message send target (the editor menu's "to agent or team"): selected, with the main conversation shown. */
@@ -575,6 +577,7 @@ export interface TurnStartedPayload {
   /** Original user input, without injected editor context; used when rebuilding a replayed bubble. */
   text?: string;
   attachments?: { path: string }[];
+  requestFiles?: { path: string }[];
   /** Active editor reference actually included in this turn's prompt, also restored on replay. */
   editorContext?: { path: string; startLine?: number; endLine?: number; caretLine?: number };
   team?: string | null;
@@ -590,6 +593,7 @@ export interface SteeredPayload {
   clientMessageId?: string;
   text: string;
   attachments?: { path: string }[];
+  requestFiles?: { path: string }[];
   editorContext?: TurnStartedPayload['editorContext'];
 }
 /** The subagent accepted a direct message; its reply continues in the agent's conversation, not this chat turn. */
@@ -599,6 +603,7 @@ export interface SubagentAcceptedPayload {
   text: string;
   agentInstance: string;
   attachments?: { path: string }[];
+  requestFiles?: { path: string }[];
   editorContext?: TurnStartedPayload['editorContext'];
 }
 /** Where a message sent to another agent or team stands in that partner's tab; `unknown`: restored without a recorded outcome. */
@@ -609,6 +614,7 @@ export interface RelaySentPayload {
   clientMessageId?: string;
   text: string;
   attachments?: { path: string }[];
+  requestFiles?: { path: string }[];
   target: { kind: 'agent' | 'team'; id: string };
   status: RelayStatus;
   detail?: string;
@@ -840,7 +846,7 @@ export interface SessionEntry {
   partner?: ConversationPartner;
 }
 
-export interface SessionHistoryMessage { role: 'user' | 'assistant'; text: string; truncated?: boolean }
+export interface SessionHistoryMessage { role: 'user' | 'assistant'; text: string; truncated?: boolean; requestFiles?: { path: string }[] }
 
 export interface SessionHistoryState {
   requestId?: string;
@@ -932,6 +938,10 @@ function normalizeHistoryMessages(value: unknown): SessionHistoryMessage[] {
     const row = protocolRecord(item);
     if ((row.role !== 'user' && row.role !== 'assistant') || typeof row.text !== 'string') continue;
     const message: SessionHistoryMessage = { role: row.role, text: row.text.slice(0, 16_000) };
+    if (Array.isArray(row.requestFiles)) {
+      const files = row.requestFiles.map(protocolRecord).filter(file => typeof file.path === 'string' && file.path.length > 0);
+      if (files.length) message.requestFiles = files.map(file => ({ path: file.path as string }));
+    }
     if (typeof row.truncated === 'boolean') message.truncated = row.truncated;
     if (row.text.length > 16_000) message.truncated = true;
     messages.push(message);
@@ -1437,6 +1447,7 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
     text: string;
     includeEditorContext: boolean;
     attachments?: { path: string }[];
+    requestFiles?: { path: string }[];
     team?: string;
     agent?: string;
     agentInstance?: string;
@@ -1459,10 +1470,10 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'knowledge/command': { requestId: string; root: string } & KnowledgeCommand;
   'agentHooks/command': { requestId: string; root: string; sessionId: string; action: 'refresh' | 'save' | 'delete' | 'autoForward'; id?: string; revision?: number; rule?: Omit<AgentHookRule, 'id' | 'revision'>; enabled?: boolean };
   /** The basket's token count: the draft, the attachment list as a send writes it and the conversation's knowledge; answered by `workspace/tokenCount`. */
-  'workspace/countDraftTokens': { requestId: string; root: string; sessionId: string; modelId: string; provider: string; text: string; attachments?: { path: string }[] };
+  'workspace/countDraftTokens': { requestId: string; root: string; sessionId: string; modelId: string; provider: string; text: string; attachments?: { path: string }[]; requestFiles?: { path: string }[] };
   'workspace/findFiles': { requestId: string; query: string; limit?: number };
   /** What the next message adds beyond its text (the editor context when on, the attachment list); answered by `workspace/basketTokens`. */
-  'workspace/countBasketTokens': { requestId: string; root: string; sessionId?: string; includeEditorContext: boolean; attachments?: { path: string }[] };
+  'workspace/countBasketTokens': { requestId: string; root: string; sessionId?: string; includeEditorContext: boolean; attachments?: { path: string }[]; requestFiles?: { path: string }[] };
   /** Host-chrome: move the focus from the page to the editor (the VS host handles it; never reaches the session). */
   'ui/toggleFocus': Record<string, never>;
   /** Host-chrome: a Visual Studio key the page does not use (F5, Ctrl+Shift+B); the VS host runs the command bound to it (never reaches the session). */

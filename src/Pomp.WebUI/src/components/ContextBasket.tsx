@@ -18,8 +18,8 @@ import { Icon } from './Icon';
  * The context basket: the files attached to the next message (sent once, as a path list) and the knowledge the conversation uses (ticked
  * defaults and picks, kept for every message of the conversation). Both are folding groups; the token count covers draft, files and knowledge.
  */
-export function ContextBasket({ native = true, files, text, dispatch, locale, workspaceKey, sessionId, model, connected, disabled, visible = false }: {
-  native?: boolean; visible?: boolean; files: WorkspaceFile[]; text: string;
+export function ContextBasket({ native = true, files, requestFiles, text, dispatch, locale, workspaceKey, sessionId, model, connected, disabled, visible = false }: {
+  native?: boolean; visible?: boolean; files: WorkspaceFile[]; requestFiles?: string[]; text: string;
   dispatch: Dispatch<Action>; locale: string; workspaceKey?: string; sessionId?: string; model?: ModelInfo; connected: boolean; disabled: boolean;
 }) {
   const t = useT();
@@ -37,7 +37,7 @@ export function ContextBasket({ native = true, files, text, dispatch, locale, wo
     dispatch({ type: 'attachmentReorder', fullPath: source.path, beforePath });
   };
   useEffect(() => { drag.current = null; }, [workspaceKey, signature, disabled]);
-  const pathBytes = useMemo(() => new TextEncoder().encode(files.map(file => file.fullPath).join('\n')).length, [files]);
+  const pathBytes = useMemo(() => new TextEncoder().encode([...files.map(file => file.fullPath), ...(requestFiles ?? [])].join('\n')).length, [files, requestFiles]);
   const bytes = new TextEncoder().encode(text).length + pathBytes;
   // The knowledge the person ticks goes with every message of this conversation until it is unticked.
   const knowledge = useKnowledge();
@@ -75,7 +75,7 @@ export function ContextBasket({ native = true, files, text, dispatch, locale, wo
     <h3>{ko ? '컨텍스트 바구니' : 'Context basket'}</h3>
     <div className="context-basket-summary">
       <span>{t('basket.summary', { min: Math.ceil(bytes / 4).toLocaleString(), max: bytes.toLocaleString() })}</span>
-      {native && <DraftTokenCounter text={text} attachments={files.map(file => file.fullPath)} knowledge={knowledge.selected} root={workspaceKey} sessionId={sessionId} model={model} connected={connected} disabled={disabled} locale={locale} />}
+      {native && <DraftTokenCounter text={text} attachments={files.map(file => file.fullPath)} requestFiles={requestFiles} knowledge={knowledge.selected} root={workspaceKey} sessionId={sessionId} model={model} connected={connected} disabled={disabled} locale={locale} />}
     </div>
     <ViewSection sectionKey="context-files" title={t('composer.attachments')} status={files.length} bodyClassName="ui-flush">
       <div onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = !disabled && drag.current ? 'move' : 'none'; }} onDrop={event => drop(event)}>

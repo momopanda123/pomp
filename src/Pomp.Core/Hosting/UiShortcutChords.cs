@@ -138,7 +138,7 @@ namespace Pomp.Hosting
         /// (<see cref="IsPageChord"/>), empty when the value is blank (no key) and the default otherwise.
         /// </summary>
         public static EditorShortcutsPayload NormalizeEditorPayload(string? openPomp, string? newConversation, string? explainCode, string? reviewCode, string? fixCode,
-            string? writeTests, string? addFileToContext, string? inlineEdit, string? toggleFocus, string? knowledgeTag, string? liveFollow = null, string? liveBookmarks = null)
+            string? writeTests, string? addFileToContext, string? inlineEdit, string? toggleFocus, string? knowledgeTag, string? liveFollow = null, string? liveBookmarks = null, string? requestFiles = null)
         {
             var defaults = new EditorShortcutsPayload();
             return new EditorShortcutsPayload
@@ -155,6 +155,7 @@ namespace Pomp.Hosting
                 KnowledgeTag = Chord(knowledgeTag, defaults.KnowledgeTag, editor: true),
                 LiveFollow = liveFollow == null ? defaults.LiveFollow : Chord(liveFollow, defaults.LiveFollow),
                 LiveBookmarks = liveBookmarks == null ? defaults.LiveBookmarks : Chord(liveBookmarks, defaults.LiveBookmarks),
+                RequestFiles = requestFiles == null ? defaults.RequestFiles : Chord(requestFiles, defaults.RequestFiles),
             };
         }
 

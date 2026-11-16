@@ -132,7 +132,7 @@ namespace Pomp.Hosting
         }
         private static ConversationPartnerPayload CopyPartner(ConversationPartnerPayload value) => new ConversationPartnerPayload { Kind = value.Kind, Id = value.Id };
         private static string? Target(string? value) => string.IsNullOrWhiteSpace(value) ? null : value!.Trim();
-        private static ChatSendPayload CopySend(ChatSendPayload value) => new ChatSendPayload { ClientMessageId = value.ClientMessageId, Text = value.Text ?? "", IncludeEditorContext = value.IncludeEditorContext, Team = Target(value.Team), Agent = Target(value.Agent), AgentInstance = Target(value.AgentInstance), Main = value.Main == true ? true : null, Attachments = value.Attachments?.Where(a => a != null).Select(a => new ChatAttachment { Path = a.Path }).ToList() };
+        private static ChatSendPayload CopySend(ChatSendPayload value) => new ChatSendPayload { ClientMessageId = value.ClientMessageId, Text = value.Text ?? "", IncludeEditorContext = !(value.RequestFiles?.Count > 0) && value.IncludeEditorContext, Team = Target(value.Team), Agent = Target(value.Agent), AgentInstance = Target(value.AgentInstance), Main = value.Main == true ? true : null, Attachments = value.Attachments?.Where(a => a != null).Select(a => new ChatAttachment { Path = a.Path }).ToList(), RequestFiles = PromptDisplay.CopyRequestFiles(value.RequestFiles) };
         private ConversationPartnerPayload ValidatePartner(ConversationPartnerPayload value)
         {
             if (value.Kind == "main") return new ConversationPartnerPayload();
@@ -297,7 +297,7 @@ namespace Pomp.Hosting
         }
         private ChatQueueStatePayload QueueView()
         {
-            lock (_stateLock) return new ChatQueueStatePayload { SessionId = _chatQueue.Count == 0 ? null : _queueSession, Paused = _queuePaused, Reason = _queueReason, Items = _chatQueue.Select(q => new ChatQueueItemPayload { Id = q.Id, Text = q.Send.Text, IncludeEditorContext = q.Send.IncludeEditorContext, Attachments = CopySend(q.Send).Attachments, Team = q.Send.Team ?? (q.Partner?.Kind == "team" ? q.Partner.Id : null), Agent = q.Send.Agent ?? (q.Partner?.Kind == "agent" ? q.Partner.Id : null), AgentInstance = q.Send.AgentInstance, CreatedAt = q.CreatedAt, CanSteer = CanSteer(q.Send) }).ToList() };
+            lock (_stateLock) return new ChatQueueStatePayload { SessionId = _chatQueue.Count == 0 ? null : _queueSession, Paused = _queuePaused, Reason = _queueReason, Items = _chatQueue.Select(q => new ChatQueueItemPayload { Id = q.Id, Text = q.Send.Text, IncludeEditorContext = q.Send.IncludeEditorContext, Attachments = CopySend(q.Send).Attachments, RequestFiles = PromptDisplay.CopyRequestFiles(q.Send.RequestFiles), Team = q.Send.Team ?? (q.Partner?.Kind == "team" ? q.Partner.Id : null), Agent = q.Send.Agent ?? (q.Partner?.Kind == "agent" ? q.Partner.Id : null), AgentInstance = q.Send.AgentInstance, CreatedAt = q.CreatedAt, CanSteer = CanSteer(q.Send) }).ToList() };
         }
         private int QueueBytes() => System.Text.Encoding.UTF8.GetByteCount(Pomp.Json.PompJson.Serialize(QueueView()));
         private void PublishChatQueue()
@@ -313,12 +313,16 @@ namespace Pomp.Hosting
         }
         private static void ValidateQueuedSend(ChatSendPayload send)
         {
-            if (string.IsNullOrWhiteSpace(send.Text) && (send.Attachments == null || send.Attachments.Count == 0)) throw new ArgumentException(PompLanguage.Pick("메시지가 비어 있어요.", "Message is empty."));
+            PromptDisplay.ValidateRequestFiles(send.RequestFiles);
+            if (send.RequestFiles?.Count > 0 && (send.Text ?? "").TrimStart().StartsWith("/", StringComparison.Ordinal))
+                throw new InvalidOperationException(PompLanguage.Pick("전체 파일 요청은 슬래시 명령과 함께 사용할 수 없어요. 일반 요청으로 보내 주세요.", "Whole-file requests cannot be combined with slash commands. Send a plain-language request instead."));
+            if (string.IsNullOrWhiteSpace(send.Text) && (send.Attachments == null || send.Attachments.Count == 0) && !(send.RequestFiles?.Count > 0)) throw new ArgumentException(PompLanguage.Pick("메시지가 비어 있어요.", "Message is empty."));
             if (send.Attachments?.Any(a => a.Path == null || a.Path.Length > 4096 || a.Path.Any(char.IsControl)) == true) throw new ArgumentException(PompLanguage.Pick("첨부 파일 경로가 올바르지 않아요.", "An attachment path is invalid."));
             // The attached paths go into the same prompt, so their number is bounded only by the frame size. The read_buffer header is the
             // longer of the two (PromptDisplay.AttachmentsHeader), so it bounds either.
             var paths = send.Attachments?.Select(a => "- " + a.Path).ToList() ?? new List<string>();
             var message = paths.Count == 0 ? send.Text : PromptDisplay.AttachmentsHeader(true) + "\n" + string.Join("\n", paths) + "\n\n" + send.Text;
+            if (send.RequestFiles?.Count > 0) message = PromptDisplay.RequestFilesPrefix(send.RequestFiles, true) + "\n\n" + message;
             var probe = new JObject { ["type"] = "prompt", ["id"] = "prompt-queue", ["message"] = message };
             if (Pomp.Transport.NdjsonWriter.Encode(probe).Length > MaxPromptFrameBytes) throw new ArgumentException(PompLanguage.Pick("메시지가 너무 커요.", "Message is too large."));
             if (new[] { send.Team, send.Agent, send.AgentInstance }.Count(t => !string.IsNullOrWhiteSpace(t)) > 1) throw new ArgumentException(PompLanguage.Pick("보낼 대상이 너무 많아요.", "Too many targets."));
@@ -423,7 +427,7 @@ namespace Pomp.Hosting
                 var entry = history.Command(command);
                 if (command.Action == "rerun")
                 {
-                    var send = new ChatSendPayload { ClientMessageId = "history-" + Guid.NewGuid().ToString("N"), Text = entry.Text, IncludeEditorContext = false, Team = entry.Target.Kind == "team" ? entry.Target.Id : null, Agent = entry.Target.Kind == "agent" ? entry.Target.Id : null, AgentInstance = entry.Target.Kind == "dm" ? entry.Target.Id : null };
+                    var send = new ChatSendPayload { ClientMessageId = "history-" + Guid.NewGuid().ToString("N"), Text = entry.Text, RequestFiles = PromptDisplay.CopyRequestFiles(entry.RequestFiles), IncludeEditorContext = false, Team = entry.Target.Kind == "team" ? entry.Target.Id : null, Agent = entry.Target.Kind == "agent" ? entry.Target.Id : null, AgentInstance = entry.Target.Kind == "dm" ? entry.Target.Id : null };
                     long generation; QueuedChat? queued;
                     // A run for another agent or team goes to that partner's tab again; it never waits in this conversation's queue.
                     var relayed = RelayTarget(CopySend(send)) != null;
@@ -458,7 +462,7 @@ namespace Pomp.Hosting
             if (history == null || relay != null) return;
             try
             {
-                var runId = history.Begin(session, new AgentRunTargetPayload { Kind = kind, Id = id, Title = title ?? id }, send.Text, turn.PromptId);
+                var runId = history.Begin(session, new AgentRunTargetPayload { Kind = kind, Id = id, Title = title ?? id }, send.Text, turn.PromptId, send.RequestFiles);
                 bool active;
                 lock (_stateLock) { turn.History = history; turn.RunId = runId; active = _turns.ContainsKey(turn.PromptId); }
                 if (!active) history.End(runId, "error");

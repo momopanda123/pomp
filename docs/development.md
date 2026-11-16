@@ -44,8 +44,8 @@ POMP를 빌드하고 디버깅하고 수정하는 사람을 위한 문서다. �
 | 인터넷 연결 | 첫 빌드에서 고정된 소스와 잠긴 종속성을 가져올 때 필요하다 |
 | Git, Bun 1.4.4+, Rust/Cargo (MSVC x64), Visual Studio C++ 빌드 도구 | 패치한 omp 엔진을 로컬에서 처음 빌드할 때 필요하다 |
 
-첫 빌드는 `build/build-omp.ps1`로 고정된 omp 18.20.0 소스에 `engines/omp/pomp-v18.20.0.patch`를 적용한다.
-빌드된 실행 파일은 `artifacts\engines\omp\18.20.0\`에 캐시하며 `engines/omp/engine.props`의 크기·SHA-256과
+첫 빌드는 `build/build-omp.ps1`로 고정된 omp 18.21.0 소스에 `engines/omp/pomp-v18.21.0.patch`를 적용한다.
+빌드된 실행 파일은 `artifacts\engines\omp\18.21.0\`에 캐시하며 `engines/omp/engine.props`의 크기·SHA-256과
 맞아야 패키지에 넣는다. 공식 릴리스 바이너리는 이 패치가 없으므로 대체할 수 없다. 오프라인에서는 같은
 패치 빌드의 로컬 사본을 `-OmpExe`로 지정한다.
 
@@ -85,7 +85,7 @@ POMP를 빌드하고 디버깅하고 수정하는 사람을 위한 문서다. �
 
 ### omp 엔진과 로그인
 
-POMP 릴리스마다 시험한 omp 버전 하나가 VSIX에 들어 있다. 위치는 `<확장 폴더>\omp\omp.exe`이고, 현재 버전은 18.20.0이다.
+POMP 릴리스마다 시험한 omp 버전 하나가 VSIX에 들어 있다. 위치는 `<확장 폴더>\omp\omp.exe`이고, 현재 버전은 18.21.0이다.
 
 - 시작할 때 크기와 SHA-256으로 그 파일이 맞는지 확인한다.
 - omp 업데이트는 POMP 업데이트로만 들어온다.

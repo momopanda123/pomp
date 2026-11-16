@@ -28,6 +28,114 @@ namespace Pomp.VisualStudio.Commands
     {
         private readonly PompPackage package;
         private readonly PompServices services;
+        private DTE2? fileCommandDte;
+        private IVsTextManager? fileCommandTextManager;
+        private IComponentModel? fileCommandComponents;
+
+        internal async Task InitializeFileSelectionAsync()
+        {
+            await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+            fileCommandDte = await package.GetServiceAsync(typeof(SDTE)) as DTE2;
+            fileCommandTextManager = await package.GetServiceAsync(typeof(SVsTextManager)) as IVsTextManager;
+            fileCommandComponents = await package.GetServiceAsync(typeof(SComponentModel)) as IComponentModel;
+        }
+
+        internal bool CanSelectFiles(FileCommandOrigin origin)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            return SelectedFilePaths(origin).Count > 0;
+        }
+
+        /// <summary>Captures targets before opening chat; this only prepares a draft and never sends a prompt.</summary>
+        internal async Task RequestFilesAsync(FileCommandOrigin origin)
+        {
+            await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+            var paths = SelectedFilePaths(origin);
+            if (paths.Count == 0) { await ReportNoFilesAsync(); return; }
+            var session = services.ActiveSession;
+            if (session.BackendId != "omp")
+            {
+                await SetStatusAsync(PompLanguage.Pick(
+                    "POMP: 이 ACP 대화는 파일 전체 요청을 지원하지 않아요. omp 대화를 선택한 뒤 다시 시도하세요.",
+                    "POMP: whole-file requests are not supported in this ACP conversation. Select an omp conversation and try again."));
+                return;
+            }
+            var files = await PrefillFilesAsync(paths);
+            await ShowChatAsync(focus: true);
+            session.PrefillComposer(new ComposerPrefillPayload { RequestFiles = files, IncludeEditorContext = false, Send = false });
+        }
+
+        internal async Task AddExplorerFilesToContextAsync()
+        {
+            await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+            var paths = SelectedFilePaths(FileCommandOrigin.SolutionExplorerMenu);
+            if (paths.Count == 0) { await ReportNoFilesAsync(); return; }
+            var session = services.ActiveSession;
+            var files = await PrefillFilesAsync(paths);
+            await ShowChatAsync(focus: true);
+            session.PrefillComposer(new ComposerPrefillPayload { Files = files });
+        }
+
+        private Task ReportNoFilesAsync() => SetStatusAsync(PompLanguage.Pick(
+            "POMP: 솔루션 탐색기에서 실제 파일을 선택하거나 저장된 파일의 편집기를 활성화하세요. 폴더와 프로젝트는 요청 대상이 아니에요.",
+            "POMP: select physical files in Solution Explorer or activate a saved file's text editor. Folders and projects are not file targets."));
+
+        private async Task<List<ComposerPrefillFile>> PrefillFilesAsync(IReadOnlyList<string> paths)
+        {
+            var root = await services.Environment.GetWorkspaceRootAsync(package.DisposalToken);
+            var prefix = string.IsNullOrEmpty(root) ? null : Path.GetFullPath(root).TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
+            var files = new List<ComposerPrefillFile>(paths.Count);
+            foreach (var full in paths)
+            {
+                var relative = prefix != null && full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    ? full.Substring(prefix.Length).Replace('\\', '/') : full;
+                files.Add(new ComposerPrefillFile { Path = relative, FullPath = full });
+            }
+            return files;
+        }
+
+        private List<string> SelectedFilePaths(FileCommandOrigin origin)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            try
+            {
+                // Menu-specific commands know their origin even if the popup changes DTE.ActiveWindow.
+                // The keyboard command has no such privilege: a different tool window must never use a stale editor.
+                var requireEditorFocus = origin == FileCommandOrigin.ActiveWindow;
+                if (origin == FileCommandOrigin.ActiveWindow)
+                {
+                    var window = fileCommandDte?.ActiveWindow;
+                    origin = FileCommandSelection.ResolveOrigin(origin,
+                        string.Equals(window?.ObjectKind, EnvDTE.Constants.vsWindowKindSolutionExplorer, StringComparison.OrdinalIgnoreCase),
+                        window?.Type == vsWindowType.vsWindowTypeDocument);
+                }
+                if (origin == FileCommandOrigin.SolutionExplorerMenu)
+                {
+                    var items = fileCommandDte?.ToolWindows.SolutionExplorer.SelectedItems as Array;
+                    return items == null ? new List<string>() : FileCommandSelection.Collect(items, entry =>
+                    {
+                        ThreadHelper.ThrowIfNotOnUIThread();
+                        if (!(entry is UIHierarchyItem item) || !(item.Object is ProjectItem projectItem)
+                            || !string.Equals(projectItem.Kind, EnvDTE.Constants.vsProjectItemKindPhysicalFile, StringComparison.OrdinalIgnoreCase)
+                            || projectItem.FileCount < 1) return null;
+                        return projectItem.FileNames[1];
+                    }, ex => services.Logger.Debug("Reading a selected Solution Explorer file failed: " + ex.Message));
+                }
+                if (origin == FileCommandOrigin.EditorMenu && fileCommandTextManager != null && fileCommandComponents != null
+                    && Microsoft.VisualStudio.ErrorHandler.Succeeded(fileCommandTextManager.GetActiveView(requireEditorFocus ? 1 : 0, null, out var native)) && native != null)
+                {
+                    var view = fileCommandComponents.GetService<IVsEditorAdaptersFactoryService>().GetWpfTextView(native);
+                    if (view != null && !view.IsClosed
+                        && fileCommandComponents.GetService<ITextDocumentFactoryService>().TryGetTextDocument(view.TextBuffer, out var document))
+                        return FileCommandSelection.Collect(new[] { document.FilePath }, entry => (string)entry);
+                }
+            }
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException || ex is ArgumentException || ex is InvalidCastException)
+            {
+                services.Logger.Debug("Reading the file command selection failed: " + ex.Message);
+            }
+            return new List<string>();
+        }
 
         public PompCommandActions(PompPackage package, PompServices services)
         {
@@ -386,24 +494,13 @@ namespace Pomp.VisualStudio.Commands
         private async Task<IReadOnlyList<string>> SolutionExplorerSelectionAsync()
         {
             await services.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
-            var paths = new List<string>();
-            if (!(await package.GetServiceAsync(typeof(SDTE)) is DTE2 dte)) return paths;
             try
             {
-                if (!string.Equals(dte.ActiveWindow?.ObjectKind, EnvDTE.Constants.vsWindowKindSolutionExplorer, StringComparison.OrdinalIgnoreCase)) return paths;
-                if (!(dte.ToolWindows.SolutionExplorer.SelectedItems is Array items)) return paths;
-                foreach (var entry in items)
-                {
-                    if (!(entry is UIHierarchyItem item) || !(item.Object is ProjectItem projectItem) || projectItem.FileCount < 1) continue;
-                    var file = projectItem.FileNames[1];
-                    if (!string.IsNullOrEmpty(file)) paths.Add(file);
-                }
+                if (!string.Equals(fileCommandDte?.ActiveWindow?.ObjectKind, EnvDTE.Constants.vsWindowKindSolutionExplorer, StringComparison.OrdinalIgnoreCase))
+                    return Array.Empty<string>();
             }
-            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException || ex is ArgumentException || ex is InvalidCastException)
-            {
-                services.Logger.Warn("Reading the Solution Explorer selection for a drop on the chat page failed: " + ex.Message);
-            }
-            return paths;
+            catch (System.Runtime.InteropServices.COMException) { return Array.Empty<string>(); }
+            return SelectedFilePaths(FileCommandOrigin.SolutionExplorerMenu);
         }
 
         /// <summary>The active document as a context-basket file (workspace-relative path with forward slashes when inside the workspace).</summary>
