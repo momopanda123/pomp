@@ -24,16 +24,21 @@ namespace Pomp.Hosting
         public void PrefillComposer(ComposerPrefillPayload prefill)
         {
             if (prefill == null) throw new ArgumentNullException(nameof(prefill));
+            var requested = prefill.RequestFiles?.Select(file => new ChatAttachment { Path = file?.FullPath! }).ToList();
+            PromptDisplay.ValidateRequestFiles(requested);
             var bounded = new ComposerPrefillPayload
             {
                 Text = prefill.Text == null ? null : prefill.Text.Length <= 4000 ? prefill.Text : prefill.Text.Substring(0, 4000),
                 Files = prefill.Files?.Where(file => file != null && file.FullPath.Length > 0 && file.FullPath.Length <= 1024 && file.Path.Length <= 1024).ToList(),
-                IncludeEditorContext = prefill.IncludeEditorContext,
-                Send = prefill.Send,
+                RequestFiles = prefill.RequestFiles?.Select(file => new ComposerPrefillFile { FullPath = file.FullPath, Path = string.IsNullOrEmpty(file.Path) || file.Path.Length > 4096 ? file.FullPath : file.Path }).ToList(),
+                IncludeEditorContext = requested?.Count > 0 ? false : prefill.IncludeEditorContext,
+                Send = !(requested?.Count > 0) && prefill.Send,
                 Target = prefill.Target != null && (prefill.Target.Kind == "agent" || prefill.Target.Kind == "team") && prefill.Target.Id.Length > 0 && prefill.Target.Id.Length <= 200
                     ? new ComposerPrefillTarget { Kind = prefill.Target.Kind, Id = prefill.Target.Id } : null,
             };
             bounded.PickTarget = prefill.PickTarget && bounded.Target == null;
+            if (System.Text.Encoding.UTF8.GetByteCount(Pomp.Json.PompJson.Serialize(bounded)) > MaxPromptFrameBytes)
+                throw new InvalidOperationException(PompLanguage.Pick("전체 파일 요청이 너무 커요.", "The whole-file request is too large."));
             // Parked first, then taken back if the page is ready: the hub's lock (IsReady) is never taken inside the state
             // lock, because the page's ready handler takes the state lock (TakePendingUiRequests) inside the hub's.
             lock (_stateLock)

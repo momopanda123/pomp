@@ -43,12 +43,12 @@ namespace Pomp.Features
         {
             lock (Gate) return Read().Entries.Select(e => e.Target).ToList();
         }
-        public string Begin(string sessionId, AgentRunTargetPayload target, string text, string? promptId = null)
+        public string Begin(string sessionId, AgentRunTargetPayload target, string text, string? promptId = null, IReadOnlyList<ChatAttachment>? requestFiles = null)
         {
             lock (Gate)
             {
                 var state = Read(); var id = Guid.NewGuid().ToString("N");
-                state.Entries.Insert(0, new AgentRunEntryPayload { Id = id, SessionId = Bound(sessionId, 256), PromptId = SafeId(promptId), Target = new AgentRunTargetPayload { Kind = target.Kind, Id = Bound(target.Id, 128), Title = Bound(target.Title, 40) }, Text = Bound(text, 4000), StartedAt = DateTimeOffset.UtcNow.ToString("O") });
+                state.Entries.Insert(0, new AgentRunEntryPayload { Id = id, SessionId = Bound(sessionId, 256), PromptId = SafeId(promptId), Target = new AgentRunTargetPayload { Kind = target.Kind, Id = Bound(target.Id, 128), Title = Bound(target.Title, 40) }, Text = Bound(text, 4000), RequestFiles = PromptDisplay.CopyRequestFiles(requestFiles), StartedAt = DateTimeOffset.UtcNow.ToString("O") });
                 Save(state); return id;
             }
         }
@@ -158,6 +158,7 @@ namespace Pomp.Features
                 foreach (var e in state.Entries)
                 {
                     if (e == null || !Guid.TryParseExact(e.Id, "N", out _) || !seen.Add(e.Id) || e.Target == null || (e.Target.Kind != "agent" && e.Target.Kind != "team" && e.Target.Kind != "dm") || e.Target.Id.Length == 0 || e.Target.Id.Length > 128 || e.Target.Title.Length > 40 || e.SessionId.Length > 256 || (e.PromptId != null && SafeId(e.PromptId) != e.PromptId) || e.Text.Length > 4000 || e.Label?.Length > 80 || !DateTimeOffset.TryParse(e.StartedAt, out _) || (e.EndedAt != null && !DateTimeOffset.TryParse(e.EndedAt, out _)) || (e.Status != "running" && e.Status != "completed" && e.Status != "error" && e.Status != "aborted") || e.Members == null) throw new InvalidDataException("Invalid run entry.");
+                    PromptDisplay.ValidateRequestFiles(e.RequestFiles, requireExisting: false);
                     foreach (var m in e.Members) if (m == null || m.JobId.Length > 128 || m.Agent.Length > 120 || m.Status.Length > 40 || m.ToolCount < 0 || m.Tokens < 0 || (m.DurationMs < 0) || m.Result?.Length > 8000) throw new InvalidDataException("Invalid run member.");
                 }
                 return state;

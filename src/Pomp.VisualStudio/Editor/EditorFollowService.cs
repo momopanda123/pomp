@@ -433,7 +433,7 @@ namespace Pomp.VisualStudio.Editor
         }
 
         /// <summary>Loads docdata without Show/Activate; callers opt into showing only after interaction checks.</summary>
-        internal static IVsWindowFrame OpenDocumentNoActivate(VsAdapterContext context, string path, bool show = false)
+        internal static IVsWindowFrame OpenDocumentNoActivate(VsAdapterContext context, string path)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             var focusedWindow = NativeMethods.GetFocusedWindow();
@@ -445,7 +445,6 @@ namespace Pomp.VisualStudio.Editor
                 var logicalView = VSConstants.LOGVIEWID_TextView;
                 ErrorHandler.ThrowOnFailure(opener.OpenDocumentViaProject(path, ref logicalView, out _, out _, out _, out var frame));
                 if (frame == null) throw new InvalidOperationException("Visual Studio did not create an editor for " + path);
-                if (show) ErrorHandler.ThrowOnFailure(frame.ShowNoActivate());
                 return frame;
             }
             finally

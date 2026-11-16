@@ -1,3 +1,4 @@
+import { AttachmentSummary } from './AttachmentSummary';
 import { useEffect, useRef, useState } from 'react';
 import { sentCaseFeedbackSummary } from '../caseFeedbackMessage';
 import { useT } from '../i18n';
@@ -82,7 +83,7 @@ export function SessionHistory({ locale, sessionId, sessionName, partner, histor
             onClick={() => { if (!entry.sessionId) return; setMenu(undefined); setDeleting({ id: entry.id, name: entry.title || entry.name || entry.sessionId, root: history.state.root, sessionId: entry.sessionId }); }}>{t('session.delete')}</button>
         </div>}
         {preview && <section className="session-preview" data-testid="session-preview-content" aria-label={t('session.preview')}>
-          {preview.messages.map((message, index) => <article key={index}><strong>{message.role === 'user' ? t('session.roleUser') : t('session.roleAssistant')}</strong><p>{revealControls((message.role === 'user' && sentCaseFeedbackSummary(message.text, t)) || message.text)}</p>{message.truncated && <span className="hint">{t('session.messageTruncated')}</span>}</article>)}
+          {preview.messages.map((message, index) => <article key={index}><strong>{message.role === 'user' ? t('session.roleUser') : t('session.roleAssistant')}</strong><p>{revealControls((message.role === 'user' && sentCaseFeedbackSummary(message.text, t)) || message.text)}</p>{!!message.requestFiles?.length && <AttachmentSummary files={message.requestFiles} wholeFiles testId="history-request-files" />}{message.truncated && <span className="hint">{t('session.messageTruncated')}</span>}</article>)}
           {preview.truncated && <p className="hint">{t('history.truncated')}</p>}
         </section>}
       </li>;

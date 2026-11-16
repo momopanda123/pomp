@@ -20,6 +20,7 @@ export interface MentionState extends MentionRange {
 export interface ComposerState {
   text: string;
   attachments: WorkspaceFile[];
+  requestFiles?: WorkspaceFile[];
   fileError?: string;
   pickerRequestId?: string;
   composing: boolean;
@@ -69,6 +70,19 @@ export function addAttachments(state: ComposerState, incoming: readonly Workspac
     attachments.push(file);
   }
   return { ...state, attachments };
+}
+
+/** A refused send returns its targets without dropping a newer draft's file scope. */
+export function restoreRequestFiles(state: ComposerState, incoming?: readonly WorkspaceFile[]): ComposerState {
+  if (!incoming?.length) return state;
+  if (!state.requestFiles?.length) return { ...state, requestFiles: [...incoming] };
+  const requestFiles = [...state.requestFiles];
+  const seen = new Set(requestFiles.map(file => fileIdentity(file.fullPath)));
+  for (const file of incoming) {
+    const id = fileIdentity(file.fullPath);
+    if (!seen.has(id)) { seen.add(id); requestFiles.push(file); }
+  }
+  return { ...state, requestFiles };
 }
 
 /** Re-evaluate the active token without discarding results when only the selection event was repeated. */

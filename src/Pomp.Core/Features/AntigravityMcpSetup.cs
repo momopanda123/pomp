@@ -12,7 +12,7 @@ using Pomp.Ui;
 
 namespace Pomp.Features
 {
-    /// <summary>Installs one workspace's model-free bundled tools into Antigravity, without starting either application.</summary>
+    /// <summary>Enables or removes one workspace's model-free bundled tools in Antigravity, without starting either application.</summary>
     public sealed class AntigravityMcpSetup
     {
         internal const int MaximumBytes = 1024 * 1024;
@@ -49,14 +49,16 @@ namespace Pomp.Features
                 var view = new AntigravityMcpStatePayload { WorkspaceRoot = root, ServerName = root == null ? null : ServerName(root) };
                 try
                 {
-                    view.ApplicationPath = ExistingInstallation(installationLocator());
-                    view.Installed = view.ApplicationPath != null;
                     view.ConfigPath = ConfigPath();
                     var file = Read(view.ConfigPath);
                     view.ConfigHash = file.Revision;
-                    var bundle = BundledEngine.Inspect(extensionDirectory);
                     var existing = view.ServerName == null ? null : (file.Json["mcpServers"] as JObject)?[view.ServerName];
                     if (existing != null && !Owns(existing)) throw new InvalidOperationException(CollisionMessage());
+                    view.Enabled = existing != null;
+                    view.CanDisable = view.Enabled;
+                    view.ApplicationPath = ExistingInstallation(installationLocator());
+                    view.Installed = view.ApplicationPath != null;
+                    var bundle = BundledEngine.Inspect(extensionDirectory);
                     view.Configured = existing is JObject server && bundle.Status == BundledEngineStatus.Verified &&
                         string.Equals((string?)server["command"], bundle.Path, StringComparison.OrdinalIgnoreCase) && JToken.DeepEquals(server["args"], Arguments(root!));
                     view.Message = !view.Installed ? PompLanguage.Pick("Antigravity 공식 앱 또는 agy CLI를 먼저 설치해 주세요.", "Install the official Antigravity app or agy CLI first.") :
@@ -76,35 +78,48 @@ namespace Pomp.Features
             }
         }
 
-        /// <summary>Atomically merges only the snapshot's workspace entry; stale, malformed and foreign entries are refused unchanged.</summary>
-        public AntigravityMcpStatePayload Setup(string? expectedName, string? expectedHash)
+        /// <summary>Atomically enables or removes only the snapshot's owned workspace entry; stale, malformed and foreign entries are refused unchanged.</summary>
+        public AntigravityMcpStatePayload SetEnabled(string? expectedName, string? expectedHash, bool enabled)
         {
             lock (ToolResourceFiles.Gate)
             {
                 if (root == null || !string.Equals(expectedName, ServerName(root), StringComparison.Ordinal))
                     throw new InvalidOperationException(PompLanguage.Pick("작업 영역이 바뀌었어요. 다시 확인해 주세요.", "The workspace changed. Refresh before configuring."));
                 var view = Inspect();
-                if (!view.CanConfigure) throw new InvalidOperationException(view.Message);
+                if (enabled && !view.CanConfigure) throw new InvalidOperationException(view.Message);
                 if (expectedHash == null || !string.Equals(expectedHash, view.ConfigHash, StringComparison.Ordinal)) throw Changed();
                 var file = Read(ConfigPath());
                 if (!string.Equals(file.Revision, expectedHash, StringComparison.Ordinal)) throw Changed();
-                var bundle = BundledEngine.Inspect(extensionDirectory);
-                if (bundle.Status != BundledEngineStatus.Verified) throw new InvalidOperationException("The bundled POMP engine is no longer verified.");
                 var servers = file.Json["mcpServers"] as JObject ?? new JObject();
                 var existing = servers[expectedName!];
                 if (existing != null && !Owns(existing)) throw new InvalidOperationException(CollisionMessage());
-                var server = existing as JObject ?? new JObject { ["timeoutSeconds"] = 600 };
-                var args = Arguments(root);
-                // A repeat click is a true no-op, including original whitespace, BOM and write time.
-                if (server["command"]?.Type == JTokenType.String && (string?)server["command"] == bundle.Path && JToken.DeepEquals(server["args"], args)) return view;
-                server["command"] = bundle.Path;
-                server["args"] = args;
-                servers[expectedName!] = server;
-                file.Json["mcpServers"] = servers;
+                if (!enabled)
+                {
+                    // An already absent entry is a true no-op, even when no configuration file exists.
+                    if (existing == null) return view;
+                    servers.Remove(expectedName!);
+                }
+                else
+                {
+                    var bundle = BundledEngine.Inspect(extensionDirectory);
+                    if (bundle.Status != BundledEngineStatus.Verified) throw new InvalidOperationException("The bundled POMP engine is no longer verified.");
+                    var server = existing as JObject ?? new JObject { ["timeoutSeconds"] = 600 };
+                    var args = Arguments(root);
+                    // A repeat click is a true no-op, including original whitespace, BOM and write time.
+                    if (server["command"]?.Type == JTokenType.String && (string?)server["command"] == bundle.Path && JToken.DeepEquals(server["args"], args)) return view;
+                    server["command"] = bundle.Path;
+                    server["args"] = args;
+                    servers[expectedName!] = server;
+                    file.Json["mcpServers"] = servers;
+                }
                 var content = (file.Bom ? "\uFEFF" : "") + file.Json.ToString(Formatting.Indented) + Environment.NewLine;
                 var bytes = ToolResourceFiles.Encode(content, MaximumBytes, "Antigravity 설정", "Antigravity configuration");
                 Commit(file, bytes);
-                return Inspect();
+                view = Inspect();
+                if (!enabled) view.Message = PompLanguage.Pick(
+                    "이 프로젝트의 POMP 도구 설정을 제거했어요. Antigravity 앱 또는 agy CLI에서 MCP를 다시 불러와야 할 수 있어요. 연결 상태는 확인하지 않았어요.",
+                    "This project's POMP tools configuration was removed. Antigravity or agy CLI may need an MCP reload. Connection state has not been verified.");
+                return view;
             }
         }
 

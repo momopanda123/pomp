@@ -29,6 +29,7 @@ namespace Pomp.VisualStudio.Commands
             (PompCommandIds.ToggleFocus, s => s.ToggleFocus, true),
             (PompCommandIds.ToggleLiveFollow, s => s.LiveFollow, true),
             (PompCommandIds.ToggleLiveBookmarks, s => s.LiveBookmarks, true),
+            (PompCommandIds.RequestFiles, s => s.RequestFiles, true),
             (PompCommandIds.ExplainCode, s => s.ExplainCode, false),
             (PompCommandIds.ReviewCode, s => s.ReviewCode, false),
             (PompCommandIds.FixCode, s => s.FixCode, false),

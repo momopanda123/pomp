@@ -8,14 +8,14 @@ import { revealControls } from './RevealControls';
  * The basket's token count: the draft, the attached file list and the conversation's knowledge, as the model gets them, counted on request
  * with the model's tokenizer (an estimate when the engine cannot). A changed basket clears the result.
  */
-export function DraftTokenCounter({ text, attachments, knowledge, root, sessionId, model, connected, disabled, locale }: {
+export function DraftTokenCounter({ text, attachments, requestFiles, knowledge, root, sessionId, model, connected, disabled, locale }: {
   /** The knowledge ids the conversation uses: a change clears the result like a changed draft or file list. */
-  text: string; attachments: string[]; knowledge: readonly string[]; root?: string; sessionId?: string; model?: ModelInfo; connected: boolean; disabled: boolean; locale: string;
+  text: string; attachments: string[]; requestFiles?: string[]; knowledge: readonly string[]; root?: string; sessionId?: string; model?: ModelInfo; connected: boolean; disabled: boolean; locale: string;
 }) {
   const [result, setResult] = useState<HostToUi['workspace/tokenCount']>();
   const [waiting, setWaiting] = useState(false); const request = useRef<string | null>(null);
   const ko = locale.startsWith('ko'); const t = useT();
-  const attachmentsKey = JSON.stringify(attachments); const knowledgeKey = knowledge.join(',');
+  const attachmentsKey = JSON.stringify(attachments); const requestFilesKey = JSON.stringify(requestFiles); const knowledgeKey = knowledge.join(',');
   useEffect(() => {
     request.current = null; setWaiting(false); setResult(undefined);
     return onMessage(message => {
@@ -28,7 +28,7 @@ export function DraftTokenCounter({ text, attachments, knowledge, root, sessionI
       }
       setResult(data);
     });
-  }, [text, attachmentsKey, knowledgeKey, root, sessionId, model?.id, model?.provider, connected]);
+  }, [text, attachmentsKey, requestFilesKey, knowledgeKey, root, sessionId, model?.id, model?.provider, connected]);
   useEffect(() => {
     if (!waiting) return;
     const id = request.current;
@@ -39,7 +39,7 @@ export function DraftTokenCounter({ text, attachments, knowledge, root, sessionI
   const count = () => {
     if (unusable || request.current || !root || !sessionId || !model) return;
     const id = newId(); request.current = id; setWaiting(true); setResult(undefined);
-    if (!send('workspace/countDraftTokens', { requestId: id, root, sessionId, modelId: model.id, provider: model.provider, text, attachments: attachments.map(path => ({ path })) })) {
+    if (!send('workspace/countDraftTokens', { requestId: id, root, sessionId, modelId: model.id, provider: model.provider, text, attachments: attachments.map(path => ({ path })), ...(requestFiles?.length ? { requestFiles: requestFiles.map(path => ({ path })) } : {}) })) {
       request.current = null; setWaiting(false); setResult({ requestId: id, error: t('error.hostUnavailable') });
     }
   };

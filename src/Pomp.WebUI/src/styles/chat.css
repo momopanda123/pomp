@@ -105,6 +105,11 @@
 .attachment-summary > .context-count { display: inline-flex; align-items: center; gap: 2px; height: 20px; padding: 0 4px; color: var(--pomp-fg); border-color: var(--pomp-focus-border); font-variant-numeric: tabular-nums; }
 .attachment-summary > .context-count[aria-expanded='true'] { background: var(--pomp-active-bg); }
 .attachment-summary-list { margin-top: 4px; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); }
+.request-files { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-height: 110px; overflow: auto; padding: 4px 0; font-size: 11px; }
+.request-files > strong { font-weight: 500; }
+.request-file { display: inline-flex; align-items: center; gap: 2px; min-width: 0; max-width: 100%; border: 1px solid var(--pomp-border); border-radius: var(--pomp-radius); padding-left: 4px; }
+.request-file > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.request-file > button { flex: 0 0 auto; }
 
 /* ---- Messages ----------------------------------------------------------------------------- */
 

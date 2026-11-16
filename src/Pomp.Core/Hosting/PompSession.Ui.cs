@@ -398,13 +398,28 @@ namespace Pomp.Hosting
         private async Task<bool> HandleChatSendAsync(ChatSendPayload send, long generation, CancellationToken requestToken = default, string? expectedSession = null, bool bypassQueue = false, ConversationPartnerPayload? capturedPartner = null, string? queuedItemId = null, bool forceQueue = false, string? engineText = null, bool queueFirstWhenBusy = false, InboundRelay? relay = null)
         {
             if (requestToken.IsCancellationRequested) return false;
+            if (send.RequestFiles?.Count > 0)
+            {
+                try
+                {
+                    ValidateQueuedSend(send);
+                    if (engineText != null) throw new InvalidOperationException("Whole-file requests cannot override an internal command.");
+                }
+                catch (Exception ex)
+                {
+                    if (queuedItemId != null) PauseChatQueue(ex.Message);
+                    if (relay != null) relay.Refusal = ex.Message;
+                    _ui.Post(UiMessageTypes.Error, new UiErrorInfo { Code = "queue_rejected", ClientMessageId = send.ClientMessageId, Message = ex.Message, Retryable = false }, UiDelivery.State);
+                    return false;
+                }
+            }
             var accepted = false;
             var text = send.Text ?? string.Empty;
             var attachments = (send.Attachments ?? new List<ChatAttachment>())
                 .Where(a => !string.IsNullOrWhiteSpace(a?.Path))
                 .Select(a => a.Path)
                 .ToList();
-            if (string.IsNullOrWhiteSpace(text) && attachments.Count == 0)
+            if (string.IsNullOrWhiteSpace(text) && attachments.Count == 0 && !(send.RequestFiles?.Count > 0))
             {
                 return false;
             }
@@ -562,6 +577,7 @@ namespace Pomp.Hosting
                 ClientMessageId = send.ClientMessageId,
                 Text = text,
                 Attachments = attachments.Count == 0 ? null : attachments.Select(path => new ChatAttachment { Path = path }).ToList(),
+                RequestFiles = PromptDisplay.CopyRequestFiles(send.RequestFiles),
                 EditorContext = editorContext?.EditorContext,
                 Team = string.IsNullOrWhiteSpace(send.Team) ? null : send.Team!.Trim(),
                 Agent = string.IsNullOrWhiteSpace(send.Agent) ? null : send.Agent!.Trim(),
@@ -605,7 +621,7 @@ namespace Pomp.Hosting
                 RefuseComputerCommand(text);
 
                 // engineText: the host's own commands (a goal run) say exactly what the engine gets; the bubble keeps what the user typed.
-                var message = engineText ?? await ComposeMessageAsync(editorContext?.Text, text, attachments, sending.Token).ConfigureAwait(false);
+                var message = engineText ?? await ComposeMessageAsync(editorContext?.Text, text, attachments, sending.Token, send.RequestFiles).ConfigureAwait(false);
                 sending.Token.ThrowIfCancellationRequested();
                 // Team dispatch and new agent assignments go through their extension commands.
                 // Existing subagents were already sent directly by steer_subagent above.
@@ -740,16 +756,24 @@ namespace Pomp.Hosting
         /// The prompt text: the <c>&lt;vs_context&gt;</c> block (design: addAdditionalContext) and attached file paths before the user's
         /// words. A slash command stays at the start because omp parses it there; the attached paths follow its own text (<see cref="ComposeSlashCommand"/>).
         /// </summary>
-        private Task<string> ComposeMessageAsync(string? editorContext, string text, IReadOnlyList<string> attachments, CancellationToken cancellationToken)
+        private Task<string> ComposeMessageAsync(string? editorContext, string text, IReadOnlyList<string> attachments, CancellationToken cancellationToken, IReadOnlyList<ChatAttachment>? requestFiles = null, bool childSession = false)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            PromptDisplay.ValidateRequestFiles(requestFiles);
+            if (requestFiles?.Count > 0 && text.TrimStart().StartsWith("/", StringComparison.Ordinal))
+                throw new InvalidOperationException(PompLanguage.Pick("전체 파일 요청은 슬래시 명령과 함께 사용할 수 없어요. 일반 요청으로 보내 주세요.", "Whole-file requests cannot be combined with slash commands. Send a plain-language request instead."));
             if (text.TrimStart().StartsWith("/", StringComparison.Ordinal))
             {
                 return Task.FromResult(ComposeSlashCommand(text, attachments));
             }
 
             var parts = new List<string>();
-            if (!string.IsNullOrEmpty(editorContext))
+            if (requestFiles?.Count > 0)
+            {
+                // A child's tool set is not the parent's: give it the conditional buffer/disk instructions.
+                parts.Add(PromptDisplay.RequestFilesPrefix(requestFiles, childSession || CanReadBuffer()));
+            }
+            else if (!string.IsNullOrEmpty(editorContext))
             {
                 parts.Add(editorContext!);
             }

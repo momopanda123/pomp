@@ -20,12 +20,9 @@ function blockedNote(state: BackendState | null, t: Translate): string | undefin
   return agy.message;
 }
 
-/**
- * The conversation engine choice. In the session header it is a chip beside the conversation buttons (its name gives way in a narrow
- * pane, the tooltip keeps it); with `field` it is a labelled full-width field, as the Accounts page shows its choices.
- */
-export function BackendPicker({ active, state, disabled, onSelect, field = false }: {
-  active: BackendId; state: BackendState | null; disabled: boolean; onSelect: (backend: BackendId) => void; field?: boolean;
+/** Conversation engine settings belong on Accounts, not beside the chat's conversation selector. */
+export function BackendPicker({ active, state, disabled, onSelect }: {
+  active: BackendId; state: BackendState | null; disabled: boolean; onSelect: (backend: BackendId) => void;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false); const anchor = useRef<HTMLDivElement>(null); const chip = useRef<HTMLButtonElement>(null); const id = useId();
@@ -48,10 +45,9 @@ export function BackendPicker({ active, state, disabled, onSelect, field = false
       { id: 'antigravity-acp', label: t('backend.acp'), current: active === 'antigravity-acp', disabled: blocked !== undefined, hint: t('backend.acpHint'), title: blocked }]}
     status={<div className="picker-status" role="status" data-testid="backend-note">{blocked ?? t('backend.acpNote')}</div>}
     onChoose={item => { setOpen(false); onSelect(item.id as BackendId); }} />;
-  if (field) return <div className="pickers pickers-panel backend-field"><div className="picker-field" ref={anchor} data-testid="backend-picker">
+  return <div className="pickers pickers-panel backend-field"><div className="picker-field" ref={anchor} data-testid="backend-picker">
     <span className="picker-field-label">{label}</span>{button}{list}
   </div></div>;
-  return <div className="picker backend-picker" ref={anchor} data-testid="backend-picker">{button}{list}</div>;
 }
 
 /** A browser sign-in may take minutes (the host waits 15); every other command is answered at once. */

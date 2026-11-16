@@ -46,6 +46,11 @@ namespace Pomp.VisualStudio
         public const int ToggleLiveChanges = 0x0112;
         public const int CleanupPompBookmarks = 0x0113;
         public const int ClearLiveChanges = 0x0114;
+        public const int RequestFiles = 0x0115;
+        // Separate menu commands carry their origin even when opening a context menu changes ActiveWindow.
+        public const int RequestEditorFiles = 0x0116;
+        public const int RequestExplorerFiles = 0x0117;
+        public const int AddExplorerFilesToContext = 0x0118;
 
         // The editor menu's "to agent or team" submenu and its dynamic items (DynamicItemStart: one id per entry, every id from this start on, so it stays above all other ids).
         public const int SendToTargetMenu = 0x1102;

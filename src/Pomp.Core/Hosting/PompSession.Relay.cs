@@ -228,6 +228,10 @@ namespace Pomp.Hosting
             }
 
             string session, root; IPartnerRelayHost host;
+            var relayId = "relay-" + Guid.NewGuid().ToString("N");
+            var text = send.Text ?? "";
+            var attachments = (send.Attachments ?? new List<ChatAttachment>()).Where(a => !string.IsNullOrWhiteSpace(a?.Path)).Select(a => a.Path).ToList();
+            JObject record;
             try
             {
                 ValidateQueuedSend(send);
@@ -242,6 +246,16 @@ namespace Pomp.Hosting
                     if (session.Length == 0 || _sessionSwitchUncertain)
                         throw new InvalidOperationException(PompLanguage.Pick("활성 대화가 확인되지 않았어요.", "The active conversation is not confirmed."));
                 }
+                record = new JObject
+                {
+                    ["v"] = 1, ["kind"] = "sent", ["relayId"] = relayId, ["target"] = new JObject { ["kind"] = target.Kind, ["id"] = target.Id },
+                    ["text"] = text.Length > RestoredTextLimit ? text.Substring(0, RestoredTextLimit) : text,
+                    ["attachments"] = attachments.Count == 0 ? null : new JArray(attachments.Take(50).ToArray<object>()),
+                    ["requestFiles"] = send.RequestFiles?.Count > 0 ? new JArray(send.RequestFiles.Select(file => new JObject { ["path"] = file.Path })) : null,
+                    ["at"] = DateTimeOffset.UtcNow.ToString("O"),
+                };
+                if (send.RequestFiles?.Count > 0 && Pomp.Transport.NdjsonWriter.Encode(RelayRecordCommand(session, record, new string('0', 32))).Length > MaxPromptFrameBytes)
+                    throw new InvalidOperationException(PompLanguage.Pick("전체 파일 요청의 전달 기록이 너무 커요.", "The whole-file request is too large to preserve in relay history."));
             }
             catch (Exception ex)
             {
@@ -249,15 +263,12 @@ namespace Pomp.Hosting
                 return false;
             }
 
-            var relayId = "relay-" + Guid.NewGuid().ToString("N");
             var fromHook = send.ClientMessageId?.StartsWith(HookMessagePrefix, StringComparison.Ordinal) == true;
-            var text = send.Text ?? "";
-            var attachments = (send.Attachments ?? new List<ChatAttachment>()).Where(a => !string.IsNullOrWhiteSpace(a?.Path)).Select(a => a.Path).ToList();
             // One run-history entry per relayed message, made here: its status follows the delivery, and a rerun sends it again.
             string? runId = null;
             try
             {
-                runId = RunHistory()?.Begin(session, new AgentRunTargetPayload { Kind = target.Kind, Id = target.Id ?? "", Title = RelayTargetTitle(target) }, text, relayId);
+                runId = RunHistory()?.Begin(session, new AgentRunTargetPayload { Kind = target.Kind, Id = target.Id ?? "", Title = RelayTargetTitle(target) }, text, relayId, send.RequestFiles);
                 if (runId != null) PublishRunHistory();
             }
             catch (Exception ex) { _logger.Warn("Run history could not be started: " + ex.Message); }
@@ -266,15 +277,10 @@ namespace Pomp.Hosting
             {
                 RelayId = relayId, ClientMessageId = string.IsNullOrEmpty(send.ClientMessageId) ? null : send.ClientMessageId, Text = text,
                 Attachments = attachments.Count == 0 ? null : attachments.Select(path => new ChatAttachment { Path = path }).ToList(),
+                RequestFiles = PromptDisplay.CopyRequestFiles(send.RequestFiles),
                 Target = CopyPartner(target), Status = "sending",
             });
-            AddRelayRecord(session, new JObject
-            {
-                ["v"] = 1, ["kind"] = "sent", ["relayId"] = relayId, ["target"] = new JObject { ["kind"] = target.Kind, ["id"] = target.Id },
-                ["text"] = text.Length > RestoredTextLimit ? text.Substring(0, RestoredTextLimit) : text,
-                ["attachments"] = attachments.Count == 0 ? null : new JArray(attachments.Take(50).ToArray<object>()),
-                ["at"] = DateTimeOffset.UtcNow.ToString("O"),
-            });
+            AddRelayRecord(session, record);
             host.Deliver(this, new PartnerRelay
             {
                 Id = relayId, Target = CopyPartner(target), FromHook = fromHook, SourceSession = session, Root = root, RunId = runId,
@@ -282,6 +288,7 @@ namespace Pomp.Hosting
                 {
                     ClientMessageId = (fromHook ? HookMessagePrefix : "") + relayId, Text = text, IncludeEditorContext = send.IncludeEditorContext,
                     Attachments = attachments.Count == 0 ? null : attachments.Select(path => new ChatAttachment { Path = path }).ToList(),
+                    RequestFiles = PromptDisplay.CopyRequestFiles(send.RequestFiles),
                 },
             });
             return true;
@@ -421,12 +428,17 @@ namespace Pomp.Hosting
             catch (Exception ex) { _logger.Warn("A relayed message's record was not kept: " + ex.Message); }
         }
 
+        private static JObject RelayRecordCommand(string session, JObject details, string request)
+        {
+            var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(new JObject { ["sessionId"] = session, ["record"] = details }.ToString(Formatting.None)));
+            return OmpCommands.Prompt("/" + RelayCommand + " " + encoded + " --request " + request);
+        }
+
         /// <summary>"ok", "busy" (the engine works: later) or the reason it was not written.</summary>
         private async Task<string> SendRelayRecordAsync(OmpConnection origin, string session, RelayRecord record, CancellationToken token)
         {
             var request = Guid.NewGuid().ToString("N");
-            var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(new JObject { ["sessionId"] = session, ["record"] = record.Details }.ToString(Formatting.None)));
-            var prompt = OmpCommands.Prompt("/" + RelayCommand + " " + encoded + " --request " + request);
+            var prompt = RelayRecordCommand(session, record.Details, request);
             if (Pomp.Transport.NdjsonWriter.Encode(prompt).Length > MaxPromptFrameBytes) return "too-large";
             var ticket = new RelayTicket(origin);
             _relayTickets[request] = ticket;
@@ -485,8 +497,11 @@ namespace Pomp.Hosting
             {
                 RelayId = id, Text = text.Length > RestoredTextLimit ? text.Substring(0, RestoredTextLimit) : text, Target = target,
                 Attachments = files == null || files.Count == 0 ? null : files, Status = "unknown",
+                // Restoring intent does not depend on whether a file still exists; a retry validates it afresh.
+                RequestFiles = PromptDisplay.RequestFilesArgument(details!["requestFiles"], requireExisting: false),
             };
         }
+
 
         /// <summary>The outcome entry of a kept "result" record; null when the record is not one.</summary>
         private static ChatRelayResultPayload? RelayResultFromRecord(JObject? details)

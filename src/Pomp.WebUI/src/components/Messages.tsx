@@ -168,6 +168,7 @@ export const UserMessage = memo(function UserMessage({ item }: { item: UserItem 
           <span className="irc-agents">{revealControls(from)} → {revealControls(to)}:</span>{' '}
           <span className="irc-body">{revealControls(body.replace(/\s+/gu, ' '))}</span>
         </div>
+        {!!item.requestFiles?.length && <AttachmentSummary files={item.requestFiles} wholeFiles testId="user-request-files" />}
         <EditorContextChip context={item.editorContext} />
       </div>
     );
@@ -185,6 +186,7 @@ export const UserMessage = memo(function UserMessage({ item }: { item: UserItem 
         <TeamBriefCard kind={kind} teamId={teamId} content={teamContent} findKey={item.key} />
         {after && <UserTextBody text={after} reveal />}
         {item.attachments && item.attachments.length > 0 && <AttachmentSummary files={item.attachments} testId="user-attachments" />}
+        {!!item.requestFiles?.length && <AttachmentSummary files={item.requestFiles} wholeFiles testId="user-request-files" />}
         <EditorContextChip context={item.editorContext} />
         {item.failed && (
           <div className="user-failed" role="alert">
@@ -206,6 +208,7 @@ export const UserMessage = memo(function UserMessage({ item }: { item: UserItem 
       {item.subagentAccepted && <div className="message-steered-badge" data-testid="message-subagent-accepted" title={t('msg.subagentAcceptedTitle')}><Icon name="check" size={12} /><span>{t('msg.subagentAccepted')}</span></div>}
       <UserTextBody text={item.text} />
       {item.attachments && item.attachments.length > 0 && <AttachmentSummary files={item.attachments} testId="user-attachments" />}
+      {!!item.requestFiles?.length && <AttachmentSummary files={item.requestFiles} wholeFiles testId="user-request-files" />}
       <EditorContextChip context={item.editorContext} />
       {item.failed && (
         <div className="user-failed" role="alert">

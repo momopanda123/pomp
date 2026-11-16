@@ -782,7 +782,7 @@ export function installMockHost(): void {
       return;
     }
     tokens += 1_900;
-    post('chat/turnStarted', { promptId, clientMessageId: input.clientMessageId, text: input.text, attachments: input.attachments, editorContext: input.includeEditorContext ? { path: 'src/Pomp.Sample/Program.cs', startLine: 20, endLine: 45, caretLine: 22 } : undefined, team: input.team, agent: input.agent, agentInstance: input.agentInstance, main: !input.team && !input.agent && !input.agentInstance ? true : undefined });
+    post('chat/turnStarted', { promptId, clientMessageId: input.clientMessageId, text: input.text, attachments: input.attachments, requestFiles: input.requestFiles, editorContext: input.includeEditorContext ? { path: 'src/Pomp.Sample/Program.cs', startLine: 20, endLine: 45, caretLine: 22 } : undefined, team: input.team, agent: input.agent, agentInstance: input.agentInstance, main: !input.team && !input.agent && !input.agentInstance ? true : undefined });
     postSession(true);
     postBackground();
     await runWait(run, 300);
@@ -970,7 +970,7 @@ export function installMockHost(): void {
     const source = sessionId; const relayId = nextId('relay');
     const tab = conversations.tabs.ensure(target);
     conversations.start(payload, relayId);
-    relayPost(source, 'chat/relaySent', { relayId, clientMessageId: payload.clientMessageId, text: payload.text, attachments: payload.attachments, target, status: 'sending' });
+    relayPost(source, 'chat/relaySent', { relayId, clientMessageId: payload.clientMessageId, text: payload.text, attachments: payload.attachments, requestFiles: payload.requestFiles, target, status: 'sending' });
     const later = (ms: number, step: () => void): void => { window.setTimeout(step, ms); };
     later(250, () => relayPost(source, 'chat/relayStatus', { relayId, status: 'delivered', sessionId: tab }));
     later(600, () => { conversations.tabs.mark(tab, 'running'); relayPost(source, 'chat/relayStatus', { relayId, status: 'working', sessionId: tab }); });
@@ -1001,10 +1001,10 @@ export function installMockHost(): void {
       const messageId = nextId('subagent');
       if (payload.agentInstance === 'job-mock-2') {
         post('chat/subagentAccepted', { messageId, clientMessageId: payload.clientMessageId, text: payload.text,
-          agentInstance: payload.agentInstance, attachments: payload.attachments });
+          agentInstance: payload.agentInstance, attachments: payload.attachments, requestFiles: payload.requestFiles });
       } else {
         post('chat/turnStarted', { promptId: messageId, clientMessageId: payload.clientMessageId, text: payload.text,
-          agentInstance: payload.agentInstance, attachments: payload.attachments });
+          agentInstance: payload.agentInstance, attachments: payload.attachments, requestFiles: payload.requestFiles });
         post('chat/turnEnd', { promptId: messageId, status: 'error',
           error: { code: 'subagent_rejected', message: 'The agent is no longer running.', retryable: false } });
       }
@@ -1025,7 +1025,7 @@ export function installMockHost(): void {
       const target = payload.team ? { kind: 'team', id: payload.team } : payload.agent ? { kind: 'agent', id: payload.agent } : payload.agentInstance ? { kind: 'dm', id: payload.agentInstance } : undefined;
       // Like the host: the routing brief, then the user's text.
       const transcriptText = target ? `<!-- pomp-${target.kind}:${target.id} -->\nMock target: ${target.id}\n<!-- /pomp-${target.kind} -->\n\n${payload.text}` : payload.text;
-      messages.push({ role: 'user', text: transcriptText }, { role: 'assistant', text: turnKind === 'error' ? '모델 제공자가 일시적으로 과부하 상태입니다.' : SHORT_ANSWER });
+      messages.push({ role: 'user', text: transcriptText, requestFiles: payload.requestFiles }, { role: 'assistant', text: turnKind === 'error' ? '모델 제공자가 일시적으로 과부하 상태입니다.' : SHORT_ANSWER });
       transcripts.set(entry.id, messages);
       entry.messageCount = messages.length;
       touchSession();
@@ -1055,7 +1055,7 @@ export function installMockHost(): void {
     if (!current || current.aborted) { startTurn(payload, opts.scenario, true); return; }
     const steerId = nextId('steer');
     runSteers.set(current, [...(runSteers.get(current) ?? []), steerId]);
-    post('chat/steered', { steerId, clientMessageId: payload.clientMessageId, text: payload.text, attachments: payload.attachments });
+    post('chat/steered', { steerId, clientMessageId: payload.clientMessageId, text: payload.text, attachments: payload.attachments, requestFiles: payload.requestFiles });
   };
 
   // ---- Engine setup (accounts / login / API keys / model / usage); nobody is signed in at the start of the "setup" scenario ----
@@ -2160,6 +2160,9 @@ export function installMockHost(): void {
     // ?attachments=N puts N files in the basket to check its table with thousands of rows.
     const seededFiles = Math.max(0, Math.min(10000, Number(new URLSearchParams(window.location.search).get('attachments')) || 0));
     if (seededFiles) post('composer/prefill', { files: Array.from({ length: seededFiles }, (_, i) => { const path = `src/Module${String(i % 50).padStart(2, '0')}/File${String(i + 1).padStart(5, '0')}.cs`; return { path, fullPath: MOCK_ROOT + '\\' + path.replaceAll('/', '\\') }; }) });
+    // ?requestFiles=1 stages a whole-file request without sending; existing attachment fixtures stay separate.
+    if (new URLSearchParams(window.location.search).get('requestFiles') === '1')
+      post('composer/prefill', { requestFiles: WORKSPACE_FILES.slice(0, 3), send: true });
 
     const { scenario } = opts;
     if (scenario === 'failed') {
@@ -2239,14 +2242,14 @@ export function installMockHost(): void {
         }
         case 'workspace/countDraftTokens': {
           const request = payload as unknown as UiToHost['workspace/countDraftTokens'];
-          window.setTimeout(() => post('workspace/tokenCount', { requestId: request.requestId, root: request.root, modelId: request.modelId, provider: request.provider, tokens: Math.ceil(request.text.length / 3) + 40 * (request.attachments?.length ?? 0), method: 'byte-estimate', estimated: true }), 60);
+          window.setTimeout(() => post('workspace/tokenCount', { requestId: request.requestId, root: request.root, modelId: request.modelId, provider: request.provider, tokens: Math.ceil(request.text.length / 3) + 40 * ((request.attachments?.length ?? 0) + (request.requestFiles?.length ?? 0)), method: 'byte-estimate', estimated: true }), 60);
           return;
         }
         case 'workspace/countBasketTokens': {
-          const { requestId, includeEditorContext, attachments = [] } = payload as unknown as UiToHost['workspace/countBasketTokens'];
+          const { requestId, includeEditorContext, attachments = [], requestFiles = [] } = payload as unknown as UiToHost['workspace/countBasketTokens'];
           const editorContext = includeEditorContext ? 650 : 0;
           const files = 180 * attachments.length;
-          window.setTimeout(() => post('workspace/basketTokens', { requestId, ok: true, tokens: files + editorContext, editorContext, attachments: files }), 60);
+          window.setTimeout(() => post('workspace/basketTokens', { requestId, ok: true, tokens: files + editorContext + 40 * requestFiles.length, editorContext, attachments: files }), 60);
           break;
         }
         case 'workspace/pickFiles': {

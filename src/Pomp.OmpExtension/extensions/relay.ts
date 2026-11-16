@@ -18,6 +18,8 @@ const RESULT = "pomp-relay-result:";
 /** The user's text and the answer as the model reads them; the record keeps what the chat shows. */
 const SENT_CHARS = 4000;
 const RESULT_CHARS = 8000;
+/** A relay command shares the host's RPC prompt budget (1 MiB less transport headroom). */
+const MAX_ENCODED_RECORD = 1024 * 1024 - 2048;
 
 export interface RelayRecord {
 	v: 1;
@@ -26,6 +28,7 @@ export interface RelayRecord {
 	target: { kind: "agent" | "team"; id: string };
 	text?: string | null;
 	attachments?: string[] | null;
+	requestFiles?: { path: string }[] | null;
 	status?: "done" | "failed" | "stopped";
 	error?: string | null;
 	truncated?: boolean | null;
@@ -39,7 +42,7 @@ const ID = /^[A-Za-z0-9._:-]{1,128}$/;
 /** The record of a request for the conversation `currentSession`, or the reason it is not one (exported for tests). */
 export function parseRelayRecord(encoded: string, currentSession: string | undefined): RelayRecord | string {
 	if (!currentSession) return "no-session";
-	if (encoded.length > 400000) return "too-large";
+	if (encoded.length > MAX_ENCODED_RECORD) return "too-large";
 	let request: { sessionId?: unknown; record?: unknown };
 	try { request = JSON.parse(Buffer.from(encoded, "base64").toString("utf8")); } catch { return "invalid"; }
 	if (typeof request?.sessionId !== "string" || request.sessionId !== currentSession) return "stale-session";
@@ -51,6 +54,8 @@ export function parseRelayRecord(encoded: string, currentSession: string | undef
 	if (record.text != null && typeof record.text !== "string") return "invalid";
 	if (record.kind === "result" && record.status !== "done" && record.status !== "failed" && record.status !== "stopped") return "invalid";
 	if (record.error != null && typeof record.error !== "string") return "invalid";
+	if (record.requestFiles != null && (!Array.isArray(record.requestFiles) || record.requestFiles.some(file =>
+		!file || typeof file.path !== "string" || !file.path.trim() || file.path.length > 4096 || /[\u0000-\u001f\u007f-\u009f]/u.test(file.path)))) return "invalid";
 	return record as RelayRecord;
 }
 

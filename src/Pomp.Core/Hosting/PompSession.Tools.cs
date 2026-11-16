@@ -408,7 +408,7 @@ namespace Pomp.Hosting
         {
             var payload = message.Payload ?? new JObject();
             // External-app file setup neither uses the chat engine nor waits behind a prompt held by the serial queue.
-            if (reply == UiMessageTypes.McpReply && payload.GetString("action") is "antigravity-refresh" or "antigravity-setup")
+            if (reply == UiMessageTypes.McpReply && payload.GetString("action") is "antigravity-refresh" or "antigravity-set")
             {
                 HandleAntigravityMcpAsync(payload).Forget(_logger, "Antigravity MCP configuration");
                 return;
@@ -767,14 +767,16 @@ namespace Pomp.Hosting
             {
                 var command = new UiMessage("", payload).PayloadAs<McpCommandPayload>() ?? throw new ArgumentException();
                 var files = await AntigravityMcpFilesAsync().ConfigureAwait(false);
-                if (command.Action == "antigravity-setup")
+                if (command.Action == "antigravity-set")
                 {
+                    if (payload["enabled"]?.Type != JTokenType.Boolean || !command.Enabled.HasValue)
+                        throw new ArgumentException("Antigravity configuration requires an explicit enabled boolean.");
                     // Resolve again after any asynchronous IDE hop. The snapshot name pins this exact root, while
                     // the service's opaque revision pins both selected config path and all of its bytes.
                     files = await AntigravityMcpFilesAsync().ConfigureAwait(false);
                     if (AntigravityWorkspaceChanging()) throw new InvalidOperationException(WorkspaceSwitchBlock());
                     _disposeCts.Token.ThrowIfCancellationRequested();
-                    view = files.Setup(command.Name, command.ExpectedHash);
+                    view = files.SetEnabled(command.Name, command.ExpectedHash, command.Enabled.Value);
                 }
                 else view = files.Inspect();
             }
@@ -787,6 +789,7 @@ namespace Pomp.Hosting
             if (view != null && AntigravityWorkspaceChanging())
             {
                 view.CanConfigure = false;
+                view.CanDisable = false;
                 view.Message = WorkspaceSwitchBlock();
             }
             lock (_stateLock) _mcpView.Antigravity = view;

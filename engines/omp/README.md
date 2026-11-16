@@ -1,7 +1,7 @@
 # POMP의 omp 엔진
 
-VSIX에는 [oh-my-pi](https://github.com/can1357/oh-my-pi) **v18.20.0** 소스(커밋 `c308970263ae13744ea15ab67302e3dac840e266`)에
-[`pomp-v18.20.0.patch`](pomp-v18.20.0.patch)를 적용해 빌드한 Windows x64 `omp.exe`가 들어간다. 패치는 새 Win32 창을 여는
+VSIX에는 [oh-my-pi](https://github.com/can1357/oh-my-pi) **v18.21.0** 소스(커밋 `6f03614d761366972e80e84e25d1418ed678d2c7`)에
+[`pomp-v18.21.0.patch`](pomp-v18.21.0.patch)를 적용해 빌드한 Windows x64 `omp.exe`가 들어간다. 패치는 새 Win32 창을 여는
 `takeover` 클릭과, 다른 앱이 앞에 있을 때의 첫 `takeover`·`raise` 창 활성화를 고친다(Windows는 마지막 입력을 보낸 프로세스에만
 포그라운드를 넘기므로, 활성화 직전 이동 거리 0인 마우스 입력 하나로 그 권한을 얻는다). 또 모델 공유용 auth gateway의 `/v1/models`
 행마다 그 모델의 노력 단계(`reasoning_efforts`)를 넣는다. 공유 PC가 실행 중에 찾은 모델은 연결한 PC의 카탈로그에 없어서, 이 목록이
@@ -13,17 +13,29 @@ VSIX에는 [oh-my-pi](https://github.com/can1357/oh-my-pi) **v18.20.0** 소스(�
 
 깨끗한 작업 트리에서 `build/build-omp.ps1`을 실행하려면 Git, Bun 1.4.4+, Rust/Cargo(MSVC x64), Visual Studio C++
 빌드 도구가 필요하다. 스크립트가 고정 커밋을 가져와 패치를 적용하고 네이티브 애드온과 실행 파일을 만든 뒤
-`artifacts/engines/omp/18.20.0/`에 보관한다. `build/build.ps1`도 캐시가 없거나 해시가 다르면 이 스크립트를 실행한다.
+`artifacts/engines/omp/18.21.0/`에 보관한다. `build/build.ps1`도 캐시가 없거나 해시가 다르면 이 스크립트를 실행한다.
 버전을 올릴 때는 소스 커밋·패치·빌드 스크립트·`engine.props`의 크기/해시/출처를 함께 갱신하고 실제 동작을 검증한다.
+
+18.21.0에서는 격리된 홈의 `--version`·`--smoke-test`와 내장 고지 일치를 확인했다. POMP 확장 명령 23개를 로드한
+로컬 테스트 공급자 RPC 두 턴에서 `agent_end`·`prompt_result`·`session_settled`와 유휴 상태를 확인했다.
+MCP 권한 우회 거부·오래된 편집 기준 보호·명령 취소 후 재사용·연결 종료 정리 검사 4개와 공유 모델 추론 단계 검사를 통과했다.
+실계정 모델 요청이나 VS 설치·로그인은 이번 엔진 검증에 사용하지 않았다.
 
 기존 18.20.0 엔진 업데이트 검증에서는 상위 CI처럼 `HOME`·`USERPROFILE`·`LOCALAPPDATA`·`XDG_DATA_HOME`을 임시 폴더로 격리한
 `omp --smoke-test`를 통과했다. POMP 확장을 로드한 격리 RPC에서도 `pomp-*` 명령 23개, 읽기·승인 후 bash 실행,
 생각 수준 선택, 미지원 모델의 빠른 모드 거부, 네 상태의 계획 저장, `/context`의 지시 파일 행과 사용량 출력을 확인했다.
 공유 모델 목록의 노력 단계와 실행 파일 내 고지도 확인했다. 계획·컨텍스트 호스트 검사 61개와 계획 UI 검사 3개를 통과했고,
-실제 웹 화면에서 작업 추가·저장을 확인했다. 이번 업데이트에서는 VS 설치·로그인이나 실제 공급자 호출은 다시 시험하지 않았다.
+실제 웹 화면에서 작업 추가·저장을 확인했다. 당시 VS 설치·로그인이나 실제 공급자 호출은 다시 시험하지 않았다.
 
 POMP는 엔진이 광고하는 경우에만 쓰는 선택 기능(`pompControlVersion`, `pomp_terminal` 등)을 지원하지만,
 이 패치는 해당 기능을 추가하지 않으므로 번들 엔진에서는 꺼져 있다.
+
+## 18.21.0으로 올릴 때
+
+- 상위 `AgentSession` SDK는 실행 종료와 백그라운드 대기를 구분하도록 수명 주기 API를 바꿨다. RPC와 확장 스트림은 기존 루프별 `agent_end`를 유지한다. POMP가 읽는 RPC `hasPendingAsyncWork`·`isSettled`도 유지되므로 SDK API를 직접 호출하는 것으로 바꾸지 않는다.
+- 알려지지 않은 커스텀·검색 모델의 추론 지원은 첫 요청 시 별도 탐색 요청으로 확인하고 결과를 기억한다. 따라서 사용자 대화 턴 수보다 공급자 요청 수가 많을 수 있다.
+- 파일 변경 이력 기록과 셸 URL 쓰기 처리의 상위 변경에 맞춰 로컬 패치를 재적용했다. 편집 취소는 파일 스냅샷을 읽은 뒤 실제 변경 직전에 확인하며, 격리 셸에서는 내부 URL 파일시스템을 연결하지 않는다.
+- [상위 18.21.0 릴리스](https://github.com/can1357/oh-my-pi/releases/tag/v18.21.0)에 전체 변경 사항이 있다.
 
 ## 18.20.0으로 올릴 때
 
@@ -43,7 +55,7 @@ POMP는 엔진이 광고하는 경우에만 쓰는 선택 기능(`pompControlVer
 
 ### 연결
 
-POMP의 **도구 → MCP → Antigravity · POMP 도구 → 자동 설정**을 사용한다.
+POMP의 **도구 → MCP** 목록에서 **Antigravity · POMP 도구** 행의 스위치를 켠다. 끄면 현재 작업 폴더에 대해 POMP가 등록한 항목만 제거하고 다른 서버와 설정은 보존한다.
 
 - 공식 앱 또는 `agy` CLI 설치를 감지한다. CLI는 기본 설치 폴더와 PATH에서도 찾으므로 데스크톱 앱이 없어도 된다.
 - 화면의 작업 폴더와 파일 편집·OS 명령 실행 권한을 확인한다. 검증된 POMP 번들 엔진만 등록한다.
@@ -57,7 +69,7 @@ POMP의 **도구 → MCP → Antigravity · POMP 도구 → 자동 설정**을 �
 저장소 루트에서 다음 PowerShell 명령으로 **현재 실행 파일과 작업 폴더에 맞는 연결 JSON**을 출력한다.
 
 ```powershell
-.\artifacts\engines\omp\18.20.0\omp.exe mcp-server --cwd "C:\Project\my-project" --allow-write --allow-exec --print-config
+.\artifacts\engines\omp\18.21.0\omp.exe mcp-server --cwd "C:\Project\my-project" --allow-write --allow-exec --print-config
 ```
 
 `--cwd`에는 실제로 존재하는 절대 경로를 지정한다. `--print-config`는 설정을 출력할 뿐 앱 설정 파일을 수정하거나 서버를 시작하지 않는다.
@@ -100,7 +112,7 @@ OAuth 프록시·예약 추론 봇을 제공하지 않는다. 아래 POMP 채팅
 
 ## POMP 채팅에서 공식 Antigravity ACP 사용
 
-채팅 상단의 **OMP / Antigravity ACP** 선택에서 **Antigravity ACP**를 고른다. 실제 프로젝트 폴더, 공식 `agy` CLI와 검증된 번들 엔진이 필요하다. 기존 OMP 프로바이더·계정과 별도이며 첫 OMP 로그인 전에도 선택할 수 있다.
+**계정** 화면의 연결 선택에서 **Antigravity ACP**를 고른다. 실제 프로젝트 폴더, 공식 `agy` CLI와 검증된 번들 엔진이 필요하다. 기존 OMP 프로바이더·계정과 별도이며 첫 OMP 로그인 전에도 선택할 수 있다.
 
 - POMP가 `agy acp`를 stdio로 실행하고 자신을 `pomp` 클라이언트로 식별한다. `agy -p`, 키보드 자동 입력, 다른 IDE 신원 사용, OAuth 토큰 가져오기는 하지 않는다.
 - 각 ACP 세션의 `mcpServers`에 `omp.exe mcp-server --cwd <프로젝트> --allow-write --allow-exec`를 전달한다. `read`, `glob`, `grep`, `edit`, `write`, `bash`를 유지하며 전역 MCP 설정을 바꿀 필요가 없다.

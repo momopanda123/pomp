@@ -28,6 +28,12 @@ namespace Pomp.VisualStudio.Options
         public PompDisplayNameAttribute(string korean, string english) { this.korean = korean; this.english = english; }
         public override string DisplayName => PompLanguage.Pick(korean, english);
     }
+    internal sealed class PompDescriptionAttribute : DescriptionAttribute
+    {
+        private readonly string korean, english;
+        public PompDescriptionAttribute(string korean, string english) { this.korean = korean; this.english = english; }
+        public override string Description => PompLanguage.Pick(korean, english);
+    }
     internal sealed class PompCategoryAttribute : CategoryAttribute
     {
         private readonly string korean, english;
@@ -54,6 +60,7 @@ namespace Pomp.VisualStudio.Options
             public Property(PropertyDescriptor inner) : base(inner) { this.inner = inner; }
             public override string Category => (Attributes[typeof(PompCategoryAttribute)] as PompCategoryAttribute)?.LocalizedName ?? inner.Category;
             public override string DisplayName => (Attributes[typeof(PompDisplayNameAttribute)] as PompDisplayNameAttribute)?.DisplayName ?? inner.DisplayName;
+            public override string Description => (Attributes[typeof(PompDescriptionAttribute)] as PompDescriptionAttribute)?.Description ?? inner.Description;
             public override Type ComponentType => inner.ComponentType;
             public override Type PropertyType => inner.PropertyType;
             public override bool IsReadOnly => inner.IsReadOnly;
@@ -599,6 +606,12 @@ namespace Pomp.VisualStudio.Options
         [Description("")]
         public string ShortcutAddFileToContext { get; set; } = "Shift+Alt+I";
 
+        [PompCategory("단축키", "Shortcuts")]
+        [PompDisplayName("파일 전체에 요청", "Request whole files")]
+        [PompDescription("편집기 파일 또는 솔루션 탐색기에서 선택한 파일 전체를 요청 대상으로 채팅에 넣어요. 초안을 유지하고 자동 전송하지 않아요. 비워 두면 단축키를 사용하지 않아요.",
+            "Prepare a request for the whole editor file or selected Solution Explorer files. Keeps your draft and never sends automatically. Leave blank to disable.")]
+        public string ShortcutRequestFiles { get; set; } = "Shift+Alt+L";
+
         // A new name, so a value saved for the former Alt+K default does not keep the key off its new default.
         [PompCategory("단축키", "Shortcuts")]
         [PompDisplayName("POMP에게 질문", "Ask POMP")]
@@ -632,7 +645,7 @@ namespace Pomp.VisualStudio.Options
             {
                 var values = Applied;
                 return UiShortcutChords.NormalizeEditorPayload(values.ShortcutOpenPomp, values.ShortcutNewConversation, values.ShortcutExplainCode, values.ShortcutReviewCode, values.ShortcutFixCode,
-                    values.ShortcutWriteTests, values.ShortcutAddFileToContext, values.ShortcutInlinePrompt, values.ShortcutToggleFocus, values.ShortcutKnowledgeTag, values.ShortcutLiveFollow, values.ShortcutLiveBookmarks);
+                    values.ShortcutWriteTests, values.ShortcutAddFileToContext, values.ShortcutInlinePrompt, values.ShortcutToggleFocus, values.ShortcutKnowledgeTag, values.ShortcutLiveFollow, values.ShortcutLiveBookmarks, values.ShortcutRequestFiles);
             }
         }
 
@@ -1138,6 +1151,7 @@ namespace Pomp.VisualStudio.Options
                 ShortcutFixCode = page.ShortcutFixCode;
                 ShortcutWriteTests = page.ShortcutWriteTests;
                 ShortcutAddFileToContext = page.ShortcutAddFileToContext;
+                ShortcutRequestFiles = page.ShortcutRequestFiles;
                 ShortcutInlinePrompt = page.ShortcutInlinePrompt;
                 ShortcutKnowledgeTag = page.ShortcutKnowledgeTag;
                 ShortcutToggleFocus = page.ShortcutToggleFocus;
@@ -1209,6 +1223,7 @@ namespace Pomp.VisualStudio.Options
                 ShortcutFixCode = source.ShortcutFixCode;
                 ShortcutWriteTests = source.ShortcutWriteTests;
                 ShortcutAddFileToContext = source.ShortcutAddFileToContext;
+                ShortcutRequestFiles = source.ShortcutRequestFiles;
                 ShortcutInlinePrompt = source.ShortcutInlinePrompt;
                 ShortcutKnowledgeTag = source.ShortcutKnowledgeTag;
                 ShortcutToggleFocus = source.ShortcutToggleFocus;
@@ -1280,6 +1295,7 @@ namespace Pomp.VisualStudio.Options
             public string? ShortcutFixCode { get; }
             public string? ShortcutWriteTests { get; }
             public string? ShortcutAddFileToContext { get; }
+            public string? ShortcutRequestFiles { get; }
             public string? ShortcutInlinePrompt { get; }
             public string? ShortcutKnowledgeTag { get; }
             public string? ShortcutToggleFocus { get; }

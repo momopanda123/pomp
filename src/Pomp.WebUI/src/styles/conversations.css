@@ -94,14 +94,7 @@
   .agents-dialog .role-options-row > .form-field { flex-basis: 100%; }
   .history-filters label { flex-basis: 100%; }
 }
-/* The conversation engine chip sits beside the header's buttons; its list drops down from the chip's right edge. In a narrow pane only
-   the icon and the caret stay (the tooltip names the engine), so the conversation name keeps its room. */
-.backend-picker { position: relative; flex: 0 1 auto; min-width: 0; max-width: 100%; }
-.backend-picker .picker-pop.inline { position: absolute; right: 0; top: 100%; width: min(300px, calc(100vw - 24px)); max-height: min(50vh, 320px); margin-top: 2px; z-index: 30; }
-@media (max-width: 299px) {
-  .backend-picker .chip-text { display: none; }
-}
-/* On the Accounts page the same choice is a labelled full-width field above the account panel, which keeps the remaining height. */
+/* Accounts owns the engine setting; the chat header only selects conversations. */
 .accounts-page { display: flex; flex: 1; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
 .accounts-page > .hint { margin: 0; padding: 0 8px; overflow-wrap: anywhere; }
 .backend-field { flex: none; padding: 8px 8px 0; }

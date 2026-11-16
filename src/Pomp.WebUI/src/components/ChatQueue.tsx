@@ -41,7 +41,7 @@ export function ChatQueue({ state, replies, sessionId, disabled, pendingSends, o
   useStatusReport(error ? engineAbortText(error, t) : null);
   if (!state.items.length && !pendingSends.length) return null;
   const blocked = disabled || pending;
-  const editInvalid = !text.trim() || !!promptRejection(text, { type: 'chat/send', payload: { clientMessageId: 'queue-edit', text, includeEditorContext: editing?.includeEditorContext ?? false } }, editing?.attachments?.map(file => file.path));
+  const editInvalid = !text.trim() || !!promptRejection(text, { type: 'chat/send', payload: { clientMessageId: 'queue-edit', text, includeEditorContext: editing?.includeEditorContext ?? false, attachments: editing?.attachments, requestFiles: editing?.requestFiles } }, editing?.attachments?.map(file => file.path));
   const capture = () => { opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; };
   return <div className="chat-queue" data-testid="chat-queue">
     <button type="button" className="conversation-strip-toggle" data-testid="queue-toggle" aria-expanded={open} onClick={() => setOpen(!open)}><Icon name={open ? 'chevronDown' : 'chevron'} size={12} /><strong>{t('queue.title', { count: state.items.length + pendingSends.length })}</strong>{state.paused && <Badge tone="warn">{t('queue.paused')}</Badge>}</button>
@@ -61,6 +61,7 @@ export function ChatQueue({ state, replies, sessionId, disabled, pendingSends, o
       <ol className="queue-list">{paged.slice.map(({ item, index }) => <li key={item.id} data-testid={`queue-item-${item.id}`}>
         <p>{revealControls(sentCaseFeedbackSummary(item.text, t) ?? item.text)}</p><QueueDestination item={item} />
         {item.attachments?.length ? <AttachmentSummary files={item.attachments} testId={`queue-attachments-${item.id}`} /> : null}
+        {!!item.requestFiles?.length && <AttachmentSummary files={item.requestFiles} wholeFiles testId={`queue-request-files-${item.id}`} />}
         <div className="conversation-actions">
           {/* Sends now: to the agent working at this moment (or, with nothing running, as the next message). */}
           <button className="btn subtle small" type="button" data-testid={`queue-steer-${item.id}`} title={t('queue.steerTitle')} disabled={blocked || other || !item.canSteer} onClick={() => post('chat/queue', { action: 'steer', id: item.id })}><Icon name="zap" size={12} /> {t('queue.steer')}</button>
@@ -72,12 +73,14 @@ export function ChatQueue({ state, replies, sessionId, disabled, pendingSends, o
       </li>)}</ol>
       <Pager paged={paged} testId="queue-pager" />
       {pendingSends.map(item => <div className="queue-awaiting" key={item.clientMessageId} data-testid="queue-awaiting"><p>{revealControls(sentCaseFeedbackSummary(item.text, t) ?? item.text)}</p>
+        {!!item.requestFiles?.length && <AttachmentSummary files={item.requestFiles} wholeFiles testId="queue-awaiting-request-files" />}
         {item.failed ? <div className="composer-error" role="alert"><Icon name="error" size={12} /><span>{revealControls(engineAbortText(item.failed.message || t('queue.unconfirmed'), t))}</span></div>
           : <small className="hint" role="status">{t('queue.awaiting')}</small>}
         {item.failed && <button className="btn subtle small" type="button" onClick={() => onRecover(item)}>{t('queue.edit')}</button>}</div>)}
     </div>}
     {editing && <AgentDialog testId="queue-editor" labelledBy="queue-editor-title" returnFocus={opener.current} onClose={() => setEditing(undefined)}>
       <div className="dialog-head"><h4 id="queue-editor-title">{t('queue.edit')}</h4></div><div className="dialog-form"><div className="form-field"><textarea data-testid="queue-edit-input" aria-label={t('queue.edit')} rows={5} value={text} onChange={event => setText(event.target.value)} /></div></div>
+      {!!editing.requestFiles?.length && <AttachmentSummary files={editing.requestFiles} wholeFiles testId="queue-editor-request-files" />}
       <div className="dialog-foot"><button className="btn subtle" type="button" onClick={() => setEditing(undefined)}>{t('dialog.cancel')}</button><button className="btn primary" type="button" data-testid="queue-edit-save" disabled={blocked || editInvalid} onClick={() => { if (post('chat/queue', { action: 'edit', id: editing.id, text })) setEditing(undefined); }}>{t('session.save')}</button></div>
     </AgentDialog>}
   </div>;

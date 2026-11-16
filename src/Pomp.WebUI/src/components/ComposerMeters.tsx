@@ -34,6 +34,7 @@ interface BasketInputs {
   sessionId?: string;
   includeEditorContext?: boolean;
   attachmentPaths?: readonly string[];
+  requestFiles?: readonly string[];
   connected?: boolean;
   /** The context was measured again (after a turn): the basket is estimated again too. */
   measuredAt?: string;
@@ -44,10 +45,11 @@ interface BasketInputs {
  * The basket estimate for the bar: sends `workspace/countBasketTokens` when its inputs change (debounced) and keeps only the reply
  * to the latest request. A failed reply hides the basket segment.
  */
-function useBasketEstimate({ workspaceKey, sessionId, includeEditorContext, attachmentPaths, connected, measuredAt, reply }: BasketInputs): number {
+function useBasketEstimate({ workspaceKey, sessionId, includeEditorContext, attachmentPaths, requestFiles, connected, measuredAt, reply }: BasketInputs): number {
   const latestId = useRef<string | null>(null);
   const [accepted, setAccepted] = useState<BasketTokens | null>(null);
   const pathsKey = JSON.stringify(attachmentPaths ?? []);
+  const requestFilesKey = JSON.stringify(requestFiles ?? []);
   useEffect(() => { latestId.current = null; setAccepted(null); }, [workspaceKey, sessionId, connected]);
   useEffect(() => {
     if (!connected) return;
@@ -55,10 +57,11 @@ function useBasketEstimate({ workspaceKey, sessionId, includeEditorContext, atta
       const requestId = newId();
       latestId.current = requestId;
       const attachments = (JSON.parse(pathsKey) as string[]).map((path) => ({ path }));
-      send('workspace/countBasketTokens', { requestId, root: workspaceKey ?? '', ...(sessionId ? { sessionId } : {}), includeEditorContext: includeEditorContext === true, attachments });
+      send('workspace/countBasketTokens', { requestId, root: workspaceKey ?? '', ...(sessionId ? { sessionId } : {}), includeEditorContext: includeEditorContext === true, attachments,
+        ...(requestFilesKey !== '[]' ? { requestFiles: (JSON.parse(requestFilesKey) as string[]).map(path => ({ path })) } : {}) });
     }, BASKET_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [connected, workspaceKey, sessionId, includeEditorContext, pathsKey, measuredAt]);
+  }, [connected, workspaceKey, sessionId, includeEditorContext, pathsKey, requestFilesKey, measuredAt]);
   useEffect(() => {
     if (reply && reply.requestId === latestId.current) setAccepted(reply);
   }, [reply]);
@@ -84,11 +87,11 @@ interface ContextMeterProps extends Omit<BasketInputs, 'measuredAt' | 'reply'> {
 }
 
 /** How full the model's context window is, from the engine's last state: a bar split by source and "42% · 84k / 200k". */
-function ContextMeterView({ session, basketTokens, workspaceKey, sessionId, includeEditorContext, attachmentPaths, connected }: ContextMeterProps) {
+function ContextMeterView({ session, basketTokens, workspaceKey, sessionId, includeEditorContext, attachmentPaths, requestFiles, connected }: ContextMeterProps) {
   const t = useT();
   const usage = session?.contextUsage;
   const breakdown = usage?.breakdown;
-  const basket = useBasketEstimate({ workspaceKey, sessionId, includeEditorContext, attachmentPaths, connected, measuredAt: breakdown?.measuredAt, reply: basketTokens });
+  const basket = useBasketEstimate({ workspaceKey, sessionId, includeEditorContext, attachmentPaths, requestFiles, connected, measuredAt: breakdown?.measuredAt, reply: basketTokens });
 
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);

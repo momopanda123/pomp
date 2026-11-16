@@ -55,6 +55,7 @@ namespace Pomp.Hosting
         }
         private static void ValidateInput(ChatSendPayload send)
         {
+            if (send.RequestFiles?.Count > 0) throw new NotSupportedException(PompLanguage.Pick("전체 파일 요청은 기본 OMP 연결에서만 지원돼요. ACP에서는 지원되지 않아요.", "Whole-file requests require native OMP and are not supported by ACP."));
             if (string.IsNullOrWhiteSpace(send.Text) && (send.Attachments == null || send.Attachments.Count == 0)) throw new ArgumentException(PompLanguage.Pick("메시지가 비어 있어요.", "The message is empty."));
             if (send.Text.Length > 500000 || send.Attachments?.Count > 100 || send.Attachments?.Any(a => string.IsNullOrEmpty(a.Path) || a.Path.Length > 4096 || a.Path.Any(char.IsControl)) == true)
                 throw new ArgumentException(PompLanguage.Pick("메시지나 첨부가 입력 한도를 넘어요.", "The message or its attachments exceed the input limits."));
