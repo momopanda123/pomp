@@ -433,8 +433,8 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
 #### 버전 정의
 
 - `engines/omp/engine.props`가 버전, 패치 빌드 출처, 자산 이름, 크기, SHA-256과 고지 파일 SHA-256을 고정한다.
-- 현재 상위 omp **18.21.0**(커밋 `6f03614d761366972e80e84e25d1418ed678d2c7`)에 `engines/omp/pomp-v18.21.0.patch`를
-  적용하고 `src/Pomp.McpServer`를 함께 넣은 빌드다. 크기 **254,009,344바이트**, SHA-256 `64fe2f2d24176f7ff63b13149bae815dc44af027602ed46f46ee3f52b142c279`.
+- 현재 상위 omp **18.21.0**(커밋 `6f03614d761366972e80e84e25d1418ed678d2c7`)에 `engines/omp/pomp-v18.21.0.patch`와 GPT-6.2 지원 백포트 `engines/omp/gpt-6.2-v18.21.0.patch`(상위 `2dedb850ac86e73aadc385e5b9cf08eac096e475`)를
+  적용하고 `src/Pomp.McpServer`를 함께 넣은 빌드다. 크기 **254,009,856바이트**, SHA-256 `3a748b1bb3fbcb679109a9930bfa53ad222ba363bd1ab756cecdec64faca1b34`.
 - 라이선스는 MIT(`engines/omp/LICENSE.upstream`).
 
 #### 빌드 (`build/build-omp.ps1`, `Pomp.Vsix.Common.targets`의 `PompPrepareOmpEngine`)

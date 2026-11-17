@@ -7,8 +7,8 @@ Visual Studio 2017(15.9) · 2019(16.10+) · 2022 · 2026을 지원하고, 화면
 
 | 구성 요소 | 버전 | 맡는 일 |
 |---|---|---|
-| POMP | 0.6.2 | Visual Studio 확장: 채팅 화면, VS 도구, 승인 카드, 에이전트·팀 관리 |
-| omp | 18.21.0 | 함께 들어 있는 대화·에이전트 엔진 [oh-my-pi](https://github.com/can1357/oh-my-pi)(MIT) |
+| POMP | 0.6.3 | Visual Studio 확장: 채팅 화면, VS 도구, 승인 카드, 에이전트·팀 관리 |
+| omp | 18.21.0 | [oh-my-pi](https://github.com/can1357/oh-my-pi)(MIT) 대화·에이전트 엔진, GPT-6.2 Astra·Sol 지원 백포트 포함 |
 
 ![POMP 소개](docs/media/pomp-intro.gif)
 
@@ -195,8 +195,8 @@ VS 2017·2019는 32비트, 2022·2026은 64비트 프로그램이어서 패키�
 전체 조건은 [`LICENSE.txt`](LICENSE.txt). Marketplace Publisher ID는 **momopanda123**이다.
 
 POMP의 대화·에이전트 엔진 **omp**는 [oh-my-pi](https://github.com/can1357/oh-my-pi)의 **MIT 라이선스** 소스에
-POMP의 [로컬 패치](engines/omp/pomp-v18.21.0.patch)를 적용해 빌드한다. 상위 코드의 MIT 권리는 POMP의 PolyForm
-라이선스로 바뀌지 않으며, POMP가 작성한 패치는 이 저장소의 라이선스를 따른다. VSIX의
+POMP의 [로컬 패치](engines/omp/pomp-v18.21.0.patch)와 [GPT-6.2 지원 백포트](engines/omp/gpt-6.2-v18.21.0.patch)를 적용해 빌드한다.
+상위 코드와 백포트의 MIT 권리는 POMP의 PolyForm 라이선스로 바뀌지 않으며, POMP가 작성한 패치는 이 저장소의 라이선스를 따른다. VSIX의
 `omp/THIRD-PARTY-NOTICES.txt`에 포함된 오픈 소스 구성 요소의 고지가 들어 있다. 그 밖의 포함된 구성 요소도
 각자의 라이선스를 유지한다(포함된 구성 요소의 `LICENSE.txt`·`THIRD-PARTY-NOTICES.txt` 참조).
 

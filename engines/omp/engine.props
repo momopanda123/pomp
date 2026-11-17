@@ -8,9 +8,9 @@
   <PropertyGroup>
     <PompOmpVersion>18.21.0</PompOmpVersion>
     <PompOmpAsset>omp.exe</PompOmpAsset>
-    <PompOmpSource>oh-my-pi@6f03614d761366972e80e84e25d1418ed678d2c7 + engines/omp/pomp-v18.21.0.patch + src/Pomp.McpServer</PompOmpSource>
-    <PompOmpSha256>64fe2f2d24176f7ff63b13149bae815dc44af027602ed46f46ee3f52b142c279</PompOmpSha256>
-    <PompOmpSize>254009344</PompOmpSize>
+    <PompOmpSource>oh-my-pi@6f03614d761366972e80e84e25d1418ed678d2c7 + engines/omp/pomp-v18.21.0.patch + engines/omp/gpt-6.2-v18.21.0.patch (upstream 2dedb850ac86e73aadc385e5b9cf08eac096e475) + src/Pomp.McpServer</PompOmpSource>
+    <PompOmpSha256>3a748b1bb3fbcb679109a9930bfa53ad222ba363bd1ab756cecdec64faca1b34</PompOmpSha256>
+    <PompOmpSize>254009856</PompOmpSize>
     <PompOmpNoticesSha256>d763dc4998ee0950ff91812c828b4c57082b395c16510e757df720d49100dbdf</PompOmpNoticesSha256>
   </PropertyGroup>
 </Project>
