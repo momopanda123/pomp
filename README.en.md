@@ -7,8 +7,8 @@ runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+)
 
 | Component | Version | What it does |
 |---|---|---|
-| POMP | 0.6.2 | The Visual Studio extension: chat UI, Visual Studio tools, approval cards, agents and teams |
-| omp | 18.21.0 | The bundled conversation and agent engine, [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT) |
+| POMP | 0.6.3 | The Visual Studio extension: chat UI, Visual Studio tools, approval cards, agents and teams |
+| omp | 18.21.0 | [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT), including the GPT-6.2 Astra/Sol support backport |
 
 ![POMP intro](docs/media/pomp-intro.gif)
 
@@ -212,8 +212,8 @@ The detailed docs are in Korean.
 commercial use. See [`LICENSE.txt`](LICENSE.txt). Marketplace publisher ID: **`momopanda123`**.
 
 POMP's conversation and agent engine **omp** is built from the **MIT-licensed** source of
-[oh-my-pi](https://github.com/can1357/oh-my-pi) with POMP's [local patch](engines/omp/pomp-v18.21.0.patch). POMP's PolyForm
-license does not change the upstream MIT rights; the patch POMP wrote follows this repository's license. The VSIX's
+[oh-my-pi](https://github.com/can1357/oh-my-pi) with POMP's [local patch](engines/omp/pomp-v18.21.0.patch) and the [GPT-6.2 support backport](engines/omp/gpt-6.2-v18.21.0.patch).
+POMP's PolyForm license does not change the upstream or backported code's MIT rights; the patch POMP wrote follows this repository's license. The VSIX's
 `omp/THIRD-PARTY-NOTICES.txt` carries the licenses of omp itself and its bundled open-source components (MIT and others).
 Other bundled open-source components keep their own licenses as well (see the bundled components' `LICENSE.txt` and
 `THIRD-PARTY-NOTICES.txt` in the package).

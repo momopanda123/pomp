@@ -5,7 +5,7 @@
     Requires Git, Bun >= 1.4.4, Rust/Cargo (MSVC x64), and Visual Studio C++ tools
     (including the CMake/Ninja components used by upstream's native build).
     Clones the exact pinned commit into a fresh ignored work directory, applies
-    engines/omp/pomp-v18.21.0.patch, stages src/Pomp.McpServer/*.ts, installs
+    engines/omp/pomp-v18.21.0.patch and gpt-6.2-v18.21.0.patch, stages src/Pomp.McpServer/*.ts, installs
     the pinned Bun lockfile, builds the Windows native addon and release-style
     Windows x64 executable.
     Only after a successful build copies the executable and the tag's verified
@@ -43,11 +43,13 @@ $commit = '6f03614d761366972e80e84e25d1418ed678d2c7'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $engineDir = Join-Path $repo 'engines\omp'
 $patch = Join-Path $engineDir "pomp-v$version.patch"
+$astraPatch = Join-Path $engineDir "gpt-6.2-v$version.patch"
 $props = [xml](Get-Content -LiteralPath (Join-Path $engineDir 'engine.props') -Raw)
 if ($props.Project.PropertyGroup.PompOmpVersion -ne $version) {
     throw "engine.props must pin omp $version before building this source patch."
 }
 if (-not (Test-Path -LiteralPath $patch -PathType Leaf)) { throw "Missing source patch: $patch" }
+if (-not (Test-Path -LiteralPath $astraPatch -PathType Leaf)) { throw "Missing GPT-6.2 backport: $astraPatch" }
 $mcpSource = Join-Path $repo 'src\Pomp.McpServer'
 foreach ($sourceName in @('server.ts', 'tool-runtime.ts')) {
     $sourcePath = Join-Path $mcpSource $sourceName
@@ -113,6 +115,8 @@ try {
     }
     Invoke-Native 'git' @('-C', $work, 'apply', '--check', $patch) $repo
     Invoke-Native 'git' @('-C', $work, 'apply', $patch) $repo
+    Invoke-Native 'git' @('-C', $work, 'apply', '--check', $astraPatch) $repo
+    Invoke-Native 'git' @('-C', $work, 'apply', $astraPatch) $repo
 
     $mcpDestination = Join-Path $work 'packages\coding-agent\src\pomp-mcp'
     New-Item -ItemType Directory -Path $mcpDestination -Force | Out-Null
