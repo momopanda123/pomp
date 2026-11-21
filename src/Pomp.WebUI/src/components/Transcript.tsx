@@ -8,6 +8,7 @@ import {
   Notice,
   SessionResetNote,
   TurnErrorBanner,
+  TurnBenchmark,
   UserMessage,
 } from './Messages';
 import { RequestRecord } from './Dialogs';
@@ -45,6 +46,8 @@ const ItemView = memo(function ItemView({ item, canRetry, onRetry, root, session
       return <RequestRecord item={item} />;
     case 'aborted':
       return <AbortedNote item={item} />;
+    case 'benchmark':
+      return <TurnBenchmark item={item} />;
     case 'sessionReset':
       return <SessionResetNote item={item} />;
     case 'advisor':
@@ -83,6 +86,7 @@ interface TranscriptProps {
   replaying: boolean;
   replayRevision: number;
   replayTruncated: boolean;
+  showTurnBenchmarks?: boolean;
   /** The composer could take a message right now (connected, idle, no new session pending). */
   canRetry: boolean;
   /** Resends the message the given failed turn belonged to. */
@@ -96,7 +100,7 @@ interface TranscriptProps {
 }
 
 /** Scrollable message list. Follows the newest content until the user scrolls up; scrolling back down resumes it. */
-export function Transcript({ items, busy, replaying, replayRevision, replayTruncated, canRetry, onRetry, request, root, sessionId, controlsEnabled, findEnabled = true, shortcuts }: TranscriptProps) {
+export function Transcript({ items, busy, replaying, replayRevision, replayTruncated, showTurnBenchmarks = true, canRetry, onRetry, request, root, sessionId, controlsEnabled, findEnabled = true, shortcuts }: TranscriptProps) {
   const t = useT();
   const wrapRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -167,7 +171,7 @@ export function Transcript({ items, busy, replaying, replayRevision, replayTrunc
           <FindBar finder={finder} />
           {replayTruncated && <div className="notice warning" role="status" data-testid="replay-truncated"><Icon name="warning" size={13} /><span>{t('msg.replayTruncated')}</span></div>}
           {items.length === 0 && !busy && !replayTruncated && !request ? <EmptyState /> : null}
-          {items.map((item) => (
+          {items.map((item) => item.kind === 'benchmark' && !showTurnBenchmarks ? null : (
             <div key={item.key} className={FIND_ITEM} data-find-key={item.key}>
               <ItemView item={item} canRetry={canRetry} onRetry={onRetry} root={root} sessionId={sessionId} controlsEnabled={controlsEnabled} />
             </div>

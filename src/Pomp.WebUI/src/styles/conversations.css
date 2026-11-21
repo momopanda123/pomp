@@ -94,18 +94,6 @@
   .agents-dialog .role-options-row > .form-field { flex-basis: 100%; }
   .history-filters label { flex-basis: 100%; }
 }
-/* Accounts owns the engine setting; the chat header only selects conversations. */
-.accounts-page { display: flex; flex: 1; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
-.accounts-page > .hint { margin: 0; padding: 0 8px; overflow-wrap: anywhere; }
-.backend-field { flex: none; padding: 8px 8px 0; }
-.tab-page > .hint { margin: 0; padding: 8px; overflow-wrap: anywhere; }
-/* An Antigravity conversation's strip under the session header: its connection in the banner's form, then one row of option chips
-   (the list of an option drops down over the chat from under the row). */
-.acp-controls { display: flex; flex: none; flex-direction: column; min-width: 0; }
-.acp-options { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; padding: 3px 8px; border-bottom: 1px solid var(--pomp-border); }
-.acp-options .picker-pop.inline { position: absolute; left: 6px; right: 6px; top: 100%; max-height: min(50vh, 320px); margin-top: 0; z-index: 30; }
-.acp-notice { margin: 0; padding: 4px 8px; border-bottom: 1px solid var(--pomp-border); }
-.acp-permission { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 /* A message sent to another agent or team runs in that partner's tab: the bubble follows its status, and one card brings back the answer. */
 .relay-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; margin-bottom: 4px; }
 .relay-status-detail { min-width: 0; color: var(--pomp-muted-fg); font-size: .78rem; overflow-wrap: anywhere; }

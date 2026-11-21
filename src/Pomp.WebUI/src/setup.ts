@@ -97,9 +97,9 @@ function normalizeLogin(value: unknown): SetupLogin {
   const prompt = isRecord(raw.prompt) ? raw.prompt : undefined;
   if (prompt && typeof prompt.id === 'string' && prompt.id) {
     const placeholder = text(prompt.placeholder);
-    login.prompt = placeholder
-      ? { id: prompt.id, message: text(prompt.message) ?? '', placeholder }
-      : { id: prompt.id, message: text(prompt.message) ?? '' };
+    login.prompt = { id: prompt.id, message: text(prompt.message) ?? '' };
+    if (placeholder) login.prompt.placeholder = placeholder;
+    if (provider === 'antigravity-cli' && (prompt.kind === 'consent' || prompt.kind === 'authorizationCode')) login.prompt.kind = prompt.kind;
   }
   return login;
 }

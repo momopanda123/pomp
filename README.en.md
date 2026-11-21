@@ -7,8 +7,8 @@ runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+)
 
 | Component | Version | What it does |
 |---|---|---|
-| POMP | 0.6.3 | The Visual Studio extension: chat UI, Visual Studio tools, approval cards, agents and teams |
-| omp | 18.21.0 | [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT), including the GPT-6.2 Astra/Sol support backport |
+| POMP | 0.6.4 | The Visual Studio extension: chat UI, Visual Studio tools, approval cards, agents and teams |
+| omp | 18.22.2 | [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT), including GPT-6.2 Astra/Sol support |
 
 ![POMP intro](docs/media/pomp-intro.gif)
 
@@ -74,11 +74,11 @@ runs tests and debugs for you. Supports Visual Studio 2017 (15.9), 2019 (16.10+)
   </tr>
   <tr>
     <td align="center" valign="top" width="50%"><b>Accounts, models and thinking level</b><br>Connect accounts, then pick the model and the thinking level under the input.</td>
-    <td width="50%"></td>
+    <td align="center" valign="top" width="50%"><b>Remote model sharing and connection</b><br>Connect from another PC using the sharing PC's address and code, then pick a model. Demo connection details.</td>
   </tr>
   <tr>
     <td align="center" valign="top" width="50%"><img src="docs/media/howto-accounts.gif" width="100%" alt="Accounts, models and thinking level"></td>
-    <td width="50%"></td>
+    <td align="center" valign="top" width="50%"><img src="docs/media/howto-remote.gif" width="100%" alt="Remote model sharing and connection"></td>
   </tr>
 </table>
 <!-- /howto-videos -->
@@ -212,8 +212,8 @@ The detailed docs are in Korean.
 commercial use. See [`LICENSE.txt`](LICENSE.txt). Marketplace publisher ID: **`momopanda123`**.
 
 POMP's conversation and agent engine **omp** is built from the **MIT-licensed** source of
-[oh-my-pi](https://github.com/can1357/oh-my-pi) with POMP's [local patch](engines/omp/pomp-v18.21.0.patch) and the [GPT-6.2 support backport](engines/omp/gpt-6.2-v18.21.0.patch).
-POMP's PolyForm license does not change the upstream or backported code's MIT rights; the patch POMP wrote follows this repository's license. The VSIX's
+[oh-my-pi](https://github.com/can1357/oh-my-pi) with POMP's [local patch](engines/omp/pomp-v18.22.2.patch).
+POMP's PolyForm license does not change the upstream code's MIT rights; the patch POMP wrote follows this repository's license. The VSIX's
 `omp/THIRD-PARTY-NOTICES.txt` carries the licenses of omp itself and its bundled open-source components (MIT and others).
 Other bundled open-source components keep their own licenses as well (see the bundled components' `LICENSE.txt` and
 `THIRD-PARTY-NOTICES.txt` in the package).

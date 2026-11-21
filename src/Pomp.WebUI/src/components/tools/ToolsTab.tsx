@@ -37,7 +37,7 @@ export function ToolsTab({ locale, workspaceKey, sessionId, connected, busy, act
   // whose form was saved or cancelled does not open that form again in the next conversation.
   const knowledgeDraftDone = useRef(0);
   const controller = useToolsState({ locale, workspaceKey, sessionId, connected, busy, active, view: controllerView, disabled: inert || newSessionPending, domains: toolsTabDomains });
-  const counts: Partial<Record<ToolsView, number>> = { permissions: permissionsCount, conversation: controller.tools.tools.length, skills: controller.skills.skills.length, mcp: controller.mcp.servers.length + 1, rules: controller.rules.rules.length, workflows: controller.workflows.workflows.length, knowledge: knowledge.items.filter(item => !item.candidate).length };
+  const counts: Partial<Record<ToolsView, number>> = { permissions: permissionsCount, conversation: controller.tools.tools.length, skills: controller.skills.skills.length, mcp: controller.mcp.servers.length, rules: controller.rules.rules.length, workflows: controller.workflows.workflows.length, knowledge: knowledge.items.filter(item => !item.candidate).length };
   const [view, change] = useViewChoice({ views: toolsViews, requested: normalizeToolsView(requestedView), active: active && !inert, scope: workspaceKey + ':' + (sessionId ?? ''), count: item => counts[item], onChange: next => { setControllerView(next); onViewChange?.(next); } });
   useEffect(() => { setControllerView(view); }, [view]);
   // The editor's "Add to Knowledge" chose Knowledge: it stays open even while its list is still empty (a draft waiting when the page starts).
@@ -46,7 +46,6 @@ export function ToolsTab({ locale, workspaceKey, sessionId, connected, busy, act
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [knowledgeDraft?.seq]);
   const disabled = inert || !active || !connected || newSessionPending;
-  const externalDisabled = inert || !active || newSessionPending;
   return <div className="tools-tab" data-testid="tools-tab" inert={inert || undefined}>
     <ViewChips prefix="tools" label={t('tools.nav')} active={view} onChange={change} inert={inert}
       views={toolsViews.map(id => ({ id, label: t(`tools.${id}`), badge: counts[id] }))} />
@@ -54,7 +53,7 @@ export function ToolsTab({ locale, workspaceKey, sessionId, connected, busy, act
       {item === 'conversation' && <ConversationTools controller={controller} locale={locale} disabled={disabled} busy={busy} />}
       {item === 'permissions' && <PermissionRules onCount={setPermissionsCount} locale={locale} root={workspaceKey} sessionId={sessionId} active={active && !inert && view === item} countActive={active && !inert} tools={controller.tools} />}
       {item === 'skills' && <SkillsView controller={controller} locale={locale} disabled={disabled} busy={busy} onUseSkill={onUseSkill} />}
-      {item === 'mcp' && <McpView controller={controller} locale={locale} disabled={disabled} busy={busy} externalDisabled={externalDisabled || view !== item} />}
+      {item === 'mcp' && <McpView controller={controller} locale={locale} disabled={disabled} busy={busy} />}
       {item === 'rules' && <RulesView active={rules} controller={controller} locale={locale} disabled={disabled} busy={busy} />}
       {item === 'workflows' && <WorkflowsView controller={controller} locale={locale} disabled={disabled} busy={busy} workspaceKey={workspaceKey} sessionId={sessionId} onStart={onStartWorkflow} />}
       {item === 'knowledge' && <KnowledgeView locale={locale} workspaceKey={workspaceKey} active={active && !inert && view === item} disabled={disabled} draft={knowledgeDraft} draftDone={knowledgeDraftDone} onInsertText={onInsertText} />}

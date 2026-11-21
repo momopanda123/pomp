@@ -18,8 +18,8 @@ import { Icon } from './Icon';
  * The context basket: the files attached to the next message (sent once, as a path list) and the knowledge the conversation uses (ticked
  * defaults and picks, kept for every message of the conversation). Both are folding groups; the token count covers draft, files and knowledge.
  */
-export function ContextBasket({ native = true, files, requestFiles, text, dispatch, locale, workspaceKey, sessionId, model, connected, disabled, visible = false }: {
-  native?: boolean; visible?: boolean; files: WorkspaceFile[]; requestFiles?: string[]; text: string;
+export function ContextBasket({ files, requestFiles, text, dispatch, locale, workspaceKey, sessionId, model, connected, disabled, visible = false }: {
+  visible?: boolean; files: WorkspaceFile[]; requestFiles?: string[]; text: string;
   dispatch: Dispatch<Action>; locale: string; workspaceKey?: string; sessionId?: string; model?: ModelInfo; connected: boolean; disabled: boolean;
 }) {
   const t = useT();
@@ -44,7 +44,7 @@ export function ContextBasket({ native = true, files, requestFiles, text, dispat
   const usable = usableKnowledge(knowledge.items);
   const picked = new Set(knowledge.selected);
   const [knowledgeError, setKnowledgeError] = useState('');
-  useRefreshOnShow(native && visible && connected, knowledge.refresh);
+  useRefreshOnShow(visible && connected, knowledge.refresh);
   const toggleKnowledge = async (item: KnowledgeItem, checked: boolean) => {
     const ids = knowledge.selected.filter(id => id !== item.id);
     if (checked) ids.push(item.id);
@@ -75,7 +75,7 @@ export function ContextBasket({ native = true, files, requestFiles, text, dispat
     <h3>{ko ? '컨텍스트 바구니' : 'Context basket'}</h3>
     <div className="context-basket-summary">
       <span>{t('basket.summary', { min: Math.ceil(bytes / 4).toLocaleString(), max: bytes.toLocaleString() })}</span>
-      {native && <DraftTokenCounter text={text} attachments={files.map(file => file.fullPath)} requestFiles={requestFiles} knowledge={knowledge.selected} root={workspaceKey} sessionId={sessionId} model={model} connected={connected} disabled={disabled} locale={locale} />}
+      <DraftTokenCounter text={text} attachments={files.map(file => file.fullPath)} requestFiles={requestFiles} knowledge={knowledge.selected} root={workspaceKey} sessionId={sessionId} model={model} connected={connected} disabled={disabled} locale={locale} />
     </div>
     <ViewSection sectionKey="context-files" title={t('composer.attachments')} status={files.length} bodyClassName="ui-flush">
       <div onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = !disabled && drag.current ? 'move' : 'none'; }} onDrop={event => drop(event)}>
@@ -95,7 +95,7 @@ export function ContextBasket({ native = true, files, requestFiles, text, dispat
       </div>
       <Pager paged={pagedFiles} testId="basket-file-pager" />
     </ViewSection>
-    {native && usable.length > 0 && <ViewSection sectionKey="context-knowledge" title={t('tools.knowledge')} status={usable.filter(item => picked.has(item.id)).length}>
+    {usable.length > 0 && <ViewSection sectionKey="context-knowledge" title={t('tools.knowledge')} status={usable.filter(item => picked.has(item.id)).length}>
       <KnowledgeChecklist items={usable} checked={item => picked.has(item.id)} onToggle={(item, checked) => { void toggleKnowledge(item, checked); }}
         disabled={disabled || !connected || knowledge.pending} testId="basket-knowledge" />
       {knowledgeError && <p className="ui-note" role="alert" data-testid="basket-knowledge-error">{revealControls(knowledgeError)}</p>}

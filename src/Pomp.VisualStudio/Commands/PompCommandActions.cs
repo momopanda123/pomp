@@ -53,13 +53,6 @@ namespace Pomp.VisualStudio.Commands
             var paths = SelectedFilePaths(origin);
             if (paths.Count == 0) { await ReportNoFilesAsync(); return; }
             var session = services.ActiveSession;
-            if (session.BackendId != "omp")
-            {
-                await SetStatusAsync(PompLanguage.Pick(
-                    "POMP: 이 ACP 대화는 파일 전체 요청을 지원하지 않아요. omp 대화를 선택한 뒤 다시 시도하세요.",
-                    "POMP: whole-file requests are not supported in this ACP conversation. Select an omp conversation and try again."));
-                return;
-            }
             var files = await PrefillFilesAsync(paths);
             await ShowChatAsync(focus: true);
             session.PrefillComposer(new ComposerPrefillPayload { RequestFiles = files, IncludeEditorContext = false, Send = false });
@@ -286,8 +279,8 @@ namespace Pomp.VisualStudio.Commands
         /// </summary>
         public async Task AddToKnowledgeAsync()
         {
-            if (!(services.KnowledgeEditor is IKnowledgeEditor editor))
-            { await SetStatusAsync("POMP: knowledge editing is unavailable for this backend."); return; }
+            var editor = services.KnowledgeEditor;
+            if (editor == null) return;
             var lines = await ReadKnowledgeLinesAsync();
             if (lines == null) return;
 
@@ -442,7 +435,7 @@ namespace Pomp.VisualStudio.Commands
         private async Task PrefillChatAsync(ComposerPrefillPayload prefill)
         {
             await ShowChatAsync(focus: true);
-            services.ActiveSession?.PrefillComposer(prefill);
+            services.ActiveSession.PrefillComposer(prefill);
         }
 
         /// <summary>

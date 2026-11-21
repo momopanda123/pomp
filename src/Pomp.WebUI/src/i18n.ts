@@ -2,7 +2,6 @@ import { createContext, useContext } from 'react';
 import { conversationEn, conversationKo } from './conversationI18n';
 import { toolsStrings } from './i18n/toolsStrings';
 import { uiStrings } from './i18n/uiStrings';
-import { acpStrings } from './i18n/acpStrings';
 
 /** Tiny i18n: Korean (default) and English, selected by `host/hello.locale`. */
 export type Locale = 'ko' | 'en';
@@ -166,8 +165,8 @@ const ko = {
   'setup.login.copied': '복사됨',
   'setup.login.codeLabel': '인증 코드',
   'setup.login.confirm': '확인',
-  'setup.login.cancelPrompt': '입력 취소',
-  'setup.login.cancel': '로그인 취소',
+  'setup.login.acceptRisk': 'Yes · 동의하고 브라우저 열기',
+  'setup.login.clipboardHint': '비워 두면 확인 시 클립보드에서 붙여넣습니다',
   'setup.login.succeeded': '{name} 계정을 연결했어요',
   'setup.login.succeededGeneric': '로그인했어요',
   'setup.login.failed': '로그인하지 못했어요',
@@ -335,6 +334,11 @@ const ko = {
   'msg.aborted': '응답을 중단했어요',
   'msg.lengthCut': '길이 제한으로 응답이 잘렸어요',
   'msg.truncated': '메시지가 너무 길어 뒷부분이 잘렸어요',
+  'benchmark.elapsed': '소요 {time}',
+  'benchmark.speed': '{speed} 토큰/s',
+  'benchmark.output': '출력 {count} 토큰',
+  'benchmark.details': '소요 시간은 도구 실행과 대기를 포함한 턴 전체 시간입니다. 속도는 실제 출력 토큰 수를 모델 응답 시간으로 나눈 값이며 도구 실행 시간은 제외합니다.',
+  'benchmark.unavailable': '출력 토큰 수나 모델 응답 시간이 보고되지 않아 속도를 계산할 수 없습니다.',
   'msg.sessionReset': '새 대화를 시작했어요.',
   'msg.notSent': '전송하지 못했어요',
   'msg.replayTruncated': '이 대화의 이전 메시지는 더 볼 수 없어요.',
@@ -374,7 +378,6 @@ const ko = {
   'composer.filesHint': '이 파일 전체에 요청할 작업 입력',
   'composer.clearFiles': '파일 전체 범위 지우기',
   'composer.removeFile': '{name} 대상에서 제거',
-  'composer.filesUnsupported': '파일 전체 요청은 OMP에서만 지원해요. 기존 초안은 유지되며 아무것도 전송하지 않았어요.',
   'composer.filesCommand': '파일 전체 요청은 일반 메시지 또는 /steer로 보내 주세요. 다른 작업을 시작하려면 먼저 파일 범위를 지워 주세요.',
   'composer.placeholderOffline': '메시지 입력',
   'composer.placeholderBusy': '메시지 입력',
@@ -714,7 +717,8 @@ const ko = {
   ...conversationKo,
   ...toolsStrings.ko,
   ...uiStrings.ko,
-  ...acpStrings.ko,
+  'msg.sendUnconfirmed': '연결이 끊겨 전송을 확인하지 못했어요.',
+  'recovery.checking': '이전 대화를 확인하는 중', 'recovery.retry': '복원 재시도', 'recovery.openHistory': '다른 기록 열기', 'recovery.new': '새 대화',
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -872,8 +876,8 @@ const en: Record<MessageKey, string> = {
   'setup.login.copied': 'Copied',
   'setup.login.codeLabel': 'Authorization code',
   'setup.login.confirm': 'OK',
-  'setup.login.cancelPrompt': 'Cancel input',
-  'setup.login.cancel': 'Cancel sign-in',
+  'setup.login.acceptRisk': 'Yes · Accept and open browser',
+  'setup.login.clipboardHint': 'Leave empty to paste from clipboard on OK',
   'setup.login.succeeded': 'Connected {name}',
   'setup.login.succeededGeneric': 'Signed in',
   'setup.login.failed': 'Sign-in failed',
@@ -1037,6 +1041,11 @@ const en: Record<MessageKey, string> = {
   'msg.aborted': 'Response was stopped',
   'msg.lengthCut': 'The response was cut off by the length limit',
   'msg.truncated': 'The message is too long; the end was cut off.',
+  'benchmark.elapsed': 'Elapsed {time}',
+  'benchmark.speed': '{speed} tokens/s',
+  'benchmark.output': '{count} output tokens',
+  'benchmark.details': 'Elapsed time includes tools and waits for the whole turn. Speed is reported output tokens divided by model response time, excluding tool execution.',
+  'benchmark.unavailable': 'Output usage or model response time was not reported, so throughput is unavailable.',
   'msg.sessionReset': 'A new conversation started.',
   'msg.notSent': 'Not sent',
   'msg.replayTruncated': 'Earlier messages of this conversation are no longer available.',
@@ -1073,7 +1082,6 @@ const en: Record<MessageKey, string> = {
   'composer.filesHint': 'Describe the task for these whole files',
   'composer.clearFiles': 'Clear whole-file scope',
   'composer.removeFile': 'Remove {name} from targets',
-  'composer.filesUnsupported': 'Whole-file requests require OMP. Your existing draft is unchanged; nothing was sent.',
   'composer.filesCommand': 'Send whole-file requests as a message or with /steer. Clear the file scope before starting a separate task.',
   'composer.placeholderOffline': 'Message input',
   'composer.placeholderBusy': 'Message input',
@@ -1405,7 +1413,8 @@ const en: Record<MessageKey, string> = {
   ...conversationEn,
   ...toolsStrings.en,
   ...uiStrings.en,
-  ...acpStrings.en,
+  'msg.sendUnconfirmed': 'The connection dropped before the send was confirmed.',
+  'recovery.checking': 'Confirming the previous conversation', 'recovery.retry': 'Retry recovery', 'recovery.openHistory': 'Open history', 'recovery.new': 'New conversation',
 };
 
 const tables: Record<Locale, Record<MessageKey, string>> = { ko, en };

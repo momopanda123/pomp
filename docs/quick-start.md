@@ -38,6 +38,8 @@ POMP 창은 다른 도구 창처럼 원하는 곳에 끌어 붙인다. 편집기
 
 OpenAI, Anthropic, Muse Code, Google Antigravity 타일이 먼저 보인다. 나머지는 검색으로 찾는다.
 
+**Antigravity CLI**를 연결할 때는 `Antigravity CLI`를 검색한다. 경고를 읽고 **Yes · 동의하고 브라우저 열기**를 누른 뒤 Google에서 로그인한다. 인증 코드나 콜백 주소를 복사한 다음 POMP로 돌아와 **확인**을 누른다.
+
 ### API 키로 연결
 
 1. **+ 키 추가**를 누른다.

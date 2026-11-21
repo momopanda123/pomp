@@ -37,7 +37,7 @@ function WorkspacePlans({ root, plans, activeSessionId, locale, inert = false, d
     const partner = plan.partner.kind === 'main' ? t('work.plan.partner.main')
       : `${t(plan.partner.kind === 'team' ? 'work.plan.partner.team' : 'work.plan.partner.agent')}${plan.partner.id ? `: ${plan.partner.id}` : ''}`;
     const status = t(!plan.ready ? 'work.plan.offline' : working(plan) ? 'work.plan.running' : 'work.plan.idle');
-    return `${plan.backend === 'antigravity-acp' ? `${t('backend.acp')} · ` : ''}${plan.title ? `${plan.title} — ` : ''}${partner} · ${plan.planTaskCount - plan.planOpenCount}/${plan.planTaskCount} · ${status}`;
+    return `${plan.title ? `${plan.title} — ` : ''}${partner} · ${plan.planTaskCount - plan.planOpenCount}/${plan.planTaskCount} · ${status}`;
   };
   return <div className="ui-gap" data-testid="conversation-plans" inert={inert || undefined}>
     {/* No open conversation: the plan card keeps its header and blank rows, with nothing to act on. */}
@@ -83,10 +83,6 @@ function SelectedPlan({ root, plan, locale, inert, disabled, selector }: {
 
   const act = (action: PlanAction, task?: string, marked?: boolean): SendResult => {
     const current = latest.current;
-    const allowed = action === 'continue' ? current.plan.canContinue : action === 'run' ? current.plan.canRun : current.plan.canStop;
-    if (allowed === false || current.plan.backend === 'antigravity-acp' && allowed !== true) {
-      setError(current.t('work.plan.actionUnavailable')); return { ok: false, reason: 'notified' };
-    }
     if (!mounted.current || current.inert || current.disabled || (request.current && (action !== 'stop' || request.current.action === 'stop'))) return { ok: false, reason: 'busy' };
     if (!root || !current.plan.ready) {
       setError(current.t('error.hostUnavailable'));
@@ -121,8 +117,6 @@ function SelectedPlan({ root, plan, locale, inert, disabled, selector }: {
 
   return <AgentPlan key={scopeKey(root, plan.sessionId)} root={root} session={plan} sessionId={plan.ready ? plan.sessionId : undefined} locale={locale} layout="page"
     busy={working(plan)} disabled={disabled || !root || !plan.ready} inert={inert}
-    editable={plan.editable ?? plan.backend !== 'antigravity-acp'} canContinue={plan.canContinue ?? plan.backend !== 'antigravity-acp'}
-    canRun={plan.canRun ?? plan.backend !== 'antigravity-acp'} canStop={plan.canStop ?? plan.backend !== 'antigravity-acp'}
     selector={selector} actionPending={pending !== null} stopPending={pending === 'stop'}
     notices={<>
       {!plan.ready && <div className="ui-note" role="status">{t('work.plan.conversationOffline')}</div>}

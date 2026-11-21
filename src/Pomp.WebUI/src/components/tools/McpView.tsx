@@ -12,7 +12,7 @@ import { useMcpManager } from './McpManage';
  * Tools › MCP: the configured servers (state, connection kind, tools in this conversation, switch, test/edit/delete) and the servers of the
  * bundled catalog that can still be installed. The props are ToolsTab's.
  */
-export function McpView({ controller, locale, disabled, busy, externalDisabled }: { controller: ToolsController; locale: string; disabled: boolean; busy: boolean; externalDisabled: boolean }) {
+export function McpView({ controller, locale, disabled, busy }: { controller: ToolsController; locale: string; disabled: boolean; busy: boolean }) {
   const t = toolsTranslate(locale);
   const [query, setQuery] = useState('');
   const root = useRef<HTMLDivElement>(null); const refocus = useRef('');
@@ -24,34 +24,29 @@ export function McpView({ controller, locale, disabled, busy, externalDisabled }
     root.current?.querySelector<HTMLElement>(`[data-testid="${id}"]`)?.focus();
   });
   const mcp = useMcpManager({ controller, locale, disabled, busy, onCreated: () => setQuery(''), onControl: id => { refocus.current = id; } });
-  const servers = [...controller.mcp.servers, { external: true as const, name: 'Antigravity', scope: 'project' }]
-    .filter(server => 'external' in server ? matches(query, server.name, t('antigravity.kind'), t('antigravity.description'), controller.mcp.antigravity?.serverName, controller.mcp.antigravity?.workspaceRoot)
-      : matches(query, server.name, server.type, server.command, server.url))
+  const servers = controller.mcp.servers.filter(server => matches(query, server.name, server.type, server.command, server.url))
     .toSorted((left, right) => left.name.localeCompare(right.name, 'en', { sensitivity: 'base', numeric: true }) || left.scope.localeCompare(right.scope));
   const paged = usePaged(servers, query);
   const toolCount = (server: McpServer) => controller.tools.tools.filter(tool => tool.group === 'mcp' && tool.server === server.name).length;
   const refreshing = controller.pending('mcp') || controller.pending('catalog');
-  async function refresh() {
-    if (externalDisabled || refreshing) return;
-    if (!disabled) {
-      void controller.command('catalog', { action: 'refresh' });
-      await controller.command('mcp', { action: 'refresh' });
-    }
-    await controller.command('mcp', { action: 'antigravity-refresh' });
+  function refresh() {
+    if (disabled || refreshing) return;
+    void controller.command('catalog', { action: 'refresh' });
+    void controller.command('mcp', { action: 'refresh' });
   }
   return <div className="tools-scroll-body" ref={root} data-testid="mcp-view">
-    <ViewSection sectionKey="tools-mcp" title={t('tools.mcpServers')} status={controller.mcp.servers.length + 1} bodyClassName="ui-flush"
+    <ViewSection sectionKey="tools-mcp" title={t('tools.mcpServers')} status={controller.mcp.servers.length} bodyClassName="ui-flush"
       actions={<>
         <button type="button" className="btn small subtle" data-testid="mcp-import" disabled={mcp.locked} onClick={mcp.startImport}><Icon name="download" size={12} />{t('tools.import')}</button>
         <button type="button" className="btn small" data-testid="mcp-add" data-tools-dialog-fallback="mcp" disabled={mcp.locked} onClick={mcp.startAdd}><Icon name="plus" size={12} />{t('mcp.addShort')}</button>
-        <SectionRefresh onClick={() => { void refresh(); }} disabled={externalDisabled || refreshing} testId="mcp-refresh" />
+        <SectionRefresh onClick={refresh} disabled={disabled || refreshing} testId="mcp-refresh" />
       </>}>
       {mcp.dialogs}
       {controller.mcp.restartRequired && <div className="ui-card-foot tools-banner-row" role="status" data-testid="mcp-restart-banner">
         <Icon name="warning" size={13} className="ui-warn" /><span className="ui-grow">{t('mcp.restartRequired')}</span>
         <button type="button" className="btn small" data-testid="mcp-restart" disabled={mcp.locked} onClick={() => { void controller.command('mcp', { action: 'restart' }); }}><Icon name="restart" size={12} />{t('mcp.restart')}</button>
       </div>}
-      {controller.mcp.servers.length + 1 > 8 && <Toolbar><SearchBox value={query} onChange={setQuery} testId="mcp-search" /></Toolbar>}
+      {controller.mcp.servers.length > 8 && <Toolbar><SearchBox value={query} onChange={setQuery} testId="mcp-search" /></Toolbar>}
       {controller.mcp.message && <p className="ui-note ui-muted" role="status">{controller.mcp.message}</p>}
       {mcp.notices}
       {controller.errors('mcp').map((error, index) => <p className="ui-note" role="alert" key={index}>{error}</p>)}
@@ -59,7 +54,6 @@ export function McpView({ controller, locale, disabled, busy, externalDisabled }
         <DataTable columns="auto minmax(0, 1fr) auto auto auto auto" label={t('tools.mcpServers')} testId="mcp-table" empty={!servers.length} emptyRows={2}
           head={['', t('tcol.name'), <span className="narrow-hide">{t('tcol.transport')}</span>, <span className="narrow-hide">{t('tcol.tools')}</span>, '', '']}>
           {paged.slice.map(server => {
-            if ('external' in server) return <AntigravityRow key="external:antigravity" controller={controller} locale={locale} disabled={externalDisabled} />;
             const state = server.error ? 'error' : server.enabled ? 'on' : 'off'; const count = toolCount(server);
             const secrets = [...Object.keys(server.env ?? {}), ...Object.keys(server.headers ?? {})];
             const target = server.type === 'stdio' ? [server.command, ...(server.args ?? [])].filter(Boolean).join(' ') : server.url ?? '';
@@ -88,43 +82,6 @@ export function McpView({ controller, locale, disabled, busy, externalDisabled }
       {mcp.output}
     </ViewSection>
     <CatalogSection controller={controller} locale={locale} locked={disabled || busy} />
-  </div>;
-}
-
-/** Outbound POMP tools for an external app, alongside (not counted as tools from) ordinary MCP servers. */
-function AntigravityRow({ controller, locale, disabled }: { controller: ToolsController; locale: string; disabled: boolean }) {
-  const t = toolsTranslate(locale);
-  const state = controller.mcp.antigravity;
-  const refresh = controller.feedback('mcp', 'antigravity-refresh');
-  const update = controller.feedback('mcp', 'antigravity-set');
-  const feedback = update.requestId || update.error ? update : refresh;
-  const enabled = state?.enabled === true;
-  const locked = disabled || controller.pending('mcp');
-  const canToggle = !!state?.serverName && !!state.configHash && (enabled ? state.canDisable : state.installed && state.canConfigure && !!state.workspaceRoot);
-  const status = !state ? 'antigravity.unchecked' : enabled ? state.configured ? 'antigravity.configured' : 'antigravity.needsUpdate'
-    : !state.installed ? 'antigravity.notInstalled' : 'antigravity.off';
-  const details = [t('antigravity.permissions'), t('antigravity.connection'), state?.applicationPath,
-    state?.workspaceRoot && `${t('antigravity.workspace')}: ${state.workspaceRoot}`,
-    state?.configPath && `${t('antigravity.config')}: ${state.configPath}`, state?.serverName].filter(Boolean).join('\n');
-  return <div className="ui-tr" role="row" data-testid="mcp-row-antigravity" data-kind="external" data-on={enabled}>
-    <span role="cell" className={`ui-cell ui-status-icon ${feedback.error ? 'ui-err' : enabled ? 'ui-ok' : 'ui-muted'}`} title={t(status)} data-testid="antigravity-status">
-      <Icon name={enabled || feedback.error ? 'dot' : 'circle'} size={16} />
-    </span>
-    <span role="cell" className="ui-cell">
-      <span className="tools-name-line"><strong>Antigravity</strong><Badge>{t('antigravity.kind')}</Badge></span>
-      <span className="ui-sub" title={details} data-testid="antigravity-details">{t('antigravity.description')}</span>
-      <span className="ui-sub ui-muted" title={t('antigravity.connection')}>{t(status)}</span>
-      {state?.message && state.message !== feedback.error && <span className="ui-sub ui-muted" title={state.message} data-testid="antigravity-message">{state.message}</span>}
-      {feedback.error && <span className="ui-sub ui-err" role="alert" title={feedback.error} data-testid="antigravity-result">{feedback.error}</span>}
-      <span className="ui-sub ui-muted" role="status" aria-live="polite" data-testid="antigravity-pending">{update.pending ? t('antigravity.updating') : refresh.pending ? t('antigravity.detecting') : ''}</span>
-    </span>
-    <span role="cell" className="ui-cell narrow-hide"><Badge>stdio</Badge></span>
-    <span role="cell" className="ui-cell narrow-hide ui-muted tools-num" title={t('antigravity.description')}>–</span>
-    <span role="cell" className="ui-cell"><Switch checked={enabled} showLabel={false} label={t('mcp.toggle', { name: 'Antigravity' })} disabled={locked || !canToggle} testId="antigravity-toggle" onChange={checked => {
-      if (locked || !canToggle || !state) return;
-      void controller.command('mcp', { action: 'antigravity-set', enabled: checked, name: state.serverName, expectedHash: state.configHash });
-    }} /></span>
-    <span role="cell" className="ui-cell ui-actions" />
   </div>;
 }
 

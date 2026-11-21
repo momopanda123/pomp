@@ -36,6 +36,12 @@ namespace Pomp.Hosting
         private void OnFrameReceived(object? sender, OmpFrameEventArgs e)
         {
             var frame = e.Frame;
+            if (frame.Type == OmpFrameTypes.MessageStart || frame.Type == OmpFrameTypes.MessageUpdate || frame.Type == OmpFrameTypes.MessageEnd)
+            {
+                var origin = _bridge.OriginOf(frame);
+                lock (_stateLock)
+                    if (origin != null && (origin.IsClosed || !ReferenceEquals(origin, _epochConnection))) return;
+            }
             try
             {
                 switch (frame.Type)
@@ -198,7 +204,7 @@ namespace Pomp.Hosting
                 _currentAssistantId = id;
             }
 
-            EnsureAssistantStarted(id);
+            EnsureAssistantStarted(id, frame);
         }
 
         private void HandleMessageUpdate(OmpFrame frame)
@@ -258,6 +264,7 @@ namespace Pomp.Hosting
             }
 
             var message = frame.Json.GetObject("message");
+            lock (_stateLock) ObserveTurnUsageLocked(frame, messageId, message);
             // The final answer of a turn another conversation asked for goes back to it: the turn's last answer text.
             lock (_stateLock)
             {
@@ -411,7 +418,7 @@ namespace Pomp.Hosting
             }
         }
 
-        private void EnsureAssistantStarted(string messageId)
+        private void EnsureAssistantStarted(string messageId, OmpFrame? startFrame = null)
         {
             bool isNew;
             lock (_stateLock)
@@ -421,12 +428,74 @@ namespace Pomp.Hosting
                 {
                     _assistantMessages[messageId] = new AssistantMessageState();
                 }
+                var state = _assistantMessages[messageId];
+                if (startFrame != null && !state.SawStart)
+                {
+                    state.SawStart = true;
+                    var origin = _bridge.OriginOf(startFrame);
+                    if ((origin == null || (!origin.IsClosed && ReferenceEquals(origin, _epochConnection))) && _turns.Count == 1)
+                    {
+                        var turn = _turns.Values.First();
+                        if (turn.BenchmarkMessageIds.Add(messageId))
+                        {
+                            state.BenchmarkOwner = turn;
+                            state.GenerationStartedAt = Stopwatch.GetTimestamp();
+                            turn.BenchmarkOpenCalls++;
+                        }
+                    }
+                }
             }
 
             if (isNew)
             {
                 _ui.Post(UiMessageTypes.ChatAssistantStart, new ChatAssistantStartPayload { MessageId = messageId });
             }
+        }
+
+        // RPC message_end carries AssistantMessage.usage.output (including reasoning/tool arguments)
+        // and optional duration (provider request milliseconds), not usage.totalTokens or ttft.
+        // Ownership is frozen at message_start, never inferred from whichever prompt ends next.
+        private void ObserveTurnUsageLocked(OmpFrame frame, string messageId, JObject? message)
+        {
+            var origin = _bridge.OriginOf(frame);
+            if (origin != null && (origin.IsClosed || !ReferenceEquals(origin, _epochConnection))) return;
+            _assistantMessages.TryGetValue(messageId, out var state);
+            var turn = state?.BenchmarkOwner;
+            if (turn == null)
+            {
+                // A missing start makes coverage unknowable. A known ownerless start is unrelated,
+                // and a repeated end already recorded by this turn must not invalidate its aggregate.
+                if (state?.SawStart != true && _turns.Count == 1)
+                {
+                    var active = _turns.Values.First();
+                    if (!active.BenchmarkMessageIds.Contains(messageId)) active.BenchmarkIncomplete = true;
+                }
+                return;
+            }
+            if (!_turns.TryGetValue(turn.PromptId, out var activeTurn) || !ReferenceEquals(turn, activeTurn)) return;
+            turn.BenchmarkOpenCalls--;
+            var output = message?.GetObject("usage")?["output"];
+            long? tokens = null;
+            if (output?.Type == JTokenType.Integer)
+            {
+                try { tokens = (long)output; }
+                catch (OverflowException) { /* An unrepresentable counter is unknown, not a partial total. */ }
+            }
+            // Providers initialize missing usage to zero, including tool-only assistant messages.
+            // Neither content length nor totalTokens can repair an unknown output-token bucket.
+            if (!tokens.HasValue || tokens.Value <= 0 || tokens.Value > long.MaxValue - turn.OutputTokens)
+                turn.BenchmarkIncomplete = true;
+            else turn.OutputTokens += tokens.Value;
+
+            var durationToken = message?["duration"];
+            var duration = durationToken?.Type == JTokenType.Integer || durationToken?.Type == JTokenType.Float
+                ? message.GetDouble("duration") : null;
+            var milliseconds = duration.HasValue && duration.Value > 0 && !double.IsInfinity(duration.Value)
+                ? duration.Value
+                : (Stopwatch.GetTimestamp() - state!.GenerationStartedAt) * 1000.0 / Stopwatch.Frequency;
+            if (milliseconds < 0 || milliseconds >= long.MaxValue - turn.GenerationDurationMs)
+                turn.BenchmarkIncomplete = true;
+            else turn.GenerationDurationMs += milliseconds;
         }
 
         private string? CurrentAssistantId()
@@ -618,6 +687,14 @@ namespace Pomp.Hosting
                     return;
                 }
 
+                turn.Elapsed.Stop();
+                var completeUsage = !turn.BenchmarkIncomplete && turn.BenchmarkOpenCalls == 0 && turn.BenchmarkMessageIds.Count > 0;
+                end.Benchmark = new ChatTurnBenchmarkPayload
+                {
+                    DurationMs = turn.Elapsed.ElapsedMilliseconds,
+                    OutputTokens = completeUsage ? turn.OutputTokens : (long?)null,
+                    GenerationDurationMs = completeUsage ? (long)turn.GenerationDurationMs : (long?)null,
+                };
                 _turns.Remove(promptId);
                 team = turn.Team; fromHook = IsHookTurn(turn);
                 RememberHookTurnLocked(turn);
@@ -1061,6 +1138,7 @@ namespace Pomp.Hosting
             IncludeEditorContextByDefault = _settings.IncludeEditorContextByDefault,
             ComposerPredictions = _settings.ComposerPredictions,
             WordCompletion = _settings.WordCompletion,
+            ShowTurnBenchmarks = _settings.ShowTurnBenchmarks,
             ApprovalMode = _settings.ApprovalMode,
             Shortcuts = (_settings as IUiShortcutSettings)?.Shortcuts ?? new UiShortcutsPayload(),
         };
@@ -1583,6 +1661,11 @@ namespace Pomp.Hosting
 
             /// <summary>Running since the turn was created (the turn-duration metric).</summary>
             public System.Diagnostics.Stopwatch Elapsed { get; } = System.Diagnostics.Stopwatch.StartNew();
+            public HashSet<string> BenchmarkMessageIds { get; } = new HashSet<string>(StringComparer.Ordinal);
+            public int BenchmarkOpenCalls { get; set; }
+            public bool BenchmarkIncomplete { get; set; }
+            public long OutputTokens { get; set; }
+            public double GenerationDurationMs { get; set; }
 
             /// <summary>Set (under the state lock) once chat/turnStarted was posted; until then an end is kept in <see cref="PendingEnd"/>.</summary>
             public bool StartPosted { get; set; }
@@ -1594,6 +1677,9 @@ namespace Pomp.Hosting
         private sealed class AssistantMessageState
         {
             public bool SawDelta { get; set; }
+            public bool SawStart { get; set; }
+            public TurnState? BenchmarkOwner { get; set; }
+            public long GenerationStartedAt { get; set; }
         }
 
         private sealed class ToolState

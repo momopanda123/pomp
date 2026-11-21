@@ -17,7 +17,7 @@ using Task = System.Threading.Tasks.Task;
 namespace Pomp.VisualStudio.Hosting
 {
     /// <summary>Facts about the hosting Visual Studio and the installed extension (see <see cref="IPompHostEnvironment"/>).</summary>
-    internal sealed partial class VsHostEnvironment : IPompHostEnvironment, IPompFilePicker, Pomp.Features.IBackgroundTaskNotifications, Pomp.Features.IWorkspaceDiffPresenter
+    internal sealed partial class VsHostEnvironment : IPompHostEnvironment, IPompFilePicker, IProviderLoginClipboard, Pomp.Features.IBackgroundTaskNotifications, Pomp.Features.IWorkspaceDiffPresenter
     {
         private readonly AsyncPackage package;
         private readonly JoinableTaskFactory joinableTaskFactory;
@@ -57,6 +57,13 @@ namespace Pomp.VisualStudio.Hosting
         /// <inheritdoc />
         public Task<string> GetWorkspaceRootAsync(CancellationToken cancellationToken) =>
             Pomp.VisualStudio.Adapters.VsAdapterContext.ResolveWorkspaceRootAsync(joinableTaskFactory, logger, cancellationToken);
+
+        /// <inheritdoc />
+        public async Task<string> ReadLoginTextAsync(CancellationToken cancellationToken)
+        {
+            await joinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+            return System.Windows.Clipboard.GetText();
+        }
 
         /// <inheritdoc />
         public async Task<System.Collections.Generic.IReadOnlyList<string>> PickFilesAsync(string? initialDirectory, string title, string? filter, bool multiselect, CancellationToken cancellationToken)

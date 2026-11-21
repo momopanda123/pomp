@@ -42,8 +42,6 @@ import { rememberPrompt } from './promptHistory';
 import { useStatusReport } from './statusBar';
 import { UndeliveredStatusBanner } from './components/UndeliveredStatusBanner';
 import './styles/conversations.css';
-import { backendId, capabilities, backendCommandAllowed, type BackendId } from './backend';
-import { AcpControls, AcpPermissionCard, BackendPicker } from './components/AcpControls';
 import { Icon } from './components/Icon';
 
 /** What a permission decision leaves in the transcript. */
@@ -90,33 +88,30 @@ export function App() {
   useHostPump(dispatch); useEscapeToComposer(inputRef); useGlobalErrorLogging();
   useEffect(() => { document.documentElement.lang = state.locale; }, [state.locale]);
 
-  const backend = backendId(state.session, state.backend);
-  const caps = capabilities(state.session, backend);
-  const native = caps.nativeOmp;
-  const connected = native ? state.bridge.state === 'running' : state.acp?.connected === true && !!state.acp.sessionId && !state.acp.authRequired;
-  useFileDrops(() => translate('composer.dropUnsupported'), caps.editorContext || caps.images, () => translate('acp.noDrop'));
+  const connected = state.bridge.state === 'running';
+  useFileDrops(() => translate('composer.dropUnsupported'));
   const recovering = state.session?.recoveryStatus === 'restoring';
   const recoveryFailed = state.session?.recoveryStatus === 'failed';
   const conversationReady = connected && !recovering && !recoveryFailed;
   const busy = isBusy(state);
-  const setupRequired = native && isSetupRequired(state.bridge);
+  const setupRequired = isSetupRequired(state.bridge);
   const workspaceKey = state.session?.workingDirectory ?? '';
   const plans = state.tabs && sameRoot(state.tabs.root, workspaceKey) ? state.tabs.plans : NO_PLANS;
   const attention = useWorkAttention(state.session, plans);
   const workCount = attention.review + attention.codeReview + attention.workflow + attention.history;
-  const accountAttention = native ? setupRequired || state.setup?.restartRecommended === true || state.setup?.usage?.reports.some(report => report.limits.some(limit => limit.status === 'exhausted')) === true : state.acp?.authRequired === true;
-  const permission = native ? state.permissions[0] : undefined; const dialog = native ? state.dialogs[0] : undefined;
+  const accountAttention = setupRequired || state.setup?.restartRecommended === true || state.setup?.usage?.reports.some(report => report.limits.some(limit => limit.status === 'exhausted')) === true;
+  const permission = state.permissions[0]; const dialog = state.dialogs[0];
   const modal = permission !== undefined || dialog !== undefined;
   // The page's shortcuts (Tools > Options > Pomp > Shortcuts), with defaults for an older host.
   const shortcuts = useMemo(() => normalizeShortcuts(state.hello?.shortcuts), [state.hello?.shortcuts]);
   useEffect(() => {
     function permissionShortcut(event: KeyboardEvent) {
-      if (!native || !matchesShortcut(event, shortcuts.permissionsView)) return;
+      if (!matchesShortcut(event, shortcuts.permissionsView)) return;
       event.preventDefault(); setToolsView('permissions'); setTab('tools');
     }
     window.addEventListener('keydown', permissionShortcut);
     return () => window.removeEventListener('keydown', permissionShortcut);
-  }, [shortcuts.permissionsView, native]);
+  }, [shortcuts.permissionsView]);
   // Editor ↔ chat focus: keystrokes inside the WebView never reach Visual Studio's key bindings, so the page sends the host-chrome
   // message itself for the same chord the IDE binding uses (Tools > Options > Pomp > Shortcuts).
   useEffect(() => {
@@ -160,14 +155,12 @@ export function App() {
     const requestId = newId();
     pendingSwitch.current = requestId;
     if (!send('conversation/tab', { ...command, requestId })) { pendingSwitch.current = undefined; dispatch({ type: 'localNotice', level: 'error', message: makeTranslate(latest.current.locale)('error.hostUnavailable') }); return false; }
-    const destinationBackend = command.action === 'activate' && command.sessionId ? state.tabs?.tabs.find(tab => tab.sessionId === command.sessionId)?.backend ?? 'omp' : 'omp';
-    dispatch({ type: 'newSessionRequested', requestId, backendSwitch: destinationBackend !== backend }); setListOpen(false); return true;
+    dispatch({ type: 'newSessionRequested', requestId }); setListOpen(false); return true;
   }
   /** Editor requests belong to the Default (POMP) tab's conversation: from an agent or team tab the page switches there first. */
   const showPomp = () => latestPartnerTab() && switchTab({ action: 'activate' });
   const pendingPartnerFocus = useRef<ConversationPartner | undefined>(undefined);
   const openPartner = (target: SendTarget) => {
-    if (!native) return;
     if (target.kind === 'agent' || target.kind === 'team') {
       pendingPartnerFocus.current = { kind: target.kind, id: target.id };
       setPartnerRequest(previous => ({ partner: { kind: target.kind as 'agent' | 'team', id: target.id }, seq: (previous?.seq ?? 0) + 1 }));
@@ -181,12 +174,11 @@ export function App() {
   /** Whether the current conversation is an agent or team tab's (not the Default (POMP) tab's). */
   function latestPartnerTab(): boolean {
     const current = latest.current; const tabs = current.tabs;
-    if (backendId(current.session, current.backend) !== 'omp') return false;
     return !!tabs && sameRoot(tabs.root, current.session?.workingDirectory) && tabs.sessionId === current.session?.sessionId && tabs.partner.kind !== 'main';
   }
-  const activeTab = !native && (tab === 'agents' || tab === 'remote') ? 'chat' : setupRequired && !availableWhileRequired(tab) ? 'accounts' : tab;
+  const activeTab = setupRequired && !availableWhileRequired(tab) ? 'accounts' : tab;
   // Approvals and questions of this conversation, and of the tabs in the background (a message sent to another tab can end up waiting there).
-  const backgroundWaiting = !native || !state.tabs || !sameRoot(state.tabs.root, workspaceKey) ? 0
+  const backgroundWaiting = !state.tabs || !sameRoot(state.tabs.root, workspaceKey) ? 0
     : state.tabs.tabs.filter(item => item.waiting && item.sessionId !== sessionId).length + (state.tabs.mainWaiting && state.tabs.main !== sessionId && state.tabs.sessionId !== state.tabs.main ? 1 : 0);
   const tabBadges = useTabBadges(activeTab, { sessionId, items: state.items, replaying: state.replaying, replayRevision: state.replayRevision, requests: state.permissions.length + state.dialogs.length + backgroundWaiting });
   const activeTabRef = useRef(activeTab); activeTabRef.current = activeTab;
@@ -194,7 +186,7 @@ export function App() {
   useHostFocusRedirect(inputRef, chatShown);
   useEffect(() => {
     const stopHiddenCapture = () => {
-      if (native && latest.current.dictation && latest.current.dictation.state !== 'idle')
+      if (latest.current.dictation && latest.current.dictation.state !== 'idle')
         send('dictation/set', { requestId: newId(), on: false });
     };
     if (activeTab !== 'chat') stopHiddenCapture();
@@ -205,7 +197,7 @@ export function App() {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', stopHiddenCapture);
     };
-  }, [activeTab, state.dictation?.captureId, native]);
+  }, [activeTab, state.dictation?.captureId]);
   const wasRequired = useRef(false);
   useEffect(() => {
     if (setupRequired) setTab('accounts'); else if (wasRequired.current) setTab('chat');
@@ -237,36 +229,17 @@ export function App() {
   /** `toMain`: a request that belongs to the Default (POMP) tab's conversation (editor menu): from another tab it waits in the input while the page switches there. */
   const sendMessage = useCallback((text: string, attachments: WorkspaceFile[] = [], clearDraft = false, target?: SendTarget | null, preserveDraftTarget = false, includeEditorContext?: boolean, toMain = false, requestFiles: WorkspaceFile[] = []): SendResult => {
     const current = latest.current;
-    const currentBackend = backendId(current.session, current.backend);
-    const allowed = capabilities(current.session, currentBackend);
-    if (requestFiles.length && !allowed.nativeOmp) {
-      dispatch({ type: 'localNotice', level: 'warning', message: makeTranslate(current.locale)('composer.filesUnsupported') });
-      return { ok: false, reason: 'notified' };
-    }
     if (requestFiles.length && !text.trim()) return { ok: false, reason: 'notified' };
-    if (!allowed.editorContext && includeEditorContext === true) {
-      dispatch({ type: 'localNotice', level: 'warning', message: makeTranslate(current.locale)('acp.noEditorContext') });
-      return { ok: false, reason: 'notified' };
-    }
-    if (!allowed.nativeOmp && (target && target.kind !== 'main' || current.selectedTarget && target === undefined)) {
-      dispatch({ type: 'localNotice', level: 'warning', message: makeTranslate(current.locale)('acp.noTargets') });
-      return { ok: false, reason: 'notified' };
-    }
-    if (!allowed.nativeOmp && attachments.some(file => /\.(png|jpe?g|gif|webp|bmp)$/i.test(file.fullPath) ? !allowed.images : !allowed.editorContext)) {
-      dispatch({ type: 'localNotice', level: 'warning', message: makeTranslate(current.locale)('acp.noAttachments') });
-      return { ok: false, reason: 'notified' };
-    }
     const destination = target === undefined ? current.selectedTarget : target ?? undefined;
     const queued = current.phase === 'running' || current.session?.isStreaming === true;
-    if (queued && !allowed.queue) return { ok: false, reason: 'busy' };
-    if (pendingSwitch.current || (!queued && sending.current) || queueSubmitting.current || current.replaying || current.phase === 'sending' || current.pendingNewSession !== undefined || allowed.nativeOmp && (current.permissions.length > 0 || current.dialogs.length > 0)) return { ok: false, reason: 'busy' };
-    if (allowed.nativeOmp ? current.bridge.state !== 'running' : current.acp?.connected !== true || !current.acp.sessionId || current.acp.authRequired) return { ok: false, reason: 'hostUnavailable' };
+    if (pendingSwitch.current || (!queued && sending.current) || queueSubmitting.current || current.replaying || current.phase === 'sending' || current.pendingNewSession !== undefined || current.permissions.length > 0 || current.dialogs.length > 0) return { ok: false, reason: 'busy' };
+    if (current.bridge.state !== 'running') return { ok: false, reason: 'hostUnavailable' };
     if (current.session?.recoveryStatus === 'restoring' || current.session?.recoveryStatus === 'failed') return { ok: false, reason: 'busy' };
     if (toMain && destination?.kind === 'main' && latestPartnerTab()) { showPomp(); return { ok: false, reason: 'busy' }; }
     const id = newId();
-    const message = { clientMessageId: id, text, includeEditorContext: !requestFiles.length && allowed.editorContext && (includeEditorContext ?? current.includeEditorContext),
+    const message = { clientMessageId: id, text, includeEditorContext: !requestFiles.length && (includeEditorContext ?? current.includeEditorContext),
       ...(requestFiles.length ? { requestFiles: requestFiles.map(file => ({ path: file.fullPath })) } : {}),
-      ...(attachments.length > 0 ? { attachments: attachments.map(file => ({ path: file.fullPath })) } : {}), ...(allowed.nativeOmp ? targetPayload(destination) : {}) };
+      ...(attachments.length > 0 ? { attachments: attachments.map(file => ({ path: file.fullPath })) } : {}), ...targetPayload(destination) };
     const rejection = promptRejection(text, { type: 'chat/send', payload: message }, attachments.map(file => file.fullPath));
     if (rejection) return { ok: false, ...rejection };
     if (queued) queueSubmitting.current = id; else sending.current = true;
@@ -289,20 +262,11 @@ export function App() {
    */
   const steerMessage = useCallback((text: string, attachments: WorkspaceFile[] = [], requestFiles: WorkspaceFile[] = []): SendResult => {
     const current = latest.current;
-    const allowed = capabilities(current.session, backendId(current.session, current.backend));
-    if (requestFiles.length && (!allowed.nativeOmp || !text.trim())) {
-      if (!allowed.nativeOmp) dispatch({ type: 'localNotice', level: 'warning', message: makeTranslate(current.locale)('composer.filesUnsupported') });
-      return { ok: false, reason: 'notified' };
-    }
-    if (!allowed.steer) return { ok: false, reason: 'hostUnavailable' };
-    if (!allowed.nativeOmp && attachments.some(file => /\.(png|jpe?g|gif|webp|bmp)$/i.test(file.fullPath) ? !allowed.images : !allowed.editorContext)) {
-      dispatch({ type: 'localNotice', level: 'warning', message: makeTranslate(current.locale)('acp.noAttachments') });
-      return { ok: false, reason: 'notified' };
-    }
+    if (requestFiles.length && !text.trim()) return { ok: false, reason: 'notified' };
     if (!(current.phase === 'running' || current.session?.isStreaming === true)) return sendMessage(text, attachments, true, undefined, false, undefined, false, requestFiles);
-    if (allowed.nativeOmp ? current.bridge.state !== 'running' : current.acp?.connected !== true || !current.acp.sessionId || current.acp.authRequired) return { ok: false, reason: 'hostUnavailable' };
+    if (current.bridge.state !== 'running') return { ok: false, reason: 'hostUnavailable' };
     if (pendingSwitch.current || current.replaying || current.pendingNewSession !== undefined || current.session?.recoveryStatus === 'restoring' || current.session?.recoveryStatus === 'failed') return { ok: false, reason: 'busy' };
-    const message = { clientMessageId: newId(), text, includeEditorContext: !requestFiles.length && allowed.editorContext && current.includeEditorContext,
+    const message = { clientMessageId: newId(), text, includeEditorContext: !requestFiles.length && current.includeEditorContext,
       ...(requestFiles.length ? { requestFiles: requestFiles.map(file => ({ path: file.fullPath })) } : {}),
       ...(attachments.length > 0 ? { attachments: attachments.map(file => ({ path: file.fullPath })) } : {}) };
     const rejection = promptRejection(text, { type: 'chat/send', payload: message }, attachments.map(file => file.fullPath));
@@ -318,7 +282,7 @@ export function App() {
   const cancelBtw = (): void => { const panel = latest.current.btw; if (panel && btwRunning()) send('btw/cancel', panel.topicId ? { recordId: panel.topicId } : {}); };
   /** `/btw [question]`: open a new side topic; only a nonempty question starts an engine request. */
   const openBtw = (question: string): SendResult => {
-    if (!native || latest.current.bridge.state !== 'running') return { ok: false, reason: 'hostUnavailable' };
+    if (latest.current.bridge.state !== 'running') return { ok: false, reason: 'hostUnavailable' };
     cancelBtw();
     const pending = question ? { requestId: newId(), question } : undefined;
     if (pending && !send('btw/ask', pending)) return { ok: false, reason: 'hostUnavailable' };
@@ -362,20 +326,12 @@ export function App() {
     return !pendingSwitch.current && current.pendingNewSession === undefined && current.session?.recoveryStatus !== 'restoring';
   }, []);
   const newSession = useCallback((): boolean => {
-    if (!canSwitchTab() || backendId(latest.current.session, latest.current.backend) === 'omp' && latest.current.bridge.state !== 'running') return false;
+    if (!canSwitchTab() || latest.current.bridge.state !== 'running') return false;
     const requestId = newId();
     pendingSwitch.current = requestId;
-    if (!send('session/new', { requestId, backend: backendId(latest.current.session, latest.current.backend) })) { pendingSwitch.current = undefined; dispatch({ type: 'localNotice', level: 'error', message: makeTranslate(latest.current.locale)('error.hostUnavailable') }); return false; }
+    if (!send('session/new', { requestId })) { pendingSwitch.current = undefined; dispatch({ type: 'localNotice', level: 'error', message: makeTranslate(latest.current.locale)('error.hostUnavailable') }); return false; }
     dispatch({ type: 'newSessionRequested', requestId, fresh: true }); setTab('chat'); setListOpen(false); return true;
   }, [canSwitchTab]);
-  const selectBackend = (selected: BackendId): void => {
-    if (!canSwitchTab() || selected === backend) return;
-    const requestId = newId(); pendingSwitch.current = requestId;
-    if (!send('conversation/backend', { requestId, backend: selected })) {
-      pendingSwitch.current = undefined; dispatch({ type: 'localNotice', level: 'error', message: translate('error.hostUnavailable') }); return;
-    }
-    dispatch({ type: 'newSessionRequested', requestId, backendSwitch: true }); setListOpen(false); setTab('chat');
-  };
   const switchSession = useCallback((requestId: string, root: string, id: string): boolean => {
     if (!canSwitchTab()) return false;
     pendingSwitch.current = requestId;
@@ -384,21 +340,20 @@ export function App() {
   }, [canSwitchTab]);
   /** A refusal or failure of a slash command (or of the conversation's rename and compaction): a warning in the chat, where the command was typed. */
   const commandNotice = useCallback((message: string) => dispatch({ type: 'localNotice', level: 'warning', message }), []);
-  const history = useSessionHistory(workspaceKey, sessionId, connected && caps.history.list, state.locale, switchSession, commandNotice, caps.history, backend, state.pendingNewSession);
+  const history = useSessionHistory(workspaceKey, sessionId, connected, state.locale, switchSession, commandNotice, state.pendingNewSession);
   const historyScope = useRef({ workspaceKey, sessionId });
   useEffect(() => {
     const before = historyScope.current; historyScope.current = { workspaceKey, sessionId };
     if (before.workspaceKey !== workspaceKey || (before.sessionId !== sessionId && !history.pendingId)) setListOpen(false);
   }, [workspaceKey, sessionId, history.pendingId]);
   const sessionBlocked = !connected || recovering || busy || newSessionPending || modal || state.session?.hasPendingAsyncWork === true || attention.terminal > 0 || state.pendingQueued.some(item => !item.failed);
-  const tabBlocked = native && !connected || recovering || newSessionPending;
-  const openList = () => { if (!caps.history.list) return; setTab('chat'); setListOpen(true); history.command('refresh'); };
+  const tabBlocked = !connected || recovering || newSessionPending;
+  const openList = () => { setTab('chat'); setListOpen(true); history.command('refresh'); };
   const closeList = () => { setListOpen(false); window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[data-testid="session-quick"]')?.focus()); };
   const openWork = (view?: RequestedWorkView) => { setWorkView(view ?? workView); setTab('work'); };
   const openRuns = () => { setAgentsView('running'); setTab('agents'); };
   /** A Tools view id (a chip, an id older builds used, or `hooks`) opens where it lives now: a Tools chip, or the Agents tab's Automation view for the project hooks. Other ids are ignored. */
   const openTools = (view: string) => {
-    if (!native) return;
     const target = toolsTarget(view);
     if (target?.tab === 'tools') { setToolsView(target.view); setTab('tools'); }
     else if (target) { setAgentsView(target.view); setTab('agents'); if (connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }
@@ -457,10 +412,9 @@ export function App() {
   }, [prefillSeq, activeTab, modal]);
   const changeTab = (next: ShellTab, byKeys = false) => {
     if (setupRequired && !availableWhileRequired(next)) return;
-    if (!native && (next === 'agents' || next === 'remote')) return;
     chatByTabKeys.current = byKeys && next === 'chat';
     if (next === 'work') openWork();
-    else { setTab(next); if (native && next === 'agents' && connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }
+    else { setTab(next); if (next === 'agents' && connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }
   };
   /** Says `message` in the chat and keeps the typed command in the input (see commandNotice). */
   const refuseCommand = (message: string): SendResult => { commandNotice(message); return { ok: false, reason: 'notified' }; };
@@ -471,7 +425,6 @@ export function App() {
     return history.command(action, value) ? { ok: true } : { ok: false, reason: 'notified' };
   };
   const handleCommand = (name: BuiltinCommand, args: string): SendResult => {
-    if (!backendCommandAllowed(name, caps)) return refuseCommand(translate('acp.noCommand', { name }));
     switch (name) {
       case 'new':
         if (!canSwitchTab()) return refuseCommand(translate('slash.newBlocked'));
@@ -496,69 +449,64 @@ export function App() {
   const planTotal = state.session?.planTaskCount ?? 0;
   const planOpen = state.session?.planOpenCount ?? 0;
   const completed = planTotal - planOpen;
-  const acpPermission = native ? undefined : state.acp?.permissions[0];
 
   const requestCard = permission
     ? <PermissionDialog key={permission.requestId} request={permission} position={state.permissionDone + 1} total={state.permissionDone + state.permissions.length} shortcuts={shortcuts} onRespond={respondPermission} onExpired={dropPermission} />
     : dialog
       ? <GenericDialog key={dialog.requestId} request={dialog} position={state.dialogDone + 1} total={state.dialogDone + state.dialogs.length} shortcuts={shortcuts} onRespond={respondDialog} onDraftChange={(requestId, text) => dispatch({ type: 'dialogDraft', requestId, text })} onExpired={dropDialog} />
-      : acpPermission
-        ? <AcpPermissionCard key={acpPermission.requestId} permission={acpPermission} total={state.acp?.permissions.length ?? 1} sessionId={state.acp?.sessionId} connected={state.acp?.connected === true} replies={state.acpReplies} />
-        : native && goal.card
+      : goal.card
         ? <GoalCard key={goal.card.key} card={goal.card} root={workspaceKey} sessionId={sessionId ?? ''} busy={busy} onClose={goal.close} />
         : null;
 
-  return <LocaleContext value={state.locale}><I18nContext value={translate}><KnowledgeProvider root={workspaceKey} sessionId={sessionId} connected={native && connected}><TeamsContext value={native ? state.agents?.teams ?? [] : []}><RolesContext value={native ? state.agents?.roles ?? [] : []}><MainRoleContext value={native ? state.agents?.main : undefined}><OpenPartnerContext value={native ? openPartner : undefined}><div className="app">
-    <TabBar active={activeTab} onChange={changeTab} bridge={native ? state.bridge : { state: connected ? 'running' : 'failed' }} required={setupRequired} badges={tabBadges} accountAttention={accountAttention} inert={false} engine={native ? state.engine : null} native={native} />
+  return <LocaleContext value={state.locale}><I18nContext value={translate}><KnowledgeProvider root={workspaceKey} sessionId={sessionId} connected={connected}><TeamsContext value={state.agents?.teams ?? []}><RolesContext value={state.agents?.roles ?? []}><MainRoleContext value={state.agents?.main}><OpenPartnerContext value={openPartner}><div className="app">
+    <TabBar active={activeTab} onChange={changeTab} bridge={state.bridge} required={setupRequired} badges={tabBadges} accountAttention={accountAttention} inert={false} engine={state.engine} />
     <main className="main">
       <section id="page-chat" className="tab-page chat-page" role="tabpanel" aria-labelledby="tab-chat" hidden={activeTab !== 'chat'} inert={activeTab !== 'chat' || undefined}>
         <SessionHeader session={state.session} history={history} disabled={sessionBlocked} newDisabled={tabBlocked} onNew={newSession} listOpen={listOpen} onToggleList={() => { if (listOpen) closeList(); else openList(); }}>
-          <PartnerPicker native={native} key={workspaceKey} tabs={state.tabs && sameRoot(state.tabs.root, workspaceKey) ? state.tabs : null} agents={state.agents} replies={state.conversationReplies} sessionId={sessionId} disabled={tabBlocked} busy={busy || state.session?.hasPendingAsyncWork === true} lockedTitle={newSessionPending ? translate('partner.locked') : undefined} request={native ? partnerRequest : undefined} shortcuts={shortcuts} input={inputRef} onSwitch={switchTab} onRefreshRoster={() => { if (native && connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }} />
+          <PartnerPicker key={workspaceKey} tabs={state.tabs && sameRoot(state.tabs.root, workspaceKey) ? state.tabs : null} agents={state.agents} replies={state.conversationReplies} sessionId={sessionId} disabled={tabBlocked} busy={busy || state.session?.hasPendingAsyncWork === true} lockedTitle={newSessionPending ? translate('partner.locked') : undefined} request={partnerRequest} shortcuts={shortcuts} input={inputRef} onSwitch={switchTab} onRefreshRoster={() => { if (connected) send('agents/command', { requestId: newId(), action: 'refresh' }); }} />
         </SessionHeader>
         <div className="conversation-list-anchor">{listOpen && <div ref={listRef} id="conversation-list" className="conversation-list"><SessionHistory locale={state.locale} sessionId={sessionId} sessionName={state.session?.sessionName} partner={scopedTabs?.partner ?? { kind: 'main' }} history={history} disabled={sessionBlocked} newDisabled={tabBlocked} switchDisabled={tabBlocked} onNew={newSession} onOpened={closeList} onClose={closeList} /></div>}</div>
-        {native ? <><ConnectionBanner bridge={state.bridge} onRestart={() => send('bridge/restart', {})} onOpenLog={() => send('log/open', {})} /><EngineNotice engine={state.engine} /></> : <AcpControls key={sessionId ?? backend} state={state.acp} backend={state.backend} replies={state.acpReplies} />}<UndeliveredStatusBanner />
-        {(recovering || recoveryFailed) && (native || state.acp?.connected === true) && <div className={recoveryFailed ? 'banner error' : 'banner warning'} role="status" data-testid="session-recovery">
+        <ConnectionBanner bridge={state.bridge} onRestart={() => send('bridge/restart', {})} onOpenLog={() => send('log/open', {})} /><EngineNotice engine={state.engine} /><UndeliveredStatusBanner />
+        {(recovering || recoveryFailed) && <div className={recoveryFailed ? 'banner error' : 'banner warning'} role="status" data-testid="session-recovery">
           {recoveryFailed ? <Icon name="error" size={14} /> : <span className="spinner" aria-hidden="true" />}
           <span className="banner-text">{state.session?.recoveryMessage || translate('recovery.checking')}</span>
-          {native && recoveryFailed && connected && <span className="banner-actions">
+          {recoveryFailed && connected && <span className="banner-actions">
             <button type="button" className="btn primary" onClick={() => send('session/recover', {})}>{translate('recovery.retry')}</button>
             <button type="button" className="btn" onClick={openList}>{translate('recovery.openHistory')}</button>
             <button type="button" className="btn" disabled={tabBlocked} onClick={newSession}>{translate('recovery.new')}</button>
           </span>}
         </div>}
-        <Transcript controlsEnabled={native && conversationReady && !newSessionPending && !state.replaying} root={workspaceKey} sessionId={sessionId} items={state.items} busy={busy} replaying={state.replaying} replayRevision={state.replayRevision} replayTruncated={state.replayTruncated} canRetry={conversationReady && !busy && !newSessionPending && !modal} onRetry={retryTurn} request={requestCard} findEnabled={activeTab === 'chat'} shortcuts={shortcuts} />
-        {(planOpen > 0 || native && (workCount > 0 || attention.hooks > 0)) && <div className="activity-chips" data-testid="activity-chips">
+        <Transcript controlsEnabled={conversationReady && !newSessionPending && !state.replaying} root={workspaceKey} sessionId={sessionId} items={state.items} busy={busy} replaying={state.replaying} replayRevision={state.replayRevision} replayTruncated={state.replayTruncated} showTurnBenchmarks={state.hello?.showTurnBenchmarks !== false} canRetry={conversationReady && !busy && !newSessionPending && !modal} onRetry={retryTurn} request={requestCard} findEnabled={activeTab === 'chat'} shortcuts={shortcuts} />
+        {(planOpen > 0 || workCount > 0 || attention.hooks > 0) && <div className="activity-chips" data-testid="activity-chips">
           {planOpen > 0 && <button className="activity-chip" type="button" data-testid="activity-plan" onClick={() => openWork('progress')}>{translate('work.view.progress')} {completed}/{planTotal}</button>}
-          {native && (['review', 'codeReview', 'workflow', 'history'] as const).filter(view => attention[view] > 0).map(view => <button className="activity-chip" type="button" key={view} data-testid={`activity-${view}`} onClick={() => openWork(view)}>{translate(ACTIVITY_LABELS[view])} {attention[view]}</button>)}
-          {native && attention.hooks > 0 && <button className="activity-chip" type="button" data-testid="activity-hooks" onClick={() => openTools('hooks')}>{translate('agents.view.hooks')} {attention.hooks}</button>}
+          {(['review', 'codeReview', 'workflow', 'history'] as const).filter(view => attention[view] > 0).map(view => <button className="activity-chip" type="button" key={view} data-testid={`activity-${view}`} onClick={() => openWork(view)}>{translate(ACTIVITY_LABELS[view])} {attention[view]}</button>)}
+          {attention.hooks > 0 && <button className="activity-chip" type="button" data-testid="activity-hooks" onClick={() => openTools('hooks')}>{translate('agents.view.hooks')} {attention.hooks}</button>}
         </div>}
-        {native && state.btw && <BtwPanel panel={state.btw} name={partnerName ?? 'POMP'} connected={conversationReady} onAsk={askBtw} onClose={closeBtw} />}
-        {native && <LiveAgentProgress disabled={!conversationReady || newSessionPending || state.replaying} sessionId={sessionId} promptId={state.activePromptId} items={state.items} />}
-        {caps.queue && <ChatQueue state={caps.steer ? state.queue : { ...state.queue, items: state.queue.items.map(item => ({ ...item, canSteer: false })) }} replies={state.conversationReplies} sessionId={sessionId} disabled={!conversationReady || newSessionPending || modal} pendingSends={state.pendingQueued} onRecover={item => { dispatch({ type: 'recoverQueueSend', id: item.clientMessageId }); inputRef.current?.focus(); }} />}
-        <Composer capabilities={caps} locale={state.locale} workspaceKey={workspaceKey} sessionId={sessionId} model={native ? state.session?.model : undefined} session={state.session} setup={state.setup} setupReplies={state.setupReplies} onManageAccounts={() => changeTab('accounts')} inputRef={inputRef} connected={conversationReady} busy={busy}
-          queueBlocked={busy && !caps.queue || state.phase === 'sending' || state.replaying || state.pendingQueued.some(item => !item.failed)} requestPending={modal || activeTab !== 'chat'} newSessionPending={newSessionPending} draft={state.composer} dispatch={dispatch} includeEditorContext={caps.editorContext && state.includeEditorContext} onIncludeEditorContextChange={value => dispatch({ type: 'setIncludeEditorContext', value })} onSend={sendMessage} onSteer={steerMessage} onStop={() => { if (caps.stop) send('chat/stop', {}); }}
-          commands={native ? state.commands.commands : state.acp?.commands ?? []} commandsHidden={native ? state.commands.hidden : undefined} onCommand={handleCommand} onGoal={native ? goal.open : undefined} skillsOff={goal.skillsOff} prefill={state.prefill} insertSkill={native ? insertSkill : undefined} insertText={insertText} basketRequest={basketRequest} basketTokens={native ? state.basketTokens : null} agents={native ? state.agents : null} shortcuts={shortcuts}
-          composerPredictions={native && state.hello?.composerPredictions === true} wordCompletion={state.hello?.wordCompletion !== false} transcript={state.items} approvalMode={state.hello?.approvalMode} permissionModeReply={state.permissionModeReply} editorFollow={native ? state.editorFollow : null} computer={native ? state.computer : null} computerReply={state.computerReply} computerRequest={native ? computerRequest : undefined} dictation={native ? state.dictation : null} dictationReply={state.dictationReply} selectedTarget={native ? state.selectedTarget : undefined} onSelectTarget={target => dispatch({ type: 'selectTarget', target })} partnerName={partnerName} partner={scopedTabs?.partner} onOpenPartner={native ? openPartner : undefined} />
+        {state.btw && <BtwPanel panel={state.btw} name={partnerName ?? 'POMP'} connected={conversationReady} onAsk={askBtw} onClose={closeBtw} />}
+        <LiveAgentProgress disabled={!conversationReady || newSessionPending || state.replaying} sessionId={sessionId} promptId={state.activePromptId} items={state.items} />
+        <ChatQueue state={state.queue} replies={state.conversationReplies} sessionId={sessionId} disabled={!conversationReady || newSessionPending || modal} pendingSends={state.pendingQueued} onRecover={item => { dispatch({ type: 'recoverQueueSend', id: item.clientMessageId }); inputRef.current?.focus(); }} />
+        <Composer locale={state.locale} workspaceKey={workspaceKey} sessionId={sessionId} model={state.session?.model} session={state.session} setup={state.setup} setupReplies={state.setupReplies} onManageAccounts={() => changeTab('accounts')} inputRef={inputRef} connected={conversationReady} busy={busy}
+          queueBlocked={state.phase === 'sending' || state.replaying || state.pendingQueued.some(item => !item.failed)} requestPending={modal || activeTab !== 'chat'} newSessionPending={newSessionPending} draft={state.composer} dispatch={dispatch} includeEditorContext={state.includeEditorContext} onIncludeEditorContextChange={value => dispatch({ type: 'setIncludeEditorContext', value })} onSend={sendMessage} onSteer={steerMessage} onStop={() => send('chat/stop', {})}
+          commands={state.commands.commands} commandsHidden={state.commands.hidden} onCommand={handleCommand} onGoal={goal.open} skillsOff={goal.skillsOff} prefill={state.prefill} insertSkill={insertSkill} insertText={insertText} basketRequest={basketRequest} basketTokens={state.basketTokens} agents={state.agents} shortcuts={shortcuts}
+          composerPredictions={state.hello?.composerPredictions === true} wordCompletion={state.hello?.wordCompletion !== false} transcript={state.items} approvalMode={state.hello?.approvalMode} permissionModeReply={state.permissionModeReply} editorFollow={state.editorFollow} computer={state.computer} computerReply={state.computerReply} computerRequest={computerRequest} dictation={state.dictation} dictationReply={state.dictationReply} selectedTarget={state.selectedTarget} onSelectTarget={target => dispatch({ type: 'selectTarget', target })} partnerName={partnerName} partner={scopedTabs?.partner} onOpenPartner={openPartner} />
       </section>
       <section id="page-work" className="tab-page work-page" role="tabpanel" aria-labelledby="tab-work" hidden={activeTab !== 'work'} inert={activeTab !== 'work' || undefined}>
-        <WorkTab native={native} locale={state.locale} plans={plans} workspaceKey={workspaceKey} sessionId={sessionId} connected={conversationReady} busy={busy} newSessionPending={newSessionPending} inert={activeTab !== 'work'} attention={attention} requestedView={workView} onViewChange={setWorkView} onContinue={continueWork} onSolve={text => {
+        <WorkTab locale={state.locale} plans={plans} workspaceKey={workspaceKey} sessionId={sessionId} connected={conversationReady} busy={busy} newSessionPending={newSessionPending} inert={activeTab !== 'work'} attention={attention} requestedView={workView} onViewChange={setWorkView} onContinue={continueWork} onSolve={text => {
           const result = sendMessage(text, [], false, undefined, true, false); if (result.ok) setTab('chat');
           return result;
         }} onOpenWorkflows={() => openTools('workflows')} />
       </section>
       <section id="page-agents" className="tab-page agents-page" role="tabpanel" aria-labelledby="tab-agents" hidden={activeTab !== 'agents'} inert={activeTab !== 'agents' || undefined}>
-        {native && <AgentsPanel agents={state.agents} replies={state.agentsReplies} setup={state.setup} setupReplies={state.setupReplies} cmd={setupCmd} locale={state.locale} connected={connected} inert={activeTab !== 'agents'} sessionId={sessionId} view={agentsView} onViewChange={setAgentsView} onSelectTarget={openPartner} workspaceKey={workspaceKey} busy={busy} newSessionPending={newSessionPending} onShowPermissions={() => openTools('permissions')} />}
+        <AgentsPanel agents={state.agents} replies={state.agentsReplies} setup={state.setup} setupReplies={state.setupReplies} cmd={setupCmd} locale={state.locale} connected={connected} inert={activeTab !== 'agents'} sessionId={sessionId} view={agentsView} onViewChange={setAgentsView} onSelectTarget={openPartner} workspaceKey={workspaceKey} busy={busy} newSessionPending={newSessionPending} onShowPermissions={() => openTools('permissions')} />
       </section>
       <section id="page-tools" className="tab-page" role="tabpanel" aria-labelledby="tab-tools" hidden={activeTab !== 'tools'} inert={activeTab !== 'tools' || undefined}>
-        {native ? <ToolsTab active={activeTab === 'tools'} locale={state.locale} workspaceKey={workspaceKey} sessionId={sessionId} connected={connected} busy={busy} newSessionPending={newSessionPending} inert={activeTab !== 'tools'} requestedView={toolsView} onViewChange={setToolsView} onUseSkill={name => { setTab('chat'); setListOpen(false); setInsertSkill(previous => ({ name, seq: (previous?.seq ?? 0) + 1 })); }} rules={state.activeRules} knowledgeDraft={state.knowledgeDraft} onInsertText={insertIntoChat} /> : activeTab === 'tools' && <p className="hint" data-testid="acp-tools-note">{translate('acp.toolsPage')}</p>}
+        <ToolsTab active={activeTab === 'tools'} locale={state.locale} workspaceKey={workspaceKey} sessionId={sessionId} connected={connected} busy={busy} newSessionPending={newSessionPending} inert={activeTab !== 'tools'} requestedView={toolsView} onViewChange={setToolsView} onUseSkill={name => { setTab('chat'); setListOpen(false); setInsertSkill(previous => ({ name, seq: (previous?.seq ?? 0) + 1 })); }} rules={state.activeRules} knowledgeDraft={state.knowledgeDraft} onInsertText={insertIntoChat} />
       </section>
       <section id="page-remote" className="tab-page" role="tabpanel" aria-labelledby="tab-remote" hidden={activeTab !== 'remote'} inert={activeTab !== 'remote' || undefined}>
-        {native && activeTab === 'remote' && <RemotePanel setup={state.setup} replies={state.setupReplies} cmd={setupCmd} required={setupRequired} connected={connected} />}
+        {activeTab === 'remote' && <RemotePanel setup={state.setup} replies={state.setupReplies} cmd={setupCmd} required={setupRequired} connected={connected} />}
       </section>
       <section id="page-accounts" className="tab-page" role="tabpanel" aria-labelledby="tab-accounts" hidden={activeTab !== 'accounts'} inert={activeTab !== 'accounts' || undefined}>
-        {activeTab === 'accounts' && <div className="accounts-page"><BackendPicker active={backend} state={state.backend} disabled={newSessionPending} onSelect={selectBackend} />
-          {native ? <SetupPanel setup={state.setup} replies={state.setupReplies} cmd={setupCmd} sessionModel={state.session?.model} required={setupRequired} connected={connected} locale={state.locale} inert={false} onOpenRemote={() => changeTab('remote')} /> : <p className="hint" data-testid="acp-accounts-note">{translate('acp.accountsPage')}</p>}
-        </div>}
+        {activeTab === 'accounts' && <SetupPanel setup={state.setup} replies={state.setupReplies} cmd={setupCmd} sessionModel={state.session?.model} required={setupRequired} connected={connected} locale={state.locale} inert={false} onOpenRemote={() => changeTab('remote')} />}
       </section>
     </main>
   </div></OpenPartnerContext></MainRoleContext></RolesContext></TeamsContext></KnowledgeProvider></I18nContext></LocaleContext>;

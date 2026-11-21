@@ -30,7 +30,7 @@ export function SessionHistory({ locale, sessionId, sessionName, partner, histor
   // A short list needs no filter field (like the other pickers): the search appears only past ten conversations. Opening puts the
   // keyboard on the search when there is one, else on the current conversation's row.
   // A filter in use keeps its field, so a list that shrinks to ten or fewer while filtered can still be cleared.
-  const tabEntries = history.state.entries.filter(entry => (entry.backend ?? 'omp') === history.backend && (entry.partner?.kind ?? 'main') === partner.kind && (partner.kind === 'main' || entry.partner?.id === partner.id));
+  const tabEntries = history.state.entries.filter(entry => (entry.partner?.kind ?? 'main') === partner.kind && (partner.kind === 'main' || entry.partner?.id === partner.id));
   const searchable = tabEntries.length > 10 || query !== '';
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -61,7 +61,7 @@ export function SessionHistory({ locale, sessionId, sessionName, partner, histor
       const preview = previewId === entry.id && history.state.preview?.id === entry.id ? history.state.preview : undefined;
       return <li key={entry.id} className={current ? 'current' : ''} data-testid={`session-row-${entry.id}`} aria-busy={history.pendingId === entry.id || undefined}>
         <div className="session-row-main">
-          <button className="session-row-open" type="button" data-testid="session-open" disabled={history.pending || (!current && (switchDisabled || !history.allowed('switch')))} onClick={() => { if (current) onOpened(); else if (history.command('switch', entry.id)) onOpened(); }}>
+          <button className="session-row-open" type="button" data-testid="session-open" disabled={history.pending || (!current && switchDisabled)} onClick={() => { if (current) onOpened(); else if (history.command('switch', entry.id)) onOpened(); }}>
             <strong className="session-title">{current && <Icon name="check" size={12} />}{revealControls(entry.title || entry.name || entry.sessionId || entry.id)}</strong>
             <span className="session-meta">{date(entry.modifiedUtc || entry.visitedUtc)}{entry.messageCount !== undefined && <> · {t('session.messages', { count: entry.messageCount })}</>}</span>
           </button>
@@ -74,11 +74,11 @@ export function SessionHistory({ locale, sessionId, sessionName, partner, histor
           event.preventDefault(); const index = items.indexOf(document.activeElement as HTMLButtonElement);
           items[event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
         }}>
-          <button className="btn subtle" type="button" role="menuitem" data-testid="session-preview" disabled={history.pending || !history.allowed('preview')} onClick={() => {
+          <button className="btn subtle" type="button" role="menuitem" data-testid="session-preview" disabled={history.pending} onClick={() => {
             closeMenu(); if (previewId === entry.id) setPreviewId(undefined); else if (history.command('preview', entry.id)) setPreviewId(entry.id);
           }}>{t('session.preview')}</button>
-          {current && history.allowed('rename') && <button className="btn subtle" type="button" role="menuitem" data-testid="session-rename" disabled={disabled || history.pending} onClick={() => { setMenu(undefined); setEditing(true); }}>{t('session.rename')}</button>}
-          <button className="btn subtle danger" type="button" role="menuitem" data-testid="session-delete" disabled={!history.allowed('delete') || disabled || history.pending || emptyCurrent || !entry.sessionId}
+          {current && <button className="btn subtle" type="button" role="menuitem" data-testid="session-rename" disabled={disabled || history.pending} onClick={() => { setMenu(undefined); setEditing(true); }}>{t('session.rename')}</button>}
+          <button className="btn subtle danger" type="button" role="menuitem" data-testid="session-delete" disabled={disabled || history.pending || emptyCurrent || !entry.sessionId}
             title={emptyCurrent ? t('session.alreadyEmpty') : undefined}
             onClick={() => { if (!entry.sessionId) return; setMenu(undefined); setDeleting({ id: entry.id, name: entry.title || entry.name || entry.sessionId, root: history.state.root, sessionId: entry.sessionId }); }}>{t('session.delete')}</button>
         </div>}

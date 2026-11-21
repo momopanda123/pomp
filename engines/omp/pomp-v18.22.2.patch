@@ -1,0 +1,212 @@
+diff --git a/crates/pi-natives/src/desktop/win32/input.rs b/crates/pi-natives/src/desktop/win32/input.rs
+index 7544427de8..ffe486de1b 100644
+--- a/crates/pi-natives/src/desktop/win32/input.rs
++++ b/crates/pi-natives/src/desktop/win32/input.rs
+@@ -943,6 +943,7 @@ mod foreground {
+ 	struct ForegroundGuard {
+ 		previous: HWND,
+ 		target:   HWND,
++		target_pid: u32,
+ 		settle:   Duration,
+ 		armed:    bool,
+ 	}
+@@ -952,6 +953,16 @@ mod foreground {
+ 			control::check()?;
+ 			let target = background::hwnd(id)?;
+ 			background::ensure_integrity(id, target)?;
++			// Capture the owner before delivery: the target HWND can disappear when
++			// a click opens an independent window in the same process.
++			let mut target_pid = 0;
++			// SAFETY: `target_pid` is writable and Win32 validates the HWND.
++			unsafe { GetWindowThreadProcessId(target, &mut target_pid) };
++			if target_pid == 0 {
++				return Err(DesktopError::input_failed(
++					"the target's owning process is no longer available; no input was sent",
++				));
++			}
+ 			// SAFETY: GetForegroundWindow has no preconditions.
+ 			let previous = unsafe { GetForegroundWindow() };
+ 			if previous.is_null() {
+@@ -959,7 +970,7 @@ mod foreground {
+ 					"cannot save the current foreground window; no input was sent",
+ 				));
+ 			}
+-			let mut guard = Self { previous, target, settle, armed: true };
++			let mut guard = Self { previous, target, target_pid, settle, armed: true };
+ 			if previous != target {
+ 				let activation = (|| {
+ 					let _ = window::activate(target)?;
+@@ -997,9 +1008,19 @@ mod foreground {
+ 					return Ok(());
+ 				}
+ 				// SAFETY: GetAncestor validates the observed handle, including
+-				// null.
++				// null. Owned modals remain eligible for restoring the previous
++				// window; a new independent window of the target process does not.
+ 				let owner = unsafe { GetAncestor(current, GA_ROOTOWNER) };
+ 				if current != self.target && owner != self.target {
++					let mut current_pid = 0;
++					// SAFETY: IsWindow validates the observed HWND and Win32 validates
++					// the handle again; `current_pid` is writable.
++					if !current.is_null() && unsafe { IsWindow(current) } != 0 {
++						unsafe { GetWindowThreadProcessId(current, &mut current_pid) };
++					}
++					if current_pid == self.target_pid {
++						return Ok(());
++					}
+ 					return Err(DesktopError::input_failed(
+ 						"foreground changed during takeover; left the newly active window untouched",
+ 					));
+@@ -1673,7 +1694,13 @@ mod foreground {
+ 			let target = unsafe { GetDesktopWindow() };
+ 			assert_ne!(previous, target);
+ 			let called = Cell::new(false);
+-			let guard = ForegroundGuard { previous, target, settle: Duration::ZERO, armed: true };
++			let guard = ForegroundGuard {
++				previous,
++				target,
++				target_pid: 0,
++				settle: Duration::ZERO,
++				armed: true,
++			};
+ 			let result = guard.run(|_| {
+ 				called.set(true);
+ 				Ok(())
+diff --git a/crates/pi-natives/src/desktop/win32/window.rs b/crates/pi-natives/src/desktop/win32/window.rs
+index b6c82c79cc..c461158d98 100644
+--- a/crates/pi-natives/src/desktop/win32/window.rs
++++ b/crates/pi-natives/src/desktop/win32/window.rs
+@@ -23,7 +23,9 @@ use windows_sys::{
+ 				DPI_AWARENESS_CONTEXT, GetWindowDpiAwarenessContext,
+ 				PhysicalToLogicalPointForPerMonitorDPI, SetThreadDpiAwarenessContext,
+ 			},
+-			Input::KeyboardAndMouse::IsWindowEnabled,
++			Input::KeyboardAndMouse::{
++				INPUT, INPUT_0, INPUT_MOUSE, IsWindowEnabled, MOUSEEVENTF_MOVE, MOUSEINPUT, SendInput,
++			},
+ 			WindowsAndMessaging::{
+ 				CWP_SKIPDISABLED, CWP_SKIPINVISIBLE, CWP_SKIPTRANSPARENT, ChildWindowFromPointEx,
+ 				EnumChildWindows, GA_PARENT, GA_ROOT, GUITHREADINFO, GetAncestor, GetClassNameW,
+@@ -438,11 +440,37 @@ fn executable_is_any(hwnd: HWND, names: &[&str]) -> bool {
+ 
+ /// Requests activation without attaching to an untrusted input queue or
+ /// injecting a dummy key into whichever application currently has focus.
+-/// Foreground-lock refusal is handled by the caller before it sends input.
++///
++/// Windows hands the foreground over from another application only to the
++/// process that provided the last input. A host that has sent no input itself
++/// yet (its user last typed into another application, such as the IDE that
++/// launched it) is refused even for takeover. A zero-distance relative mouse
++/// move first makes this process that input provider: it moves no pointer and
++/// reaches no keyboard handler. A remaining refusal is handled by the caller
++/// before it sends input.
+ pub(super) fn activate(target: HWND) -> CoreResult<bool> {
+ 	control::check()?;
+-	// SAFETY: both functions take only OS-validated handles and scalar state.
++	let nudge = INPUT {
++		r#type:    INPUT_MOUSE,
++		Anonymous: INPUT_0 {
++			mi: MOUSEINPUT {
++				dx:          0,
++				dy:          0,
++				mouseData:   0,
++				dwFlags:     MOUSEEVENTF_MOVE,
++				time:        0,
++				dwExtraInfo: 0,
++			},
++		},
++	};
++	// SAFETY: these functions take only OS-validated handles and scalar state;
++	// `nudge` is one initialized INPUT copied synchronously by Win32.
+ 	unsafe {
++		if GetForegroundWindow() != target {
++			// A refused nudge (secure desktop, higher-integrity foreground) leaves
++			// the plain request below, whose refusal the caller reports.
++			SendInput(1, &nudge, size_of::<INPUT>() as i32);
++		}
+ 		SetForegroundWindow(target);
+ 		Ok(GetForegroundWindow() == target)
+ 	}
+diff --git a/packages/ai/src/auth-gateway/server.ts b/packages/ai/src/auth-gateway/server.ts
+index 9ed43122ac..99a499ed3e 100644
+--- a/packages/ai/src/auth-gateway/server.ts
++++ b/packages/ai/src/auth-gateway/server.ts
+@@ -810,6 +810,11 @@ interface ModelListRow {
+ 	max_output_tokens?: number;
+ 	input_modalities: ("text" | "image")[];
+ 	supports_tools?: boolean;
++	/**
++	 * POMP: the efforts `reasoning_effort` takes for this model, in ladder order; empty when it has no thinking to choose. A model
++	 * this PC found at run time is in no client's bundled catalog, so a client offers exactly these levels.
++	 */
++	reasoning_efforts: Effort[];
+ }
+ 
+ function handleModelsList(opts: AuthGatewayRouteOptions): Response {
+@@ -826,6 +831,7 @@ function handleModelsList(opts: AuthGatewayRouteOptions): Response {
+ 			api: model.api,
+ 			display_name: model.name,
+ 			input_modalities: model.input,
++			reasoning_efforts: [...getSupportedEfforts(model)],
+ 		};
+ 		if (modelKind(model) !== "chat") row.kind = modelKind(model);
+ 		if (model.contextWindow != null) row.context_length = model.contextWindow;
+diff --git a/packages/ai/test/auth-gateway-model-list.test.ts b/packages/ai/test/auth-gateway-model-list.test.ts
+index 197da3d383..eb7b02b3b2 100644
+--- a/packages/ai/test/auth-gateway-model-list.test.ts
++++ b/packages/ai/test/auth-gateway-model-list.test.ts
+@@ -6,11 +6,14 @@ import { startAuthGateway } from "@oh-my-pi/pi-ai/auth-gateway";
+ import { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
+ import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
+ 
+-test("model listing exposes one provider-qualified route per upstream model", async () => {
++test("model listing preserves provider routes and their supported reasoning efforts", async () => {
+ 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "gw-model-list-"));
+ 	const storage = await AuthStorage.create(path.join(dir, "auth.db"));
+-	const anthropic = createMockModel({ provider: "anthropic", id: "shared-model" });
+-	const devin = createMockModel({ provider: "devin", id: "shared-model" });
++	const anthropic = Object.assign(
++		createMockModel({ provider: "anthropic", id: "shared-model", reasoning: true }),
++		{ thinking: { mode: "effort" as const, efforts: ["low", "high"] as const } },
++	);
++	const devin = createMockModel({ provider: "devin", id: "shared-model", reasoning: false });
+ 	const handle = startAuthGateway({
+ 		bind: "127.0.0.1:0",
+ 		bearerTokens: [],
+@@ -35,6 +38,7 @@ test("model listing exposes one provider-qualified route per upstream model", as
+ 					context_length: 200_000,
+ 					max_output_tokens: 32_768,
+ 					input_modalities: ["text"],
++					reasoning_efforts: ["low", "high"],
+ 				},
+ 				{
+ 					id: "devin/shared-model",
+@@ -45,6 +49,7 @@ test("model listing exposes one provider-qualified route per upstream model", as
+ 					context_length: 200_000,
+ 					max_output_tokens: 32_768,
+ 					input_modalities: ["text"],
++					reasoning_efforts: [],
+ 				},
+ 			],
+ 		});
+diff --git a/packages/catalog/src/compat/rules/auth/antigravity-cli.kdl b/packages/catalog/src/compat/rules/auth/antigravity-cli.kdl
+--- a/packages/catalog/src/compat/rules/auth/antigravity-cli.kdl
++++ b/packages/catalog/src/compat/rules/auth/antigravity-cli.kdl
+@@ -8,4 +8,5 @@ auth "antigravity-cli" {
+ 	login "custom" hook="antigravity-cli"
++	paste-code #true
+ 	refresh hook="antigravity-cli"
+ 	api-key-format "structured"
+ }
+diff --git a/packages/coding-agent/src/edit/index.ts b/packages/coding-agent/src/edit/index.ts
+index ca61be7..4bb93a9 100644
+--- a/packages/coding-agent/src/edit/index.ts
++++ b/packages/coding-agent/src/edit/index.ts
+@@ -717,6 +717,7 @@ export class EditTool implements AgentTool<TInput> {
+ 				beforeMtimeMs: snapshot.mtimeMs,
+ 			});
+ 		};
++		signal?.throwIfAborted();
+ 		if (request.op === "delete") {
+ 			await deleteFileWithFallback(request.path, Bun.file(request.path));
+ 			journal(request.path, null);

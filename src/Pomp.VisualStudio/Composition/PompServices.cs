@@ -34,7 +34,7 @@ namespace Pomp.VisualStudio.Composition
         private static readonly TimeSpan RestartDebounce = TimeSpan.FromMilliseconds(750);
 
         private readonly object gate = new object();
-        private IPompSession? session;
+        private PompConversationHost? session;
         private bool sessionStartRequested;
         private CancellationTokenSource? restartDebounce;
         private LaunchSettings? requestedLaunchSettings;
@@ -90,8 +90,8 @@ namespace Pomp.VisualStudio.Composition
         public EditorSessionContext? RefreshEditorSession()
         {
             Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
-            IEditorSessionContextSource? source;
-            lock (gate) source = session as IEditorSessionContextSource;
+            PompConversationHost? source;
+            lock (gate) source = session;
             if (source == null) return null;
             var state = source.EditorSessionContext;
             EditorFollow.SetSession(state.WorkspaceRoot, state.SessionId, state.IsStreaming, state.TaskId, state.SessionTitle);
@@ -99,7 +99,7 @@ namespace Pomp.VisualStudio.Composition
         }
 
         /// <summary>The chat session (created on first use, on the UI thread).</summary>
-        public IPompSession Session
+        public PompConversationHost Session
         {
             get
             {
@@ -115,21 +115,21 @@ namespace Pomp.VisualStudio.Composition
             }
         }
         /// <summary>The selected conversation for editor commands that act on chat input or model context.</summary>
-        public IConversationSession ActiveSession => ((PompConversationHost)Session).ActiveSession;
+        public PompSession ActiveSession => Session.ActiveSession;
 
-        /// <summary>Stable invalidation source for optional editor capabilities across backend and tab switches.</summary>
+        /// <summary>Notifies editor features when another conversation is selected.</summary>
         public event EventHandler? ActiveSessionChanged;
 
         private void OnActiveSessionChanged(object? sender, EventArgs args) => ActiveSessionChanged?.Invoke(this, args);
 
-        /// <summary>The knowledge of the open workspace for the editor (menu, line colors): the session's, or null when it offers none or the services are disposed.</summary>
+        /// <summary>The selected conversation's knowledge for the editor, or null when the services are disposed.</summary>
         public IKnowledgeEditor? KnowledgeEditor
         {
             get
             {
                 try
                 {
-                    return ActiveSession as IKnowledgeEditor;
+                    return ActiveSession;
                 }
                 catch (ObjectDisposedException)
                 {
@@ -263,7 +263,7 @@ namespace Pomp.VisualStudio.Composition
         }
 
         /// <summary>Each open conversation receives its own registry and engine; the tool window keeps one UI owner.</summary>
-        private IPompSession CreateSession()
+        private PompConversationHost CreateSession()
         {
             ICustomToolRegistry CreateRegistry()
             {

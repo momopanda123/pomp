@@ -28,7 +28,7 @@ interface TaskDraft { mode: 'add' | 'edit'; phase: number | 'new'; task?: number
  * (idle: `startTask`, then the chat request of `onRunTask`; while the agent works: only the request, queued after the current turn)
  * and moved by dragging its handle or with Alt+Up/Down on it (`moveTask`).
  */
-export function AgentPlan({ root, session, sessionId, locale, disabled, busy, onContinue, onRunTask, onStop, layout = 'details', inert = false, selector, notices, actionPending = false, stopPending = false, editable = true, canContinue = true, canRun = true, canStop = true }: { root: string; session: SessionInfoPayload | null; sessionId?: string; locale: string; disabled: boolean; busy: boolean; onContinue: () => void; onRunTask: (task: string, marked: boolean) => SendResult; onStop: () => void; layout?: WorkLayout; inert?: boolean; selector?: ReactNode; notices?: ReactNode; actionPending?: boolean; stopPending?: boolean; editable?: boolean; canContinue?: boolean; canRun?: boolean; canStop?: boolean }) {
+export function AgentPlan({ root, session, sessionId, locale, disabled, busy, onContinue, onRunTask, onStop, layout = 'details', inert = false, selector, notices, actionPending = false, stopPending = false }: { root: string; session: SessionInfoPayload | null; sessionId?: string; locale: string; disabled: boolean; busy: boolean; onContinue: () => void; onRunTask: (task: string, marked: boolean) => SendResult; onStop: () => void; layout?: WorkLayout; inert?: boolean; selector?: ReactNode; notices?: ReactNode; actionPending?: boolean; stopPending?: boolean }) {
   const t = useT();
   const total = session?.planTaskCount ?? 0; const open = session?.planOpenCount ?? 0; const revision = session?.planRevision ?? '';
   const [query, setQuery] = useState(''); const [search, setSearch] = useState(''); const [page, setPage] = useState(0);
@@ -96,9 +96,9 @@ export function AgentPlan({ root, session, sessionId, locale, disabled, busy, on
   const pagedTasks = { page, pages, total: matching, from: matching ? page * PAGE_SIZE + 1 : 0, to: Math.min(matching, page * PAGE_SIZE + PAGE_SIZE), setPage };
   const working = busy || !!session?.hasPendingAsyncWork;
   const usable = !disabled && !inert && !pending && !!sessionId;
-  const canEdit = editable && usable && !working && data?.editable === true;
+  const canEdit = usable && !working && data?.editable === true;
   // While the agent works, leave its task in progress alone (the host checks again).
-  const canEditWorking = editable && usable && data?.editableWhileWorking === true;
+  const canEditWorking = usable && data?.editableWhileWorking === true;
   const inProgress = (status: string) => status === 'in_progress';
   const canEditRow = (row: PlanRow) => canEdit || (canEditWorking && !inProgress(row.status));
   const canAdd = canEdit || canEditWorking;
@@ -114,7 +114,6 @@ export function AgentPlan({ root, session, sessionId, locale, disabled, busy, on
   // under its turn: the request alone goes to the chat queue (or into the turn with Send now) and has the agent start the task itself.
   const scheduling = !canEdit && canEditWorking;
   const run = (row: PlanRow) => {
-    if (!canRun) return;
     if (!scheduling) {
       const id = edit({ op: 'startTask', phase: row.phase, task: row.task });
       if (id) runRequest.current = { id, content: row.content };
@@ -189,8 +188,8 @@ export function AgentPlan({ root, session, sessionId, locale, disabled, busy, on
     actions={<>
       {selector}
       <button type="button" className="btn small" data-testid="plan-add" disabled={!canAdd} onClick={startAdd}><Icon name="plus" size={12} />{t('work.plan.add')}</button>
-      <button type="button" className="btn small subtle" data-testid="plan-continue" disabled={!canContinue || disabled || inert || actionPending || pending || !total} onClick={() => { if (canContinue) onContinue(); }}><Icon name="play" size={12} />{t(working ? 'work.plan.queueContinue' : 'work.plan.continue')}</button>
-      <button type="button" className="btn small subtle" data-testid="plan-stop" disabled={!canStop || disabled || inert || stopPending || (!working && !actionPending && !runRequest.current)} onClick={() => { if (!canStop) return; runRequest.current = undefined; onStop(); }}><Icon name="stop" size={11} />{t('work.plan.stop')}</button>
+      <button type="button" className="btn small subtle" data-testid="plan-continue" disabled={disabled || inert || actionPending || pending || !total} onClick={onContinue}><Icon name="play" size={12} />{t(working ? 'work.plan.queueContinue' : 'work.plan.continue')}</button>
+      <button type="button" className="btn small subtle" data-testid="plan-stop" disabled={disabled || inert || stopPending || (!working && !actionPending && !runRequest.current)} onClick={() => { runRequest.current = undefined; onStop(); }}><Icon name="stop" size={11} />{t('work.plan.stop')}</button>
       {armed === 'clear-completed'
         ? <button type="button" className="btn small danger" data-testid="plan-clear-completed-confirm" disabled={!canClear} onClick={() => arm('clear-completed', () => edit({ op: 'clearCompleted' }))}>{t('work.plan.clearConfirm')}</button>
         : <button type="button" className="btn small subtle" data-testid="plan-clear-completed" disabled={!canClear} onClick={() => arm('clear-completed', () => edit({ op: 'clearCompleted' }))}><Icon name="trash" size={12} />{t('work.plan.clearCompleted')}</button>}
@@ -229,7 +228,7 @@ export function AgentPlan({ root, session, sessionId, locale, disabled, busy, on
             <Actions>
               {/* While the agent works, the task it is on needs no run of its own. */}
               <IconButton icon="play" label={t(scheduling ? 'work.plan.runAfter' : 'work.plan.run')}
-                disabled={!canRun || !canAdd || actionPending || row.status === 'completed' || (scheduling && inProgress(row.status))} onClick={() => run(row)} testId={`plan-run-${key}`} />
+                disabled={!canAdd || actionPending || row.status === 'completed' || (scheduling && inProgress(row.status))} onClick={() => run(row)} testId={`plan-run-${key}`} />
               <IconButton icon="edit" label={t('work.plan.edit')} disabled={!canEditRow(row)} onClick={() => startEdit(row)} testId={`plan-edit-${key}`} />
               {deleteButton(key, t('work.plan.delete'), canEditRow(row), () => edit({ op: 'deleteTask', phase: row.phase, task: row.task }))}
             </Actions>

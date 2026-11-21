@@ -36,7 +36,7 @@ namespace Pomp.Tools
                 Name = HostToolNames.EditBufferHashline,
                 Label = "Edit Buffer (hashline)",
                 Description =
-                    "Edit text through Visual Studio's editor buffer, preserving unsaved changes and using one undo step per file; needs file-write approval with a complete diff. " +
+                    "Edit an unsaved Visual Studio buffer, or make an explicitly requested buffer-only edit, with one undo step per file and file-write approval for the complete diff. For ordinary edits to saved files, even open ones, use the disk tools instead. " +
                     "Read files with read_buffer first. `input` contains [path#TAG] sections copied from read_buffer/get_editor_context, followed by operations on ORIGINAL lines: " +
                     "`PUT N.=M:` replaces inclusive lines N..M with following `+text` rows; `PUT <N:` / `PUT >N:` insert before/after line N; " +
                     "`PUT >$:` appends; `CUT N.=M` deletes. Each PUT needs at least one + row; a lone + means an empty line. " +

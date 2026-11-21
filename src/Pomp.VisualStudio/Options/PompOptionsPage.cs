@@ -471,6 +471,12 @@ namespace Pomp.VisualStudio.Options
         [Description("")]
         public bool WordCompletion { get; set; } = true;
 
+        [PompCategory("채팅", "Chat")]
+        [PompDisplayName("턴 벤치마크 표시", "Show turn benchmarks")]
+        [PompDescription("각 채팅 요청이 끝나면 경과 시간과 보고된 출력 토큰의 초당 생성 속도를 표시합니다. 토큰 사용량을 알 수 없으면 속도는 표시하지 않습니다.",
+            "Show elapsed time and reported output tokens per second after each chat request. Throughput is omitted when token usage is unavailable.")]
+        public bool ShowTurnBenchmarks { get; set; } = true;
+
         // Voice input (docs/settings.md "음성 입력"): the composer's microphone button dictates into the draft with a model that runs on this PC.
 
         [PompCategory("채팅", "Chat")]
@@ -704,6 +710,8 @@ namespace Pomp.VisualStudio.Options
         bool IPompSettings.ComposerPredictions => Applied.ComposerPredictions;
 
         bool IPompSettings.WordCompletion => Applied.WordCompletion;
+
+        bool IPompSettings.ShowTurnBenchmarks => Applied.ShowTurnBenchmarks;
 
         IReadOnlyCollection<string> IPompSettings.AlwaysAllowedPolicyKeys => Applied.AlwaysAllowedPolicyKeys;
 
@@ -1169,6 +1177,7 @@ namespace Pomp.VisualStudio.Options
                     page.EditorContextSelectedChars, page.EditorContextLineChars, page.EditorContextWindowChars, page.EditorContextErrors, page.EditorContextTimeoutSeconds);
                 ComposerPredictions = page.ComposerPredictions;
                 WordCompletion = page.WordCompletion;
+                ShowTurnBenchmarks = page.ShowTurnBenchmarks;
                 DictationModel = Enum.IsDefined(typeof(DictationModel), page.DictationModel) ? page.DictationModel : DictationModel.Balanced;
                 DictationLanguage = Dictation.NormalizeLanguage(page.DictationLanguage);
                 EnableCodeCaptions = page.EnableCodeCaptions;
@@ -1240,6 +1249,7 @@ namespace Pomp.VisualStudio.Options
                 EditorContextLimits = source.EditorContextLimits;
                 ComposerPredictions = source.ComposerPredictions;
                 WordCompletion = source.WordCompletion;
+                ShowTurnBenchmarks = source.ShowTurnBenchmarks;
                 DictationModel = source.DictationModel;
                 DictationLanguage = source.DictationLanguage;
                 EnableCodeCaptions = source.EnableCodeCaptions;
@@ -1325,6 +1335,8 @@ namespace Pomp.VisualStudio.Options
             public bool ComposerPredictions { get; }
 
             public bool WordCompletion { get; }
+
+            public bool ShowTurnBenchmarks { get; }
 
             public DictationModel DictationModel { get; }
 

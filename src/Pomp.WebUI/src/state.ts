@@ -1,4 +1,3 @@
-import type { BackendState, AcpState, AcpReply } from './backend';
 import { addAttachments, dismissMention, emptyComposer, fileFromAttachment, fileIdentity, receiveFiles, restoreRequestFiles, selectMention, updateMention, withoutMentions, type ComposerState } from './composerState';
 import { localeFromHost, makeTranslate, type Locale } from './i18n';
 import { sameRoot } from './knowledge';
@@ -34,6 +33,7 @@ import type {
   SessionInfoPayload,
   SendTarget,
   TurnStartedPayload,
+  TurnBenchmarkPayload,
   UiErrorInfo,
   WorkspaceFile,
 } from './protocol';
@@ -128,6 +128,14 @@ export interface AbortedItem {
   key: string;
 }
 
+/** One terminal measurement per prompt, independent of intermediate assistant messages and viewer settings. */
+export interface TurnBenchmarkItem {
+  kind: 'benchmark';
+  key: string;
+  promptId: string;
+  benchmark: TurnBenchmarkPayload;
+}
+
 /** How a permission request or question ended; 'handled' = the host closed it without an answer from this page. */
 export type RequestOutcome = 'allow' | 'deny' | 'always' | 'session' | 'expired' | 'cancelled' | 'answered' | 'handled';
 
@@ -176,6 +184,7 @@ export type TranscriptItem =
   | NoticeItem
   | TurnErrorItem
   | AbortedItem
+  | TurnBenchmarkItem
   | RequestItem
   | SessionResetItem
   | AdvisorNotesItem
@@ -206,9 +215,6 @@ export type PendingPermission = PermissionRequestPayload & { receivedAt: number 
 export type PendingDialog = DialogRequestPayload & { receivedAt: number; draft?: string };
 
 export interface AppState {
-  backend: BackendState | null;
-  acp: AcpState | null;
-  acpReplies: AcpReply[];
   locale: Locale;
   hello: HostHelloPayload | null;
   /** Which omp engine runs (`engine/info`); null until the host has started one. */
@@ -252,7 +258,6 @@ export interface AppState {
   pendingNewSession: string | undefined;
   /** The pending request when it starts a new conversation (session/new: /new, New conversation), not a tab or saved-conversation switch. */
   newConversationRequest: string | undefined;
-  backendSwitchRequest?: string;
   permissions: PendingPermission[];
   dialogs: PendingDialog[];
   /** Requests answered since the queue was last empty: drives the "2 / 3" counter of queued dialogs. */
@@ -299,9 +304,6 @@ export interface AppState {
 }
 
 export const initialState: AppState = {
-  backend: null,
-  acp: null,
-  acpReplies: [],
   locale: 'ko',
   hello: null,
   engine: null,
@@ -377,7 +379,7 @@ export type Action =
   | { type: 'attachmentRemove'; fullPath: string }
   | { type: 'dialogDraft'; requestId: string; text: string }
   /** session/new (`fresh`), a tab switch or a saved conversation was posted: wait for the host's `session/newResult` before touching the transcript. */
-  | { type: 'newSessionRequested'; requestId: string; fresh?: boolean; backendSwitch?: boolean }
+  | { type: 'newSessionRequested'; requestId: string; fresh?: boolean }
   /** A notice created by the page itself (nothing reached the host). */
   | { type: 'localNotice'; level: Level; message: string }
   | { type: 'permissionAnswered'; requestId: string; outcome: RequestOutcome; at: number }
@@ -505,11 +507,7 @@ function withItem(state: AppState, build: (key: string) => TranscriptItem, items
   return { ...state, items: [...items, build(`n:${state.seq}`)], seq: state.seq + 1 };
 }
 
-const ACP_STARTUP_DRAFT = 'antigravity-acp:pending';
-
-/** Native drafts follow partner tabs; every ACP conversation owns its own draft, including startup before it has an ID. */
-function tabKey(partner: ConversationPartner | undefined, backend = 'omp', sessionId?: string | null): string {
-  if (backend === 'antigravity-acp') return sessionId ? `antigravity-acp:session:${sessionId}` : ACP_STARTUP_DRAFT;
+function tabKey(partner: ConversationPartner | undefined): string {
   return partner && partner.kind !== 'main' ? `${partner.kind}:${partner.id ?? ''}` : 'main';
 }
 
@@ -518,15 +516,6 @@ function draftFor(state: AppState, key: string): AppState {
   if (key === state.composerTab) return state;
   const drafts = { ...state.drafts };
   const leaving: ComposerState = { ...state.composer, mention: null, pickerRequestId: undefined, composing: false };
-  if (state.composerTab === ACP_STARTUP_DRAFT && key.startsWith('antigravity-acp:session:')) {
-    const saved = drafts[key] ?? emptyComposer;
-    const text = saved.text && leaving.text ? `${saved.text}\n\n${leaving.text}` : saved.text || leaving.text;
-    const composer = addAttachments({ ...saved, text, composing: false, mention: null, pickerRequestId: undefined,
-      fileError: leaving.fileError ?? saved.fileError }, leaving.attachments);
-    delete drafts[ACP_STARTUP_DRAFT];
-    delete drafts[key];
-    return { ...state, composer, composerTab: key, drafts, dictation: null, dictationReply: null };
-  }
   if (leaving.text || leaving.attachments.length > 0 || leaving.requestFiles?.length) drafts[state.composerTab] = leaving;
   else delete drafts[state.composerTab];
   const composer = drafts[key] ?? emptyComposer;
@@ -539,12 +528,9 @@ function draftForTabs(state: AppState): AppState {
   const tabs = state.tabs;
   if (!tabs || (state.session?.sessionId && tabs.sessionId !== state.session.sessionId) ||
     (state.session?.workingDirectory && !sameRoot(tabs.root, state.session.workingDirectory))) return state;
-  if (state.session?.backend && (tabs.backend ?? 'omp') !== state.session.backend) return state;
-  if (state.session?.backend === 'antigravity-acp' && (tabs.sessionId ?? undefined) !== state.session.sessionId) return state;
-  const key = tabKey(tabs.partner, tabs.backend ?? state.session?.backend ?? state.backend?.active, tabs.sessionId);
+  const key = tabKey(tabs.partner);
   const next = draftFor(state, key);
-  // Startup can stage editor input before the host has an ID to list. Confirmed ACP drafts survive only while their tabs are open.
-  const open = new Set(['main', ACP_STARTUP_DRAFT, key, ...(tabs.tabs ?? []).map(tab => tabKey(tab.partner, tab.backend, tab.sessionId))]);
+  const open = new Set(['main', key, ...(tabs.tabs ?? []).map(tab => tabKey(tab.partner))]);
   const closed = Object.keys(next.drafts).filter(key => !open.has(key));
   if (closed.length === 0) return next;
   const drafts = { ...next.drafts };
@@ -560,9 +546,7 @@ function draftForTabs(state: AppState): AppState {
 function clearedForNewSession(state: AppState, fresh: boolean): AppState {
   return {
     ...state,
-    // Native New reuses a partner draft and drops its old basket. ACP switches to a separate session key: never clear the previous
-    // owner's basket, or input already staged for the new owner before this result arrived.
-    composer: fresh && !state.composerTab.startsWith('antigravity-acp:') ? { ...state.composer, attachments: [], fileError: undefined } : state.composer,
+    composer: fresh ? { ...state.composer, attachments: [], fileError: undefined } : state.composer,
     items: [],
     pendingSends: [],
     pendingQueued: [],
@@ -586,17 +570,6 @@ function clearedForNewSession(state: AppState, fresh: boolean): AppState {
 
 function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
   switch (msg.type) {
-    case 'backend/state': {
-      const changed = (state.backend?.active ?? state.session?.backend ?? 'omp') !== msg.payload.active;
-      const next = { ...state, backend: msg.payload, acp: changed ? null : state.acp, selectedTarget: changed ? undefined : state.selectedTarget };
-      // Backend state has no conversation ID. Stage input until session/info or matching tab metadata identifies its owner.
-      return changed ? draftFor(next, tabKey(state.tabs?.backend === msg.payload.active ? state.tabs.partner : undefined, msg.payload.active)) : next;
-    }
-    case 'acp/state':
-      // A history load that failed never sends its replay end: a session that reports a failure or a sign-in is not replaying any more.
-      return state.replaying && !msg.payload.connected && (!!msg.payload.error || msg.payload.authRequired)
-        ? { ...state, acp: msg.payload, replaying: false, replayRevision: state.replayRevision + 1 } : { ...state, acp: msg.payload };
-    case 'acp/reply': return { ...state, acpReplies: [...state.acpReplies.filter(reply => reply.requestId !== msg.payload.requestId), msg.payload].slice(-40) };
     case 'composer/prediction': return state;
     case 'rules/active': {
       const payload = msg.payload;
@@ -658,11 +631,9 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
     case 'composer/prefill': {
       // A target (the editor menu's "to agent or team") becomes the one-message send target; App shows the main conversation for it.
       const payload = boundedPrefill(msg.payload);
-      const native = (state.backend?.active ?? state.session?.backend ?? state.tabs?.backend ?? 'omp') === 'omp';
-      // Only OMP editor requests redirect to its Default partner tab. ACP retains the selected conversation and its basket.
       const scoped = !!payload.requestFiles?.length;
-      const base = native && !scoped && (payload.send || payload.target || payload.pickTarget) ? draftFor(state, 'main') : state;
-      return { ...base, prefill: { payload, seq: (state.prefill?.seq ?? 0) + 1 }, selectedTarget: scoped ? state.selectedTarget : native ? payload.target ?? state.selectedTarget : undefined };
+      const base = !scoped && (payload.send || payload.target || payload.pickTarget) ? draftFor(state, 'main') : state;
+      return { ...base, prefill: { payload, seq: (state.prefill?.seq ?? 0) + 1 }, selectedTarget: scoped ? state.selectedTarget : payload.target ?? state.selectedTarget };
     }
     case 'knowledge/draft': {
       const payload = boundedKnowledgeDraft(msg.payload);
@@ -701,7 +672,7 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
         pendingSends: [],
         pendingQueued: state.pendingQueued.map(item => item.failed ? item : { ...item, failed: { code: 'queue_unconfirmed', message: makeTranslate(state.locale)('queue.unconfirmed'), retryable: false } }),
         composer: { ...state.composer, mention: null, pickerRequestId: undefined, composing: false },
-        pendingNewSession: state.pendingNewSession === state.backendSwitchRequest ? state.pendingNewSession : undefined,
+        pendingNewSession: undefined,
         newConversationRequest: undefined,
         dictation: state.dictation ? { ...state.dictation, state: 'idle' } : null,
         dictationReply: null,
@@ -742,7 +713,6 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
       let next: AppState = { ...state, session, activeRules: restarted || workspaceChanged ? [] : state.activeRules,
         selectedTarget: restarted ? undefined : state.selectedTarget, sendError: restarted ? undefined : state.sendError, btw: restarted ? null : state.btw,
         dictation: restarted ? null : state.dictation, dictationReply: restarted ? null : state.dictationReply };
-      if (session.backend === 'antigravity-acp') next = draftFor(next, tabKey(undefined, session.backend, session.sessionId));
       if (before !== session.sessionId || workspaceChanged) next = draftForTabs(next);
       // omp continues in another session (restart, `/new`): mark the boundary, what is above is not part of its context.
       if (restarted && state.items.length > 0 && state.items[state.items.length - 1]!.kind !== 'sessionReset') {
@@ -1030,10 +1000,7 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
     case 'chat/toolEnd': {
       const { toolCallId, toolName, isError, resultText, durationMs } = msg.payload;
       if (!toolCallId) return state;
-      // ACP terminal updates are merged snapshots of one session-scoped call, including patches after completion.
-      const index = (state.backend?.active ?? state.session?.backend) === 'antigravity-acp'
-        ? findLastIndex(state.items, item => item.kind === 'tool' && item.toolCallId === toolCallId)
-        : findUnfinishedTool(state.items, toolCallId);
+      const index = findUnfinishedTool(state.items, toolCallId);
       if (index < 0) {
         // The start was missed: still show the result.
         return withItem(state, (key) => ({
@@ -1062,7 +1029,7 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
     }
 
     case 'chat/turnEnd': {
-      const { promptId, status, error } = msg.payload;
+      const { promptId, status, error, benchmark } = msg.payload;
       const owner = state.activePromptId;
       const own = findUserByPrompt(state.items, promptId);
       // The end of the running turn. Without an owner the ending turn counts as the running one when this page never saw it
@@ -1079,12 +1046,12 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
       // A prompt the host rejected as busy never ran: what is in flight belongs to the agent run that made it answer "busy".
       const rejected = status === 'error' && error?.code === 'busy';
       const items = rejected ? state.items : finalizeInFlight(state.items);
-      const ended: AppState = { ...state, phase: !state.replaying && state.pendingSends.length > 0 ? 'sending' : 'idle', activePromptId: undefined };
+      let ended: AppState = { ...state, items, phase: !state.replaying && state.pendingSends.length > 0 ? 'sending' : 'idle', activePromptId: undefined };
       if (status === 'error') {
         const info: UiErrorInfo = error ?? { code: 'error', message: '', retryable: false };
         // "Retry" resends the message of the turn that failed, not whatever the newest user message is.
         const user = own >= 0 ? (state.items[own] as UserItem) : undefined;
-        return withItem(
+        ended = withItem(
           ended,
           (key) => ({
             kind: 'turnError',
@@ -1097,11 +1064,12 @@ function applyHost(state: AppState, msg: HostMessage, at: number): AppState {
             retryRequestFiles: user?.requestFiles,
             retryTarget: user?.target,
           }),
-          items,
+          ended.items,
         );
       }
-      if (status === 'aborted') return withItem(ended, (key) => ({ kind: 'aborted', key }), items);
-      return { ...ended, items };
+      if (status === 'aborted') ended = withItem(ended, (key) => ({ kind: 'aborted', key }));
+      return !rejected && benchmark && !ended.items.some(item => item.kind === 'benchmark' && item.promptId === promptId)
+        ? withItem(ended, (key) => ({ kind: 'benchmark', key, promptId, benchmark })) : ended;
     }
 
     case 'chat/notice':
@@ -1387,7 +1355,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'newSessionRequested':
       // One request at a time (the button is disabled meanwhile, and the handler checks before posting).
       return state.pendingNewSession === undefined
-        ? { ...state, pendingNewSession: action.requestId, backendSwitchRequest: action.backendSwitch ? action.requestId : undefined, newConversationRequest: action.fresh ? action.requestId : undefined } : state;
+        ? { ...state, pendingNewSession: action.requestId, newConversationRequest: action.fresh ? action.requestId : undefined } : state;
 
     case 'localNotice':
       return withItem(state, (key) => ({ kind: 'notice', key, level: action.level, message: action.message }));

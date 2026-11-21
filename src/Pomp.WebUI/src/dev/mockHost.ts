@@ -28,14 +28,13 @@
  *   switch    = ok (default) | error | slow   switch session and replay a short transcript
  *   messages  = ok (default) | error | slow   40-message pages with nextCursor
  *   knowledgeDraft = 1   the editor's "Add to Knowledge > New" arrives at the start (knowledge/draft), as window.pompMockHost.knowledge.draft() sends it later
- *   acp = connected | auth | missing | error | exited | busy   start with the Antigravity (ACP) conversation selected (see mockBackend.ts);
- *               without it the backend picker switches to it, connected
  *
  * Whatever the scenario, typing a message in the composer starts a turn of the scenario's kind.
  *
  * Sign-in (login command) follows the provider: openai-codex opens a browser link and finishes by itself, anthropic asks for an
  * authorization code (answerPrompt; "wrong-code" is refused once), github-copilot shows a device code, google-antigravity fails
- * because it needs a terminal (the page offers loginConsole), every other provider finishes like openai-codex. openai-codex-device and
+ * because it needs a terminal, and antigravity-cli asks for risk consent before showing the login link and code input.
+ * Other providers finish like openai-codex. openai-codex-device and
  * zai-coding-plan are sign-in methods that store as openai-codex / zai: they sign that provider in and are never listed as authenticated.
  */
 import { DEFAULT_SHORTCUTS } from '../protocol';
@@ -81,7 +80,6 @@ import type { ConversationPartner } from '../conversationProtocol';
 import { createMockKnowledge } from './mockKnowledge';
 import { createMockAdvisors } from './mockAdvisors';
 import { createMockWork } from './mockWork';
-import { createMockBackend, type MockBackend } from './mockBackend';
 
 declare global {
   interface Window {
@@ -282,6 +280,7 @@ const PROVIDER_NAMES: [string, string][] = [
   ['github-copilot', 'GitHub Copilot'],
   ['google-gemini-cli', 'Google Cloud Code Assist (Gemini CLI)'],
   ['google-antigravity', 'Antigravity (Gemini 3, Claude, GPT-OSS)'],
+  ['antigravity-cli', 'Antigravity CLI (Gemini, Claude, GPT-OSS)'],
   ['openai', 'OpenAI'],
   ['google', 'Google Gemini'],
   ['xai', 'xAI Grok'],
@@ -507,16 +506,10 @@ export function installMockHost(): void {
     window.setTimeout(() => listeners.forEach((listener) => listener({ data })), 0);
   };
   const post = <K extends HostMessageType>(type: K, payload: HostToUi[K]): void => {
-    // While the Antigravity conversation is shown, the native conversation's frames stay with the host (mockBackend).
-    if (backend.holds(type)) return;
     const message = { type, payload };
     if (ready) deliver(message);
     else backlog.push(message);
   };
-  const backend: MockBackend = createMockBackend(post, {
-    root: MOCK_ROOT, ko: opts.locale.startsWith('ko'), nativeSession: () => sessionId, stopNative: () => stopTurn(),
-    showNative: () => { if (bridgeRunning) post('bridge/state', { state: 'running' }); else void bridgeStart(); postSession(streaming); conversations.snapshot(); postCommands(); },
-  });
   // Work tab data (?work=1 | active); session/info is reposted when the plan changes.
   const work = createMockWork(post, MOCK_ROOT, () => sessionId, () => postSession(streaming), () => conversations.tabs.sessions());
 
@@ -1547,6 +1540,10 @@ export function installMockHost(): void {
         login = { state: 'running', provider, url: 'https://github.com/login/device', instructions: 'Enter the device code ABCD-1234 on the page that opened.', progress: 'Waiting for authorization' };
         loginTimers.push(later(4_000, () => finishLogin(provider)));
         break;
+      case 'antigravity-cli':
+        login = { state: 'running', provider, prompt: { id: `prompt-${++promptCounter}`, kind: 'consent', placeholder: 'yes',
+          message: 'Google explicitly supports ACP-compatible editors, but its guidance on third-party coding agents is inconsistent. This provider uses the official agy CLI over ACP with your Antigravity login.' } };
+        break;
       case 'google-antigravity':
         login = { state: 'running', provider, progress: 'Starting the sign-in' };
         loginTimers.push(later(1_200, () => finishLogin(provider, 'This provider needs a terminal: the secret must be typed in a console window (stdin is not available here).')));
@@ -1596,6 +1593,9 @@ export function installMockHost(): void {
         loginTimers.push(later(3_000, () => finishLogin(provider ?? 'openai')));
         break;
       }
+      case 'answerPromptFromClipboard':
+        postSetup(requestId, 'Native clipboard access requires Visual Studio. Paste the code in the input instead.');
+        break;
       case 'answerPrompt': {
         const prompt = login.prompt;
         if (login.state !== 'running' || !prompt || prompt.id !== command.promptId) {
@@ -1604,6 +1604,17 @@ export function installMockHost(): void {
         }
         if (command.value === undefined) {
           finishLogin(login.provider, 'The sign-in was cancelled.');
+          postSetup(requestId);
+          break;
+        }
+        if (prompt.kind === 'consent') {
+          if (command.value !== 'yes') {
+            finishLogin(login.provider, 'The sign-in was cancelled.');
+          } else {
+            login = { state: 'running', provider: login.provider, url: 'https://auth.example.com/antigravity-cli',
+              instructions: 'Sign in with Google, then copy the authorization code or callback URL.',
+              prompt: { id: `prompt-${++promptCounter}`, kind: 'authorizationCode', message: 'Paste the authorization code (or callback URL)' } };
+          }
           postSetup(requestId);
           break;
         }
@@ -2145,7 +2156,6 @@ export function installMockHost(): void {
     postProjectHooks();
     work.snapshot();
     postInteractive();
-    backend.snapshot();
     // The real host sends engine/info at every engine start and in the ui/ready snapshot.
     if (opts.engine === 'bundled') post('engine/info', { source: 'bundled', version: '18.20.0', verified: true, expectedVersion: '18.20.0' });
     else if (opts.engine === 'settings') post('engine/info', { source: 'settings', version: '18.9.0', verified: false, expectedVersion: '18.20.0', path: 'D:\\tools\\omp-next\\omp.exe' });
@@ -2185,7 +2195,7 @@ export function installMockHost(): void {
     postMessage(message: unknown): void {
       sent.push(message);
       const { type, payload } = (message ?? {}) as { type?: string; payload?: Record<string, unknown> };
-      if (type && (backend.handle(type, payload) || work.handle(type, payload) || mockTools({ type, payload }) || conversations.handle(type, payload))) return;
+      if (type && (work.handle(type, payload) || mockTools({ type, payload }) || conversations.handle(type, payload))) return;
       switch (type) {
         case 'ui/ready':
           onReady();

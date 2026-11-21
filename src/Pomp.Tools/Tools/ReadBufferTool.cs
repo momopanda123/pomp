@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
+using Pomp.Adapters;
 
 namespace Pomp.Tools
 {
@@ -39,8 +40,8 @@ namespace Pomp.Tools
                     "For large files use outline=true to get a bounded symbol summary with line numbers and nesting instead of source rows, then read only the needed ranges. " +
                     "An outline keeps the TAG but does not mark any source lines as shown; read the complete anchor/range before editing. " +
                     "Do not combine outline=true with startLine or endLine. " +
-                    "Use it instead of the built-in read for files that may have unsaved changes in Visual Studio (the built-in read only sees the file on disk). " +
-                    "Do not overwrite a file that has unsaved changes with tools that write to disk: ask the user to save it in Visual Studio first. " +
+                    "Use it to check the live content of an open file. For ordinary edits to saved files use disk tools and their own anchors, not this TAG. " +
+                    "Never overwrite unsaved buffer changes on disk. " +
                     "Paths outside the workspace root are rejected.",
                 Parameters = new SchemaBuilder()
                     .String("path", "File path, absolute or relative to the workspace root (forward or back slashes).", required: true, minLength: 1)
@@ -107,10 +108,7 @@ namespace Pomp.Tools
 
                 // Retain the version/TAG but grant no new anchors: signatures can be shortened or omit literals.
                 var outlineEntry = Context.Snapshots.Record(fullPath, view.ContentHash, view.Lines, 1, 0);
-                if (view.IsDirty)
-                {
-                    summary.Append("\n[unsaved changes: showing the editor buffer, not the file on disk]");
-                }
+                AppendEditorState(summary, snapshot);
 
                 if (outlineEntry == null)
                 {
@@ -163,10 +161,7 @@ namespace Pomp.Tools
 
             var entry = Context.Snapshots.Record(fullPath, view.ContentHash, view.Lines, start, end);
 
-            if (view.IsDirty)
-            {
-                builder.Append("\n[unsaved changes: showing the editor buffer, not the file on disk]");
-            }
+            AppendEditorState(builder, snapshot);
 
             if (entry == null)
             {
@@ -203,6 +198,14 @@ namespace Pomp.Tools
             builder.Append("\n[contentHash: ").Append(view.ContentHash).Append(']');
             details["contentHash"] = view.ContentHash;
             return HostToolResult.Text(builder.ToString(), details);
+        }
+
+        private static void AppendEditorState(StringBuilder text, BufferSnapshot snapshot)
+        {
+            if (snapshot.IsDirty)
+                text.Append("\n[unsaved changes: showing the editor buffer, not the file on disk]");
+            else if (snapshot.IsOpenInEditor)
+                text.Append("\n[open in Visual Studio; editor reports saved. For a disk edit, read the disk file for its own anchors.]");
         }
 
         private static bool IsDirectory(string fullPath)

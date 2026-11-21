@@ -407,12 +407,6 @@ namespace Pomp.Hosting
         private void QueueResourceCommand(UiMessage message, string reply, Func<JObject, Task> handler)
         {
             var payload = message.Payload ?? new JObject();
-            // External-app file setup neither uses the chat engine nor waits behind a prompt held by the serial queue.
-            if (reply == UiMessageTypes.McpReply && payload.GetString("action") is "antigravity-refresh" or "antigravity-set")
-            {
-                HandleAntigravityMcpAsync(payload).Forget(_logger, "Antigravity MCP configuration");
-                return;
-            }
             // Reading a list or one file for the editor stays allowed while a reply runs; changes wait.
             var reject = ResourcesBusy() && (reply == UiMessageTypes.ToolsReply || payload.GetString("action") is not ("refresh" or "read" or "get"));
             if (reject) _ui.Post(reply, new UiCommandReplyPayload { RequestId = payload.GetString("requestId") ?? "", Ok = false, Error = ResourceBusyMessage() }, UiDelivery.State);
@@ -739,64 +733,11 @@ namespace Pomp.Hosting
             lock (_stateLock)
             {
                 view.RestartRequired = _mcpRestartRequired;
-                view.Antigravity = _mcpView.Antigravity;
                 if (_mcpRestartRequired) view.Message = PompLanguage.Pick("변경 내용이 아직 적용되지 않았어요.", "The changes are not applied yet.");
                 _mcpView = view;
             }
             PublishMcp();
         }
-        private async Task<AntigravityMcpSetup> AntigravityMcpFilesAsync()
-        {
-            // _workingDirectory is initialized only when omp starts, and may itself be the fallback. Resolve the
-            // actual IDE workspace even before sign-in/start; never send the host's internal data/workspace to an app.
-            var root = await TryGetWorkspaceRootAsync().ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(root) || string.Equals(NormalizePath(root), NormalizePath(Path.Combine(_environment.DataDirectory, "workspace")), StringComparison.OrdinalIgnoreCase)) root = null;
-            return new AntigravityMcpSetup(root, _options.UserHome, _environment.ExtensionDirectory, _options.AntigravityInstallationLocator);
-        }
-
-        // A stopped engine retains its switch flag until its next launch. It must not prevent independent app
-        // setup in the current IDE project; the workspace-specific name still rejects a previous project's click.
-        private bool AntigravityWorkspaceChanging() => Volatile.Read(ref _workspaceSwitching) != 0 && _bridge.State != BridgeState.Stopped;
-
-        private async Task HandleAntigravityMcpAsync(JObject payload)
-        {
-            var id = payload.GetString("requestId") ?? "";
-            string? error = null;
-            AntigravityMcpStatePayload? view = null;
-            try
-            {
-                var command = new UiMessage("", payload).PayloadAs<McpCommandPayload>() ?? throw new ArgumentException();
-                var files = await AntigravityMcpFilesAsync().ConfigureAwait(false);
-                if (command.Action == "antigravity-set")
-                {
-                    if (payload["enabled"]?.Type != JTokenType.Boolean || !command.Enabled.HasValue)
-                        throw new ArgumentException("Antigravity configuration requires an explicit enabled boolean.");
-                    // Resolve again after any asynchronous IDE hop. The snapshot name pins this exact root, while
-                    // the service's opaque revision pins both selected config path and all of its bytes.
-                    files = await AntigravityMcpFilesAsync().ConfigureAwait(false);
-                    if (AntigravityWorkspaceChanging()) throw new InvalidOperationException(WorkspaceSwitchBlock());
-                    _disposeCts.Token.ThrowIfCancellationRequested();
-                    view = files.SetEnabled(command.Name, command.ExpectedHash, command.Enabled.Value);
-                }
-                else view = files.Inspect();
-            }
-            catch (Exception ex)
-            {
-                error = ResourceError(ex);
-                try { view = (await AntigravityMcpFilesAsync().ConfigureAwait(false)).Inspect(); }
-                catch (Exception refreshError) { view = new AntigravityMcpStatePayload { Message = ResourceError(refreshError) }; }
-            }
-            if (view != null && AntigravityWorkspaceChanging())
-            {
-                view.CanConfigure = false;
-                view.CanDisable = false;
-                view.Message = WorkspaceSwitchBlock();
-            }
-            lock (_stateLock) _mcpView.Antigravity = view;
-            PublishMcp();
-            _ui.Post(UiMessageTypes.McpReply, new McpReplyPayload { RequestId = id, Ok = error == null, Error = error }, UiDelivery.State);
-        }
-
         private async Task HandleMcpAsync(JObject payload)
         {
             var id = payload.GetString("requestId") ?? ""; string? error = null, output = null;

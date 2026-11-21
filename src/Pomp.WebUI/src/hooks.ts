@@ -107,10 +107,8 @@ export function fileUriPaths(list: string): string[] {
  *   Solution Explorer's selection, the dragged items.
  * Plain text dragged from the editor still drops into the composer.
  */
-export function useFileDrops(unsupported: () => string, enabled = true, unavailable?: () => string): void {
+export function useFileDrops(unsupported: () => string): void {
   const message = useRef(unsupported); message.current = unsupported;
-  const allowed = useRef(enabled); allowed.current = enabled;
-  const refused = useRef(unavailable); refused.current = unavailable;
   useEffect(() => {
     const handled = (event: DragEvent): boolean => {
       const types = event.dataTransfer?.types;
@@ -123,7 +121,6 @@ export function useFileDrops(unsupported: () => string, enabled = true, unavaila
     const drop = (event: DragEvent): void => {
       if (!handled(event)) return;
       event.preventDefault();
-      if (!allowed.current) { const text = refused.current?.(); if (text) send('ui/status', { text, level: 'warning' }); return; }
       const data = event.dataTransfer!; const webview = window.chrome?.webview;
       if (!webview) return;
       if (!data.types.length) { send('ui/dropFiles', { projectItems: true }); return; }

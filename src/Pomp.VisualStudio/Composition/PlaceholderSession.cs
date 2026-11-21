@@ -151,6 +151,7 @@ namespace Pomp.VisualStudio.Composition
                 IncludeEditorContextByDefault = settings.IncludeEditorContextByDefault,
                 ComposerPredictions = settings.ComposerPredictions,
                 WordCompletion = settings.WordCompletion,
+                ShowTurnBenchmarks = settings.ShowTurnBenchmarks,
             }));
 
             Post(new UiMessage(UiMessageTypes.BridgeState, new BridgeStatePayload

@@ -140,9 +140,17 @@ namespace Pomp.Features.ModelShare
             if (name.Length > 253) return false;
             if (Ipv4Like.IsMatch(name))
             {
-                // Digits and dots only: it has to be a full dotted IPv4 address (no "10.1" shorthand).
-                if (name.Split('.').Length != 4 || !IPAddress.TryParse(name, out var ip) || ip.AddressFamily != AddressFamily.InterNetwork) return false;
-                name = ip.ToString();
+                // The Remote form accepts four decimal octets, including padded ones. IPAddress.TryParse
+                // interprets leading zeros as octal, which can reject the address or connect to a different PC.
+                var parts = name.Split('.');
+                if (parts.Length != 4) return false;
+                var octets = new byte[4];
+                for (var i = 0; i < octets.Length; i++)
+                {
+                    if (parts[i].Length > 3 || !byte.TryParse(parts[i], NumberStyles.None, CultureInfo.InvariantCulture, out octets[i])) return false;
+                }
+
+                name = new IPAddress(octets).ToString();
             }
 
             if (match.Groups["port"].Success)

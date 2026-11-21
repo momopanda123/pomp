@@ -1,4 +1,3 @@
-import { capabilities as sessionCapabilities, type BackendId, type SessionCapabilities } from './backend';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { newId } from './format';
 import { makeTranslate } from './i18n';
@@ -18,7 +17,7 @@ const CHAT_ACTIONS: Partial<Record<HistoryAction, true>> = { rename: true, compa
  */
 export function useSessionHistory(workspaceKey: string, sessionId: string | undefined, connected: boolean, locale: string,
   onSwitch: (requestId: string, root: string, id: string) => boolean, onChatNotice: (message: string) => void,
-  capabilities = sessionCapabilities(null, 'omp').history, backend: BackendId = 'omp', pendingSwitch?: string) {
+  pendingSwitch?: string) {
   const [state, setState] = useState<SessionHistoryState>({ root: '', entries: [] });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -29,11 +28,6 @@ export function useSessionHistory(workspaceKey: string, sessionId: string | unde
   const currentSession = useRef(sessionId); currentSession.current = sessionId;
   const refreshNeeded = useRef(true);
   const t = makeTranslate(locale.startsWith('ko') ? 'ko' : 'en');
-  const allowed = (action: HistoryAction): boolean => {
-    const key: keyof SessionCapabilities['history'] = action === 'refresh' ? 'list' : action === 'switch' ? 'resume' : action === 'messages' ? 'preview' : action;
-    return capabilities[key];
-  };
-
   useEffect(() => {
     for (const request of requests.current.values()) window.clearTimeout(request.timer);
     requests.current.clear(); setPending(false); setPendingId(undefined); setState({ root: '', entries: [] }); setError('');
@@ -60,7 +54,7 @@ export function useSessionHistory(workspaceKey: string, sessionId: string | unde
       off(); for (const request of requests.current.values()) window.clearTimeout(request.timer);
       requests.current.clear();
     };
-  }, [workspaceKey, backend]);
+  }, [workspaceKey]);
   useEffect(() => {
     if (connected) return;
     for (const request of requests.current.values()) window.clearTimeout(request.timer);
@@ -81,7 +75,6 @@ export function useSessionHistory(workspaceKey: string, sessionId: string | unde
   }, []);
 
   const command = useCallback((action: HistoryAction, value?: string, selection?: { root: string; sessionId: string }): boolean => {
-    if (!allowed(action)) { onChatNotice(t('acp.noHistory')); return false; }
     if (!connected || currentScope.current !== workspaceKey || currentSession.current !== sessionId || busyFor(action)) return false;
     const fail = (message: string): void => { if (CHAT_ACTIONS[action]) onChatNotice(message); else setError(message); };
     if (action === 'rename' && (!value?.trim() || value.trim().length > 120 || /[\p{Cc}\p{Cf}]/u.test(value))) {
@@ -115,7 +108,7 @@ export function useSessionHistory(workspaceKey: string, sessionId: string | unde
       window.clearTimeout(timer); requests.current.delete(requestId); setPending(requests.current.size > 0); setPendingId(undefined); fail(t('error.hostUnavailable')); return false;
     }
     return true;
-  }, [connected, workspaceKey, onSwitch, onChatNotice, busyFor, sessionId, t, capabilities]);
+  }, [connected, workspaceKey, onSwitch, onChatNotice, busyFor, sessionId, t]);
 
   const commandRef = useRef(command); commandRef.current = command;
   useEffect(() => {
@@ -131,7 +124,7 @@ export function useSessionHistory(workspaceKey: string, sessionId: string | unde
   useEffect(() => {
     if (connected && refreshNeeded.current && commandRef.current('refresh')) refreshNeeded.current = false;
   }, [workspaceKey, sessionId, connected, pending]);
-  return { state, pending, pendingId, error, command, busyFor, allowed, backend };
+  return { state, pending, pendingId, error, command, busyFor };
 }
 
 export type SessionHistoryController = ReturnType<typeof useSessionHistory>;
