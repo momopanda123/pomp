@@ -6,11 +6,11 @@
     PompOmpNoticesSha256 pins the notices build/build-omp.ps1 composes from the tag (the text of omp's license option).
   -->
   <PropertyGroup>
-    <PompOmpVersion>18.21.0</PompOmpVersion>
+    <PompOmpVersion>18.22.2</PompOmpVersion>
     <PompOmpAsset>omp.exe</PompOmpAsset>
-    <PompOmpSource>oh-my-pi@6f03614d761366972e80e84e25d1418ed678d2c7 + engines/omp/pomp-v18.21.0.patch + engines/omp/gpt-6.2-v18.21.0.patch (upstream 2dedb850ac86e73aadc385e5b9cf08eac096e475) + src/Pomp.McpServer</PompOmpSource>
-    <PompOmpSha256>3a748b1bb3fbcb679109a9930bfa53ad222ba363bd1ab756cecdec64faca1b34</PompOmpSha256>
-    <PompOmpSize>254009856</PompOmpSize>
-    <PompOmpNoticesSha256>d763dc4998ee0950ff91812c828b4c57082b395c16510e757df720d49100dbdf</PompOmpNoticesSha256>
+    <PompOmpSource>oh-my-pi@e1ae2cc998efd1ca151b46ebefc0e0dab6c23c63 + engines/omp/pomp-v18.22.2.patch</PompOmpSource>
+    <PompOmpSha256>62432b950dd5213b4430ea572e72e606e10ae09716cf522f7ea06b211af2c7a7</PompOmpSha256>
+    <PompOmpSize>254779392</PompOmpSize>
+    <PompOmpNoticesSha256>7b8637fbec4d504d08174d5e202998f1fdda4bbb8276cdd4d4bb27b956e311d8</PompOmpNoticesSha256>
   </PropertyGroup>
 </Project>

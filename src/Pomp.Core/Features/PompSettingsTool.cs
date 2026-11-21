@@ -102,6 +102,7 @@ namespace Pomp.Features
                     ["editorContext"] = EditorContext((settings as IEditorContextSettings)?.EditorContextLimits ?? EditorContextLimits.Default),
                     ["composerPredictions"] = settings.ComposerPredictions,
                     ["wordCompletion"] = settings.WordCompletion,
+                    ["showTurnBenchmarks"] = settings.ShowTurnBenchmarks,
                     ["voiceInput"] = VoiceInput((settings as IDictationSettings)?.Dictation ?? DictationOptions.Default),
                     ["loadPompExtensions"] = settings.LoadOmpExtensions,
                     ["loadDiscoveredExtensions"] = settings.LoadDiscoveredOmpExtensions,

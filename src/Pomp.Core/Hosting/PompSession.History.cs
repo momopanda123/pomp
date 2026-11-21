@@ -90,6 +90,8 @@ namespace Pomp.Hosting
             RecentSessionStore? store = null;
             try
             {
+                if (args.GetString("backend") is string ownerKind && ownerKind != "omp")
+                    throw new InvalidOperationException(PompLanguage.Pick("이 대화는 OMP 대화가 아니에요.", "This is not an OMP conversation."));
                 if (action != "refresh" && action != "switch" && action != "messages" && action != "preview" && action != "rename" && action != "compact" && action != "delete") throw new ArgumentException(PompLanguage.Pick("알 수 없는 세션 기록 명령이에요.", "Unknown session-history command."));
                 if (action == "switch" && SessionChangeBusy())
                 {

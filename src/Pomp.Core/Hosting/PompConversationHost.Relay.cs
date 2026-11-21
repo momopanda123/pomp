@@ -95,8 +95,7 @@ namespace Pomp.Hosting
                     throw new InvalidOperationException(PompLanguage.Pick("작업 영역이 바뀌었어요.", "The workspace changed."));
                 // The partner's open tab, else its most recent conversation, else a new one: what opening the tab would show.
                 var id = _tabs.OpenSession(root, relay.Target) ?? MostRecent(root, relay.Target);
-                var (session, created) = await OpenChildAsync(root, id, relay.Target, "omp", null, false, epoch).ConfigureAwait(false);
-                if (!(session is PompSession target)) throw new InvalidOperationException(PompLanguage.Pick("에이전트·팀 대화는 OMP 연결에서만 열 수 있어요.", "Agent and team conversations require the OMP backend."));
+                var (target, created) = await OpenChildAsync(root, id, relay.Target, null, false, epoch).ConfigureAwait(false);
                 try
                 {
                     epoch.ThrowIfCancellationRequested();
@@ -171,7 +170,7 @@ namespace Pomp.Hosting
             {
                 if (_disposed) return;
                 if (!update.Terminal) { delivery.Status = update.Status; delivery.Detail = update.Detail; delivery.TargetSession = update.SessionId ?? delivery.TargetSession; }
-                source = _channels.Keys.OfType<PompSession>().FirstOrDefault(session => session.ConversationId == relay.SourceSession && SameRoot(session.ConversationRoot, relay.Root));
+                source = _channels.Keys.FirstOrDefault(session => session.ConversationId == relay.SourceSession && SameRoot(session.ConversationRoot, relay.Root));
             }
             if (source != null && source.ApplyRelayUpdate(relay.SourceSession, update)) return;
             if (!update.Terminal) return;

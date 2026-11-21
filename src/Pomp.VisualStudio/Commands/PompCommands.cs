@@ -118,12 +118,9 @@ namespace Pomp.VisualStudio.Commands
                     targets.Clear(); large = false;
                     try
                     {
-                        if (services.ActiveSession is PompSession session)
-                        {
-                            var all = session.ListEditorSendTargets(MenuItems - 1);
-                            large = all.Count > MenuItems;
-                            targets.AddRange(large ? all.Where(target => target.Recent) : all);
-                        }
+                        var all = services.ActiveSession.ListEditorSendTargets(MenuItems - 1);
+                        large = all.Count > MenuItems;
+                        targets.AddRange(large ? all.Where(target => target.Recent) : all);
                     }
                     catch (Exception ex) { services.Logger.Debug("Reading the agent roster for the editor menu failed: " + ex.Message); }
                 }
@@ -131,8 +128,7 @@ namespace Pomp.VisualStudio.Commands
                 var target = !showAll && index < targets.Count ? targets[index] : null;
                 command!.Visible = index == 0 || target != null || showAll;
                 command.Enabled = target != null || showAll;
-                command.Text = services.ActiveSession is not PompSession ? "Unavailable for this backend"
-                    : showAll ? PompLanguage.Pick("에이전트·팀 찾기", "Find Agent or Team") : MenuText(target != null ? target.Title : PompLanguage.Pick("(없음)", "(none)"));
+                command.Text = showAll ? PompLanguage.Pick("에이전트·팀 찾기", "Find Agent or Team") : MenuText(target != null ? target.Title : PompLanguage.Pick("(없음)", "(none)"));
                 command.MatchedCommandId = 0;
             };
             commandService.AddCommand(command);

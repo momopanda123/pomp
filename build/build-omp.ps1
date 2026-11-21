@@ -1,21 +1,20 @@
 <#
 .SYNOPSIS
-    Build POMP's patched Windows x64 omp engine from the upstream v18.21.0 tag.
+    Build POMP's patched Windows x64 omp engine from the upstream v18.22.2 tag.
 .DESCRIPTION
     Requires Git, Bun >= 1.4.4, Rust/Cargo (MSVC x64), and Visual Studio C++ tools
     (including the CMake/Ninja components used by upstream's native build).
     Clones the exact pinned commit into a fresh ignored work directory, applies
-    engines/omp/pomp-v18.21.0.patch and gpt-6.2-v18.21.0.patch, stages src/Pomp.McpServer/*.ts, installs
-    the pinned Bun lockfile, builds the Windows native addon and release-style
-    Windows x64 executable.
+    engines/omp/pomp-v18.22.2.patch, installs from the pinned Bun lockfile,
+    and builds the Windows native addon and release-style Windows x64 executable.
     Only after a successful build copies the executable and the tag's verified
     notices (the text `omp --license` prints: the OMP license, then the CLI's
     and the native addon's THIRD-PARTY-NOTICES.txt) as THIRD-PARTY-NOTICES.txt
-    to artifacts/engines/omp/18.21.0/ by default.
+    to artifacts/engines/omp/18.22.2/ by default.
     Prints the SHA-256 and size to pin in engines/omp/engine.props before VSIX
     packaging. No binary hash is assumed before the first successful build.
 .PARAMETER OutputPath
-    Destination for omp.exe; defaults to artifacts/engines/omp/18.21.0/omp.exe.
+    Destination for omp.exe; defaults to artifacts/engines/omp/18.22.2/omp.exe.
     Notices always go beside the executable (VSIX packaging expects the default
     directory, even when build/build.ps1 -OmpExe uses another executable path).
 .PARAMETER BunPath
@@ -38,26 +37,16 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$version = '18.21.0'
-$commit = '6f03614d761366972e80e84e25d1418ed678d2c7'
+$version = '18.22.2'
+$commit = 'e1ae2cc998efd1ca151b46ebefc0e0dab6c23c63'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $engineDir = Join-Path $repo 'engines\omp'
 $patch = Join-Path $engineDir "pomp-v$version.patch"
-$astraPatch = Join-Path $engineDir "gpt-6.2-v$version.patch"
 $props = [xml](Get-Content -LiteralPath (Join-Path $engineDir 'engine.props') -Raw)
 if ($props.Project.PropertyGroup.PompOmpVersion -ne $version) {
     throw "engine.props must pin omp $version before building this source patch."
 }
 if (-not (Test-Path -LiteralPath $patch -PathType Leaf)) { throw "Missing source patch: $patch" }
-if (-not (Test-Path -LiteralPath $astraPatch -PathType Leaf)) { throw "Missing GPT-6.2 backport: $astraPatch" }
-$mcpSource = Join-Path $repo 'src\Pomp.McpServer'
-foreach ($sourceName in @('server.ts', 'tool-runtime.ts')) {
-    $sourcePath = Join-Path $mcpSource $sourceName
-    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
-        throw "Missing MCP server source: $sourcePath"
-    }
-}
-$mcpSources = @(Get-ChildItem -LiteralPath $mcpSource -Filter '*.ts' -File)
 
 if ($BunPath) {
     $BunPath = (Resolve-Path -LiteralPath $BunPath).ProviderPath
@@ -115,14 +104,6 @@ try {
     }
     Invoke-Native 'git' @('-C', $work, 'apply', '--check', $patch) $repo
     Invoke-Native 'git' @('-C', $work, 'apply', $patch) $repo
-    Invoke-Native 'git' @('-C', $work, 'apply', '--check', $astraPatch) $repo
-    Invoke-Native 'git' @('-C', $work, 'apply', $astraPatch) $repo
-
-    $mcpDestination = Join-Path $work 'packages\coding-agent\src\pomp-mcp'
-    New-Item -ItemType Directory -Path $mcpDestination -Force | Out-Null
-    foreach ($source in $mcpSources) {
-        Copy-Item -LiteralPath $source.FullName -Destination $mcpDestination -Force
-    }
 
     # Since 18.13 the tag has no top-level notices file: the executable embeds the OMP license and the notices of the CLI
     # and of the native addon, and `omp --license` prints them (packages/coding-agent/src/cli/license.ts). Compose the
@@ -162,6 +143,8 @@ try {
     if (-not (Test-Path -LiteralPath $baselineAddon -PathType Leaf)) {
         throw "Patched baseline native addon was not built: $baselineAddon"
     }
+    # The catalog compiler uses the native Windows path helpers. Regenerate its bundled OAuth rules after the addon exists.
+    Invoke-Native 'bun' @('run', 'gen:compat') $work
     Invoke-Native 'bun' @('scripts/ci-release-build-binaries.ts', '--targets', 'win32-x64') $work
     $built = Join-Path $work 'packages\coding-agent\binaries\omp-windows-x64.exe'
     if (-not (Test-Path -LiteralPath $built -PathType Leaf)) {

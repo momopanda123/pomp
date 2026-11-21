@@ -42,11 +42,6 @@ namespace Pomp.Ui
     public static class UiMessageTypes
     {
         // Host -> UI
-        public const string BackendState = "backend/state";
-        public const string ConversationBackend = "conversation/backend";
-        public const string AcpState = "acp/state";
-        public const string AcpCommand = "acp/command";
-        public const string AcpReply = "acp/reply";
         public const string HostHello = "host/hello";
         public const string BridgeState = "bridge/state";
         public const string ThemeChanged = "theme/changed";
@@ -305,6 +300,9 @@ namespace Pomp.Ui
 
         /// <summary>Word completion in the chat input (Tools > Options > Pomp > Chat); absent from an older host = on.</summary>
         public bool WordCompletion { get; set; } = true;
+
+        /// <summary>Show elapsed time and output token throughput after each chat turn.</summary>
+        public bool ShowTurnBenchmarks { get; set; } = true;
 
         /// <summary>omp's approval mode in effect (Tools > Options > Pomp > Agent, or the composer's permission-mode chip).</summary>
         public Pomp.Protocol.OmpApprovalMode ApprovalMode { get; set; }
@@ -579,39 +577,8 @@ namespace Pomp.Ui
         public List<AgentPlanTaskPayload> Tasks { get; set; } = new List<AgentPlanTaskPayload>();
     }
 
-    public sealed class SessionCapabilitiesPayload
-    {
-        public bool NativeOmp { get; set; }
-        public bool Queue { get; set; }
-        public bool Steer { get; set; }
-        public bool Stop { get; set; }
-        public bool Images { get; set; }
-        public bool EditorContext { get; set; }
-        public PlanCapabilitiesPayload Plan { get; set; } = new PlanCapabilitiesPayload();
-        public HistoryCapabilitiesPayload History { get; set; } = new HistoryCapabilitiesPayload();
-    }
-
-    public sealed class PlanCapabilitiesPayload
-    {
-        public bool Read { get; set; }
-        public bool Edit { get; set; }
-        public bool Actions { get; set; }
-    }
-
-    public sealed class HistoryCapabilitiesPayload
-    {
-        public bool List { get; set; }
-        public bool Preview { get; set; }
-        public bool Resume { get; set; }
-        public bool Rename { get; set; }
-        public bool Delete { get; set; }
-        public bool Compact { get; set; }
-    }
-
     public sealed class SessionInfoPayload
     {
-        public string? Backend { get; set; }
-        public SessionCapabilitiesPayload? Capabilities { get; set; }
         public string RecoveryStatus { get; set; } = "ready";
 
         public string? RecoveryMessage { get; set; }
@@ -893,6 +860,19 @@ namespace Pomp.Ui
         public long? DurationMs { get; set; }
     }
 
+    /// <summary>Host-measured turn time and actual model output usage; unknown measurements are omitted.</summary>
+    public sealed class ChatTurnBenchmarkPayload
+    {
+        /// <summary>Whole admitted turn, including tools and waits.</summary>
+        public long DurationMs { get; set; }
+
+        /// <summary>Reported output tokens across all model calls; null when coverage is incomplete.</summary>
+        public long? OutputTokens { get; set; }
+
+        /// <summary>Summed model-call time, excluding tool execution; null when unavailable.</summary>
+        public long? GenerationDurationMs { get; set; }
+    }
+
     public sealed class ChatTurnEndPayload
     {
         public string PromptId { get; set; } = string.Empty;
@@ -901,6 +881,8 @@ namespace Pomp.Ui
         public string Status { get; set; } = "completed";
 
         public UiErrorInfo? Error { get; set; }
+
+        public ChatTurnBenchmarkPayload? Benchmark { get; set; }
     }
 
     public sealed class ChatNoticePayload
@@ -1651,24 +1633,6 @@ namespace Pomp.Ui
         public List<McpServerPayload> Servers { get; set; } = new List<McpServerPayload>();
         public bool RestartRequired { get; set; }
         public string? Message { get; set; }
-        public AntigravityMcpStatePayload? Antigravity { get; set; }
-    }
-    /// <summary>External Antigravity configuration only; configured does not mean connected or signed in.</summary>
-    public sealed class AntigravityMcpStatePayload
-    {
-        public bool Installed { get; set; }
-        /// <summary>An owned workspace entry exists, even if its engine path is outdated or unavailable.</summary>
-        public bool Enabled { get; set; }
-        public bool Configured { get; set; }
-        public bool CanConfigure { get; set; }
-        /// <summary>The owned entry can be removed without an installed app or verified engine.</summary>
-        public bool CanDisable { get; set; }
-        public string? ApplicationPath { get; set; }
-        public string? ConfigPath { get; set; }
-        public string? WorkspaceRoot { get; set; }
-        public string? ServerName { get; set; }
-        public string? ConfigHash { get; set; }
-        public string? Message { get; set; }
     }
     public sealed class McpServerPayload
     {
@@ -1762,8 +1726,6 @@ namespace Pomp.Ui
         public string? Name { get; set; }
         public JObject? Server { get; set; }
         public string? ExpectedHash { get; set; }
-        /// <summary>Required explicitly for antigravity-set; ordinary MCP commands retain their existing server payload.</summary>
-        public bool? Enabled { get; set; }
     }
     public sealed class McpReplyPayload
     {
@@ -1791,7 +1753,6 @@ namespace Pomp.Ui
     /// <summary>An open agent or team tab: its own conversation.</summary>
     public sealed class ConversationTabPayload
     {
-        public string? Backend { get; set; }
         public string SessionId { get; set; } = string.Empty;
         public ConversationPartnerPayload Partner { get; set; } = new ConversationPartnerPayload();
         public string? Title { get; set; }
@@ -1803,11 +1764,6 @@ namespace Pomp.Ui
     /// <summary>A live conversation's plan summary. Task pages and mutations stay on its owning engine.</summary>
     public sealed class ConversationPlanPayload
     {
-        public string? Backend { get; set; }
-        public bool? Editable { get; set; }
-        public bool? CanContinue { get; set; }
-        public bool? CanRun { get; set; }
-        public bool? CanStop { get; set; }
         public string SessionId { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
         public ConversationPartnerPayload Partner { get; set; } = new ConversationPartnerPayload();
@@ -1822,7 +1778,6 @@ namespace Pomp.Ui
     /// <summary>conversation/tabsState: the current conversation's partner and the workspace's chat tabs (docs/architecture.md §8.8).</summary>
     public sealed class ConversationTabsStatePayload
     {
-        public string? Backend { get; set; }
         public string Root { get; set; } = string.Empty;
         public List<ConversationPlanPayload> Plans { get; set; } = new List<ConversationPlanPayload>();
         public string? SessionId { get; set; }
@@ -1968,7 +1923,6 @@ namespace Pomp.Ui
 
     public sealed class SessionNewPayload
     {
-        public string? Backend { get; set; }
         /// <summary>Echoed in <see cref="SessionNewResultPayload.RequestId"/>.</summary>
         public string? RequestId { get; set; }
     }

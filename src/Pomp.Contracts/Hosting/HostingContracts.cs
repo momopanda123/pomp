@@ -59,6 +59,9 @@ namespace Pomp.Hosting
         /// <summary>Word completion in the chat input (local, from this workspace's words): a grey rest of the word Tab inserts.</summary>
         bool WordCompletion { get; }
 
+        /// <summary>Show elapsed time and output token throughput after each chat turn.</summary>
+        bool ShowTurnBenchmarks { get; }
+
         /// <summary>Persisted "always allow" policy keys (see <see cref="Permissions.PermissionRequest.PolicyKey"/>).</summary>
         IReadOnlyCollection<string> AlwaysAllowedPolicyKeys { get; }
 
@@ -181,6 +184,12 @@ namespace Pomp.Hosting
         void ShowSettings();
     }
 
+    /// <summary>Reads text for an explicit paste into a pending provider login. The clipboard is never exposed to the WebView.</summary>
+    public interface IProviderLoginClipboard
+    {
+        Task<string> ReadLoginTextAsync(CancellationToken cancellationToken);
+    }
+
     /// <summary>Optional host capability: recycle local files and folders, never fall back to permanent deletion.</summary>
     public interface IPompRecycleBin
     {
@@ -197,10 +206,7 @@ namespace Pomp.Hosting
         Task<IReadOnlyList<string>> PickFilesAsync(string? initialDirectory, string title, string? filter, bool multiselect, CancellationToken cancellationToken);
     }
 
-    /// <summary>
-    /// A backend-neutral chat session lifecycle and UI binding. Native sessions own their real OMP bridge;
-    /// other backends expose only their supported capabilities.
-    /// </summary>
+    /// <summary>The lifecycle and UI binding of a POMP chat session.</summary>
     public interface IPompSession : IDisposable
     {
         /// <summary>Binds the chat UI (a tool window's WebView). Replaces any previously attached channel.</summary>
@@ -208,10 +214,10 @@ namespace Pomp.Hosting
 
         void DetachUi(IUiChannel channel);
 
-        /// <summary>Starts the selected backend if it is not running yet.</summary>
+        /// <summary>Starts the conversation's engine if it is not running yet.</summary>
         Task EnsureStartedAsync(CancellationToken cancellationToken);
 
-        /// <summary>Restarts the session while preserving backend-owned conversation identity.</summary>
+        /// <summary>Restarts the engine while preserving the conversation identity.</summary>
         Task RestartAsync(CancellationToken cancellationToken);
     }
 }

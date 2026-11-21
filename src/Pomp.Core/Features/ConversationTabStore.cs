@@ -13,9 +13,7 @@ namespace Pomp.Features
 {
     /// <summary>
     /// Workspace chat ownership in <c>.pomp/local/chat-tabs.json</c>. <c>main</c> is exclusively the native OMP main.
-    /// Native agent/team entries retain their partners; ACP entries retain opaque, prefixed IDs with explicit backend ownership.
-    /// Closing an ACP tab preserves its resume metadata, not provider deletion. Missing backend fields mean OMP.
-    /// The OMP extension reads native partner entries from this file (lib/conversation-partner.ts).
+    /// Agent/team conversations retain their partners and tab order. The OMP extension reads these entries too (lib/conversation-partner.ts).
     /// </summary>
     internal sealed class ConversationTabStore
     {
@@ -30,14 +28,15 @@ namespace Pomp.Features
         internal sealed class Entry
         {
             public string SessionId { get; set; } = "";
-            public string Backend { get; set; } = "omp";
             public ConversationPartnerPayload Partner { get; set; } = new ConversationPartnerPayload();
             public bool Open { get; set; }
         }
         internal sealed class Snapshot
         {
-            public string? Main { get; set; }
-            /// <summary>Native partner conversations and independently selectable ACP conversations; open ones retain tab order.</summary>
+            public string? StoredMain { get; set; }
+            public string? Main => IsLegacyId(StoredMain) ? null : StoredMain;
+            // Keep older, non-native rows on disk without exposing them as sessions or counting them as open tabs.
+            public List<JToken>? OtherRows { get; set; }
             public List<Entry> Conversations { get; } = new List<Entry>();
         }
 
@@ -52,36 +51,11 @@ namespace Pomp.Features
 
         /// <summary>The partners of all agent and team conversations of the workspace, by conversation id (one read for a whole list).</summary>
         public Dictionary<string, ConversationPartnerPayload> All(string root) =>
-            Read(root).Conversations.Where(e => e.Backend == "omp").ToDictionary(e => e.SessionId, e => Copy(e.Partner), StringComparer.Ordinal);
+            Read(root).Conversations.ToDictionary(e => e.SessionId, e => Copy(e.Partner), StringComparer.Ordinal);
 
         /// <summary>The conversation of the open tab of <paramref name="partner"/>, or null.</summary>
         public string? OpenSession(string root, ConversationPartnerPayload partner) =>
-            Read(root).Conversations.FirstOrDefault(e => e.Backend == "omp" && e.Open && Same(e.Partner, partner))?.SessionId;
-
-        public string Backend(string root, string sessionId) =>
-            sessionId.StartsWith("antigravity-acp:", StringComparison.Ordinal) ? "antigravity-acp"
-                : Read(root).Conversations.FirstOrDefault(e => e.SessionId == sessionId)?.Backend ?? "omp";
-
-        /// <summary>ACP ownership is additive metadata; its main conversations never replace the native main.</summary>
-        public void ObserveBackend(string root, string sessionId, string backend)
-        {
-            Check(sessionId);
-            if (backend == "omp") { Observe(root, sessionId, null); return; }
-            if (backend != "antigravity-acp" || !sessionId.StartsWith("antigravity-acp:", StringComparison.Ordinal))
-                throw new ArgumentException("Invalid backend conversation identity.");
-            lock (Gate)
-            {
-                var file = FileFor(root); var data = Load(file);
-                var entry = data.Conversations.FirstOrDefault(e => e.SessionId == sessionId);
-                if (entry == null) data.Conversations.Add(new Entry { SessionId = sessionId, Backend = backend, Open = true });
-                else
-                {
-                    if (entry.Backend == backend && entry.Open) return;
-                    entry.Backend = backend; entry.Open = true;
-                }
-                Write(file, data);
-            }
-        }
+            Read(root).Conversations.FirstOrDefault(e => e.Open && Same(e.Partner, partner))?.SessionId;
 
         /// <summary>
         /// <paramref name="sessionId"/> became the current conversation. <paramref name="assign"/> (an agent or team) makes it that partner's new
@@ -91,8 +65,6 @@ namespace Pomp.Features
         public ConversationPartnerPayload Observe(string root, string sessionId, ConversationPartnerPayload? assign)
         {
             Check(sessionId);
-            if (sessionId.StartsWith("antigravity-acp:", StringComparison.Ordinal))
-                throw new ArgumentException("ACP conversations cannot become native conversations.");
             lock (Gate)
             {
                 var file = FileFor(root); var data = Load(file);
@@ -105,12 +77,12 @@ namespace Pomp.Features
                 if (entry == null)
                 {
                     if (data.Main == sessionId) return new ConversationPartnerPayload();
-                    data.Main = sessionId;
+                    data.StoredMain = sessionId;
                 }
                 else
                 {
                     var wasOpen = entry.Open && data.Conversations.Contains(entry);
-                    var replaced = data.Conversations.FirstOrDefault(e => e.Backend == "omp" && e.Open && e != entry && Same(e.Partner, entry.Partner));
+                    var replaced = data.Conversations.FirstOrDefault(e => e.Open && e != entry && Same(e.Partner, entry.Partner));
                     entry.Open = true;
                     if (!wasOpen)
                     {
@@ -119,7 +91,7 @@ namespace Pomp.Features
                         if (replaced != null) { replaced.Open = false; data.Conversations.Insert(data.Conversations.IndexOf(replaced), entry); }
                         else data.Conversations.Add(entry);
                     }
-                    if (data.Main == sessionId) data.Main = null;
+                    if (data.Main == sessionId) data.StoredMain = null;
                 }
                 Write(file, data);
                 return entry == null ? new ConversationPartnerPayload() : Copy(entry.Partner);
@@ -145,35 +117,39 @@ namespace Pomp.Features
             {
                 var file = FileFor(root); var data = Load(file);
                 var removed = data.Conversations.RemoveAll(e => e.SessionId == sessionId) > 0;
-                if (data.Main == sessionId) { data.Main = null; removed = true; }
+                if (data.Main == sessionId) { data.StoredMain = null; removed = true; }
                 if (removed) Write(file, data);
             }
         }
 
         private static bool Same(ConversationPartnerPayload a, ConversationPartnerPayload b) => a.Kind == b.Kind && a.Id == b.Id;
         private static ConversationPartnerPayload Copy(ConversationPartnerPayload value) => new ConversationPartnerPayload { Kind = value.Kind, Id = value.Id };
+        private static bool IsLegacyId(string? id) => id?.StartsWith("antigravity-acp:", StringComparison.Ordinal) == true;
         private static void Check(string sessionId)
         {
-            if (string.IsNullOrWhiteSpace(sessionId) || sessionId.Length > 256 || sessionId.Any(char.IsControl)) throw new ArgumentException("Invalid conversation id.");
+            if (string.IsNullOrWhiteSpace(sessionId) || sessionId.Length > 256 || sessionId.Any(char.IsControl) || IsLegacyId(sessionId)) throw new ArgumentException("Invalid native conversation id.");
         }
         private string FileFor(string root) => ProjectData.File(string.IsNullOrWhiteSpace(root) ? Path.Combine(dataDirectory, "workspace") : root, FileName);
 
-        private static JObject Serialize(Snapshot data) => new JObject
+        private static JObject Serialize(Snapshot data)
         {
-            ["version"] = 1,
-            ["main"] = data.Main == null ? JValue.CreateNull() : (JToken)data.Main,
-            ["conversations"] = new JArray(data.Conversations.Select(e => new JObject
+            var rows = new JArray(data.Conversations.Select(e => new JObject
             {
-                ["sessionId"] = e.SessionId, ["backend"] = e.Backend, ["partner"] = new JObject { ["kind"] = e.Partner.Kind, ["id"] = e.Partner.Id }, ["open"] = e.Open,
-            })),
-        };
+                ["sessionId"] = e.SessionId, ["partner"] = new JObject { ["kind"] = e.Partner.Kind, ["id"] = e.Partner.Id }, ["open"] = e.Open,
+            }));
+            if (data.OtherRows != null) rows.Add(data.OtherRows);
+            return new JObject { ["version"] = 1, ["main"] = data.StoredMain, ["conversations"] = rows };
+        }
         private static void Write(string file, Snapshot data)
         {
             var json = Serialize(data).ToString(Formatting.None);
-            while (Encoding.UTF8.GetByteCount(json) > MaxBytes - 64 && data.Conversations.FirstOrDefault(e => !e.Open) is Entry stale)
+            var length = Encoding.UTF8.GetByteCount(json);
+            while (length > MaxBytes - 64 && data.Conversations.FirstOrDefault(e => !e.Open) is Entry stale)
             {
                 data.Conversations.Remove(stale); json = Serialize(data).ToString(Formatting.None);
+                length = Encoding.UTF8.GetByteCount(json);
             }
+            if (length > MaxBytes) throw new InvalidDataException("Chat tab store exceeds its byte budget.");
             CheckpointStore.CheckDirectPath(file);
             AtomicFile.WriteAllText(file, json);
         }
@@ -190,18 +166,27 @@ namespace Pomp.Features
                 var root = JObject.Load(reader);
                 if (reader.Read() || (int?)root["version"] != 1 || root["conversations"] is not JArray rows) throw new InvalidDataException("Invalid chat tab store.");
                 var main = root["main"];
-                if (main != null && main.Type != JTokenType.Null) { var id = main.Type == JTokenType.String ? (string?)main : null; Check(id ?? ""); data.Main = id; }
+                if (main != null && main.Type != JTokenType.Null)
+                {
+                    var id = main.Type == JTokenType.String ? (string?)main : null;
+                    if (!IsLegacyId(id)) Check(id ?? "");
+                    data.StoredMain = id;
+                }
                 var seen = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var row in rows)
                 {
-                    var id = (string?)(row as JObject)?["sessionId"]; var kind = (string?)row["partner"]?["kind"]; var target = (string?)row["partner"]?["id"];
-                    var backend = (string?)row["backend"] ?? "omp";
+                    var id = (string?)(row as JObject)?["sessionId"];
+                    if (IsLegacyId(id) || (row["backend"]?.Type == JTokenType.String && (string?)row["backend"] != "omp"))
+                    {
+                        (data.OtherRows ??= new List<JToken>()).Add(row);
+                        continue;
+                    }
+                    var kind = (string?)row["partner"]?["kind"]; var target = (string?)row["partner"]?["id"];
                     if (id == null || row["open"]?.Type != JTokenType.Boolean
-                        || (backend == "omp" ? ((kind != "agent" && kind != "team") || !AgentRoster.IsValidName(target ?? ""))
-                            : backend != "antigravity-acp" || kind != "main" || !id.StartsWith("antigravity-acp:", StringComparison.Ordinal)))
+                        || (kind != "agent" && kind != "team") || !AgentRoster.IsValidName(target ?? ""))
                         throw new InvalidDataException("Invalid chat tab entry.");
                     Check(id); if (!seen.Add(id)) throw new InvalidDataException("Duplicate chat tab entry.");
-                    data.Conversations.Add(new Entry { SessionId = id, Backend = backend, Partner = new ConversationPartnerPayload { Kind = kind!, Id = target }, Open = (bool)row["open"]! });
+                    data.Conversations.Add(new Entry { SessionId = id, Partner = new ConversationPartnerPayload { Kind = kind!, Id = target }, Open = (bool)row["open"]! });
                 }
                 return data;
             }

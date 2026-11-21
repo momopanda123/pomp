@@ -531,6 +531,7 @@ namespace Pomp.Hosting
                     }
                     else
                     {
+                        turn.Elapsed.Restart();
                         _sendingPrompt = sending; _turns[promptId] = turn; _backgroundAgents.SetCurrentTurnPrompt(promptId);
                         _chatEngineSettled = false; _streamingRevision++;
                         if (relay != null) { turn.Relays.Add(relay); relay.State = RelayState.Running; }

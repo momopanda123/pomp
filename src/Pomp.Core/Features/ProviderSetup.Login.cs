@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
@@ -23,6 +24,10 @@ namespace Pomp.Features
         private const int MaxBrowserOpensPerLogin = 3;
         private const int MinScrubbedAnswerChars = 3;
 
+        private const string AntigravityCliProvider = "antigravity-cli";
+        private const string ConsentPromptKind = "consent";
+        private const string AuthorizationCodePromptKind = "authorizationCode";
+
         /// <summary>One RPC sign-in through the auth helper. Fields other than the constants are guarded by <c>_lock</c>.</summary>
         private sealed class LoginRun
         {
@@ -37,6 +42,7 @@ namespace Pomp.Features
             public bool Cancelled;
             public string? PromptId;
             public int BrowserOpens;
+            public bool AntigravityRiskAccepted;
 
             /// <summary>What the user typed into this sign-in's prompts: removed from every text that leaves the host.</summary>
             public readonly List<string> Answers = new List<string>();
@@ -221,7 +227,7 @@ namespace Pomp.Features
 
         private bool IsCurrent(LoginRun run) => !_disposed && !run.Cancelled && ReferenceEquals(_run, run);
 
-        /// <summary>omp wants a browser page: <c>launchUrl ?? url</c> is opened when it is an http(s) address, and shown in the login state.</summary>
+        /// <summary>Opens the provider's sign-in link; Antigravity CLI only opens Google's HTTPS authorization page after consent.</summary>
         private void HandleOpenUrl(LoginRun run, JObject frame)
         {
             var launchUrl = frame.GetString("launchUrl");
@@ -231,6 +237,15 @@ namespace Pomp.Features
             lock (_lock)
             {
                 if (!IsCurrent(run)) return;
+                if (run.Provider == AntigravityCliProvider)
+                {
+                    if (!run.AntigravityRiskAccepted) return;
+                    if (target != null)
+                    {
+                        var uri = new Uri(target);
+                        if (uri.Scheme != Uri.UriSchemeHttps || uri.Host != "accounts.google.com" || !uri.IsDefaultPort) target = null;
+                    }
+                }
                 if (target != null && run.BrowserOpens < MaxBrowserOpensPerLogin)
                 {
                     run.BrowserOpens++;
@@ -240,7 +255,9 @@ namespace Pomp.Features
 
             string? progress = null;
             if (target == null)
-                progress = SetupText.Get("http(s) 주소가 아닌 링크는 열지 않았습니다.", "A link that is not an http(s) address was not opened.");
+                progress = run.Provider == AntigravityCliProvider
+                    ? SetupText.Get("안전한 Google 로그인 주소가 아니어서 열지 않았습니다.", "The link was not opened because it is not a secure Google sign-in URL.")
+                    : SetupText.Get("http(s) 주소가 아닌 링크는 열지 않았습니다.", "A link that is not an http(s) address was not opened.");
             else if (open)
             {
                 try
@@ -284,25 +301,39 @@ namespace Pomp.Features
         {
             var id = frame.GetString("id");
             if (!ValidPromptId(id)) return; // Nothing to answer with.
-            var message = SetupSanitize.Block(frame.GetString("title") ?? frame.GetString("message"), 500)
-                ?? SetupText.Get("로그인이 입력을 기다리고 있습니다.", "The sign-in is waiting for input.");
+            var message = SetupSanitize.Block(frame.GetString("title") ?? frame.GetString("message"), 500);
             var placeholder = SetupSanitize.Line(frame.GetString("placeholder"), 200);
             string? replaced = null;
-            var current = true;
+            var show = false;
             lock (_lock)
             {
-                if (!IsCurrent(run)) current = false;
-                else
+                string? kind = null;
+                if (run.Provider == AntigravityCliProvider)
                 {
+                    // omp RPC exposes the risk acknowledgement as input with placeholder "yes", before any auth URL.
+                    // Never offer a clipboard action for this prompt, nor interpret an unrecognized prompt as consent.
+                    if (!run.AntigravityRiskAccepted && placeholder == "yes" && message != null)
+                        kind = ConsentPromptKind;
+                    else if (run.AntigravityRiskAccepted && run.BrowserOpens != 0)
+                        kind = AuthorizationCodePromptKind;
+                }
+                if (IsCurrent(run) && (run.Provider != AntigravityCliProvider || kind != null))
+                {
+                    show = true;
                     replaced = run.PromptId;
                     run.PromptId = id;
-                    var prompt = new JObject { ["id"] = id, ["message"] = message };
+                    var prompt = new JObject
+                    {
+                        ["id"] = id,
+                        ["message"] = message ?? SetupText.Get("로그인이 입력을 기다리고 있습니다.", "The sign-in is waiting for input."),
+                    };
+                    if (kind != null) prompt["kind"] = kind;
                     if (placeholder != null) prompt["placeholder"] = placeholder;
                     _loginState["prompt"] = prompt;
                 }
             }
 
-            if (!current) { Decline(id); return; }
+            if (!show) { Decline(id); return; }
             if (replaced != null && replaced != id) Decline(replaced);
             Publish();
         }
@@ -351,32 +382,111 @@ namespace Pomp.Features
 
         // ---- answers and cancel -----------------------------------------------------------------------------------------
 
-        /// <summary><c>answerPrompt</c>: hands the typed text (or a cancel) to the waiting sign-in; the text is never stored or logged.</summary>
-        private async Task AnswerPromptAsync(JObject request)
+        /// <summary>Deliver a typed answer, a cancellation, or (only for the current CLI code prompt) the user's explicit paste.</summary>
+        private async Task AnswerPromptAsync(JObject request, bool fromClipboard = false)
         {
             var promptId = Text(request, "promptId");
-            string? value = null;
-            var token = request["value"];
-            if (token != null && token.Type != JTokenType.Null)
+            LoginRun? clipboardRun = null;
+            JObject? clipboardPrompt = null;
+            string? value;
+            if (fromClipboard)
             {
-                if (token.Type != JTokenType.String) throw new ProviderSetupException(SetupText.Get("입력 형식이 올바르지 않습니다.", "The input is invalid."));
-                value = (string)token!;
+                CancellationToken token;
+                lock (_lock)
+                {
+                    clipboardRun = WaitingLogin(promptId);
+                    clipboardPrompt = _loginState["prompt"] as JObject;
+                    if (clipboardRun.Provider != AntigravityCliProvider || (string?)clipboardPrompt?["kind"] != AuthorizationCodePromptKind)
+                        throw NoWaitingPrompt();
+                    token = clipboardRun.Cts.Token;
+                }
+                if (!(_environment is IProviderLoginClipboard clipboard)) throw ClipboardUnavailable();
+                try { value = await clipboard.ReadLoginTextAsync(token).ConfigureAwait(false); }
+                catch (Exception ex) when (!(ex is OperationCanceledException)) { throw ClipboardUnavailable(); }
+                if (string.IsNullOrWhiteSpace(value)) throw ClipboardUnavailable();
+            }
+            else
+            {
+                var token = request["value"];
+                if (token != null && token.Type != JTokenType.Null && token.Type != JTokenType.String)
+                    throw new ProviderSetupException(SetupText.Get("입력 형식이 올바르지 않습니다.", "The input is invalid."));
+                value = (string?)token;
+            }
+
+            if (value != null)
+            {
                 if (value.Length > 4096) throw new ProviderSetupException(SetupText.Get("입력이 너무 깁니다.", "The input is too long."));
                 value = value.Trim();
             }
 
+            Task delivery;
             lock (_lock)
             {
-                var run = _run;
-                if (run == null || run.Cancelled || string.IsNullOrEmpty(promptId) || run.PromptId != promptId)
-                    throw new ProviderSetupException(SetupText.Get("대기 중인 입력 요청이 없습니다.", "No sign-in input is being waited for."));
+                var run = WaitingLogin(promptId);
+                var prompt = _loginState["prompt"];
+                var kind = (string?)prompt?["kind"];
+                if (fromClipboard && (!ReferenceEquals(run, clipboardRun) || !ReferenceEquals(prompt, clipboardPrompt) || kind != AuthorizationCodePromptKind))
+                    throw NoWaitingPrompt();
+                if (value != null && kind == AuthorizationCodePromptKind) value = AntigravityCode(value);
+                if (kind == ConsentPromptKind)
+                {
+                    run.AntigravityRiskAccepted = string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
+                    value = run.AntigravityRiskAccepted ? "yes" : null;
+                }
+                else if (!string.IsNullOrEmpty(value)) RememberAnswer(run, value!);
                 run.PromptId = null;
                 _loginState.Remove("prompt");
-                if (!string.IsNullOrEmpty(value)) RememberAnswer(run, value!);
+                // Capture the current helper connection before a concurrent cancel/new login can replace it.
+                var frame = value == null ? OmpCommands.ExtensionUiCancelled(promptId!) : OmpCommands.ExtensionUiValue(promptId!, value);
+                delivery = DeliverPromptAnswerAsync(frame, run.Cts.Token);
             }
 
-            var frame = value == null ? OmpCommands.ExtensionUiCancelled(promptId!) : OmpCommands.ExtensionUiValue(promptId!, value);
-            try { await _helper.SendFrameAsync(frame, _token).ConfigureAwait(false); }
+            await delivery.ConfigureAwait(false);
+        }
+
+        /// <summary>Only called while holding _lock.</summary>
+        private LoginRun WaitingLogin(string? promptId)
+        {
+            var run = _run;
+            if (run == null || !IsCurrent(run) || string.IsNullOrEmpty(promptId) || promptId != run.PromptId)
+                throw NoWaitingPrompt();
+            return run;
+        }
+
+        private static ProviderSetupException NoWaitingPrompt() =>
+            new ProviderSetupException(SetupText.Get("대기 중인 입력 요청이 없습니다.", "No sign-in input is being waited for."));
+
+        private static ProviderSetupException ClipboardUnavailable() =>
+            new ProviderSetupException(SetupText.Get("클립보드에서 텍스트를 읽을 수 없습니다. 코드를 복사하거나 직접 붙여 넣으세요.", "No clipboard text is available. Copy the code again or paste it manually."));
+
+        // agy accepts a raw code or the first case-sensitive `code` query parameter of an HTTP(S) callback.
+        // Only the code goes to the helper. Never navigate the callback or send its other query parameters.
+        private static string AntigravityCode(string text)
+        {
+            if (text.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || text.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+            {
+                var code = string.Empty;
+                if (Uri.TryCreate(text, UriKind.Absolute, out var callback))
+                {
+                    foreach (var pair in callback.GetComponents(UriComponents.Query, UriFormat.UriEscaped).Split('&'))
+                    {
+                        var equals = pair.IndexOf('=');
+                        var key = equals < 0 ? pair : pair.Substring(0, equals);
+                        if (WebUtility.UrlDecode(key) != "code") continue;
+                        if (equals >= 0) code = WebUtility.UrlDecode(pair.Substring(equals + 1));
+                        break;
+                    }
+                }
+                text = code;
+            }
+            if (text.Length == 0 || text.IndexOf('\r') >= 0 || text.IndexOf('\n') >= 0)
+                throw new ProviderSetupException(SetupText.Get("인증 코드 또는 code 쿼리 매개 변수가 있는 콜백 URL을 붙여 넣으세요.", "Paste an authorization code or a callback URL with a code query parameter."));
+            return text;
+        }
+
+        private async Task DeliverPromptAnswerAsync(JObject frame, CancellationToken token)
+        {
+            try { await _helper.SendFrameAsync(frame, token).ConfigureAwait(false); }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
                 throw new ProviderSetupException(SetupText.Get("입력을 전달하지 못했습니다.", "The input could not be delivered."));

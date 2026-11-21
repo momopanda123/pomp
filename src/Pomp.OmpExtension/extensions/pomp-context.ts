@@ -47,23 +47,18 @@ export function guidance(mode: PreEditMode = "block", tools: ReadonlySet<string>
 	const bufferRead = has("read_buffer");
 	const bufferEdit = bufferRead && has("edit_buffer_hashline");
 
-	const unsaved = bufferEdit
-		? "- Files open in VS may have unsaved edits. Read them with `read_buffer` (not `read`, `grep` or shell) and change them with `edit_buffer_hashline` (not `edit`, `write`, `ast_edit` or shell), using the tag from your latest `read_buffer`; never mix its tags with `read`/`edit`. " +
-			(mode === "block"
-				? "Disk edits to a file with unsaved VS changes are blocked"
-				: "Never edit such a file on disk (it conflicts with the unsaved buffer)") +
-			"; if the buffer tools fail, ask the user to save. Files not open in VS: use the normal tools."
-		: "- Files open in VS may have unsaved edits that exist only in the editor." +
-			(bufferRead ? " Read them with `read_buffer` (not `read`, `grep` or shell)." : "") +
-			(mode === "block"
-				? " Disk edits (`edit`, `write`, `ast_edit`) to a file with unsaved VS changes are blocked; do not bypass that with shell commands."
-				: " Never edit such a file on disk (it conflicts with the unsaved buffer), with any tool or shell command.") +
-			" If a file you must change has unsaved edits, ask the user to save it in Visual Studio (Ctrl+S), then retry with the normal tools; never overwrite unsaved changes. Files not open in VS, or already saved: use the normal tools.";
+	const unsaved = "- For ordinary changes to saved files, use the normal disk tools even if the file is open in Visual Studio. " +
+		(bufferRead ? "If unsure about an open file, check it with `read_buffer`. " : "") +
+		"Use `read` for a disk edit's anchors; editor-buffer tags are not disk tags. " +
+		(mode === "block" ? "Disk edits to files with unsaved VS changes are blocked. " : "Never edit files with unsaved VS changes on disk. ") +
+		(bufferEdit
+			? "If VS reports unsaved changes on the target, use `read_buffer` and `edit_buffer_hashline` to preserve them; this edits the buffer without saving it. If that fails, ask the user to save that file."
+			: "If the target has unsaved changes, ask the user to save that file before editing it. Never bypass this with shell commands.");
 
 	const facts: string[] = [];
 	if (has("run_terminal") && has("terminal_status")) facts.push("`run_terminal`: queue a noninteractive PowerShell process after explicit approval; prefer dedicated IDE tools for builds/tests. `terminal_status`: poll its bounded output and exit code. Queued/running is not completion; zero shell exit is not proof the requested task succeeded. Commands are not OS-sandboxed.");
-	if (has("build_codebase_context")) facts.push("`build_codebase_context`: bounded folder/file/symbol outline and selected source excerpts for broad tasks. State omissions; character budget is not exact tokens. Use read_buffer for complete files before editing.");
-	if (has("search_codebase")) facts.push("`search_codebase`: local symbol/BM25 search of live loaded source, including unsaved buffers. Cite returned path and line ranges; disclose coverage notices. Read full files with read_buffer before editing.");
+	if (has("build_codebase_context")) facts.push("`build_codebase_context`: bounded folder/file/symbol outline and selected source excerpts for broad tasks. State omissions; character budget is not exact tokens. Read the target file before editing.");
+	if (has("search_codebase")) facts.push("`search_codebase`: local symbol/BM25 search of live loaded source, including unsaved buffers. Cite returned path and line ranges; disclose coverage notices. Read the target file before editing.");
 	if (has("propose_workspace_edits")) facts.push("`propose_workspace_edits`: stage complete existing-source edits for per-line review and shadow compilation; use the contentHash from read_buffer. Staging does not apply changes. Read all source ranges before proposing complete replacement text.");
 	if (has("get_editor_context")) facts.push("`get_editor_context`: active file, selection, open documents.");
 	if (has("query_solution")) facts.push("`query_solution`: projects, files, references.");

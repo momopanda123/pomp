@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { copyText } from '../format';
 import { useT } from '../i18n';
 import type { SetupLogin, SetupLoginPrompt, SetupProvider } from '../protocol';
@@ -25,52 +25,66 @@ interface LoginCardProps {
 }
 
 /**
- * The answer to a sign-in prompt (an authorization code to paste): a secret. It lives only in this input; it is cleared the
- * moment it is posted (or the prompt is declined), and is never put into reducer state, storage, a log message or an error text.
+ * A sign-in code lives only in this input until submitted or the prompt closes. Never put it in reducer state, storage or logs.
  */
-function PromptForm({ prompt, cmd, inert }: { prompt: SetupLoginPrompt; cmd: SetupCommands; inert: boolean }) {
+function PromptForm({ prompt, cmd, inert, children }: { prompt: SetupLoginPrompt; cmd: SetupCommands; inert: boolean; children: ReactNode }) {
   const t = useT();
   const inputId = useId();
   const [value, setValue] = useState('');
   const answer = cmd.feedback('answer');
   const trimmed = value.trim();
-  const canSend = trimmed.length > 0 && !answer.pending && !inert;
+  const consent = prompt.kind === 'consent';
+  const codePrompt = prompt.kind === 'authorizationCode';
+  const useClipboard = codePrompt && value === '';
+  const canSend = !consent && (useClipboard || trimmed.length > 0) && !answer.pending && !inert;
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
     if (!canSend) return;
+    if (useClipboard) {
+      cmd.post('answer', (requestId) => ({ requestId, action: 'answerPromptFromClipboard', promptId: prompt.id }), prompt.id);
+      return;
+    }
     // The input is cleared only once the host has the answer; if posting failed the user keeps what they typed.
     if (cmd.post('answer', (requestId) => ({ requestId, action: 'answerPrompt', promptId: prompt.id, value: trimmed }), prompt.id)) setValue('');
-  };
-  const decline = (): void => {
-    cmd.post('answer', (requestId) => ({ requestId, action: 'answerPrompt', promptId: prompt.id }), prompt.id); // no value = cancel this input
-    setValue('');
   };
 
   return (
     <form className="login-prompt" autoComplete="off" noValidate onSubmit={submit} data-testid="login-prompt">
-      <label className="login-prompt-label" htmlFor={inputId}>
-        {revealControls(prompt.message || t('setup.login.codeLabel'))}
-      </label>
-      <input
-        id={inputId}
-        type="password"
-        className="field mono"
-        data-testid="prompt-input"
-        autoComplete="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        maxLength={MAX_PROMPT_ANSWER_CHARS}
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-      />
+      {consent ? (
+        <p className="login-instructions">{revealControls(prompt.message)}</p>
+      ) : (
+        <>
+          <label className="login-prompt-label" htmlFor={inputId}>
+            {revealControls(prompt.message || t('setup.login.codeLabel'))}
+          </label>
+          <input
+            id={inputId}
+            type="password"
+            className="field mono"
+            data-testid="prompt-input"
+            autoComplete="off"
+            placeholder={codePrompt ? t('setup.login.clipboardHint') : undefined}
+            autoCapitalize="off"
+            spellCheck={false}
+            maxLength={MAX_PROMPT_ANSWER_CHARS}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+          />
+        </>
+      )}
       <div className="ui-form-actions">
-        <button type="button" className="btn subtle" data-testid="prompt-cancel" disabled={answer.pending || inert} onClick={decline}>
-          {t('setup.login.cancelPrompt')}
-        </button>
-        <button type="submit" className="btn primary" data-testid="prompt-submit" disabled={!canSend}>
-          {t('setup.login.confirm')}
-        </button>
+        {consent ? (
+          <button type="button" className="btn primary" disabled={answer.pending || inert}
+            onClick={() => cmd.post('answer', (requestId) => ({ requestId, action: 'answerPrompt', promptId: prompt.id, value: 'yes' }), prompt.id)}>
+            {t('setup.login.acceptRisk')}
+          </button>
+        ) : (
+          <button type="submit" className="btn primary" data-testid="prompt-submit" disabled={!canSend}>
+            {t('setup.login.confirm')}
+          </button>
+        )}
+        {children}
       </div>
       {answer.error && <Note tone="error" text={answer.error} />}
     </form>
@@ -180,18 +194,15 @@ export function LoginCard({ login, providers, cmd, inert, onSignIn, onConsole }:
 
   if (!visible) return null;
 
+  const cancelButton = (
+    <button type="button" className="btn" data-testid="login-cancel" disabled={inert || cancel.pending}
+      onClick={() => cmd.post('cancel', (requestId) => ({ requestId, action: 'cancelLogin' }))}>
+      {t('dialog.cancel')}
+    </button>
+  );
+
   return (
-    <div className="login-stack" data-testid="login-card" ref={cardRef}><ViewSection sectionKey="setup-login" className="login-section" title={t('section.login')} active={running || starting}
-      actions={running && !starting ? <button
-        type="button"
-        className="btn small"
-        data-testid="login-cancel"
-        disabled={inert || cancel.pending}
-        onClick={() => cmd.post('cancel', (requestId) => ({ requestId, action: 'cancelLogin' }))}
-      >
-        <Icon name="x" size={12} />
-        {t('setup.login.cancel')}
-      </button> : undefined}>
+    <div className="login-stack" data-testid="login-card" ref={cardRef}><ViewSection sectionKey="setup-login" className="login-section" title={t('section.login')} active={running || starting}>
       {starting && (
         <div className="login-card" role="status" data-testid="login-starting">
           <div className="login-title">
@@ -212,7 +223,13 @@ export function LoginCard({ login, providers, cmd, inert, onSignIn, onConsole }:
           {login.instructions && <ClampedText className="login-instructions" text={login.instructions} />}
           {login.url && !viaConsole && <LoginLink url={login.url} />}
           {login.progress && <ClampedText className="login-progress" text={login.progress} />}
-          {login.prompt && <PromptForm key={login.prompt.id} prompt={login.prompt} cmd={cmd} inert={inert} />}
+          {login.prompt ? (
+            <PromptForm key={login.prompt.id} prompt={login.prompt} cmd={cmd} inert={inert || cancel.pending}>
+              {cancelButton}
+            </PromptForm>
+          ) : (
+            <div className="ui-form-actions">{cancelButton}</div>
+          )}
         </div>
       )}
 

@@ -1,6 +1,6 @@
 import { memo, useContext, useRef, useState, useSyncExternalStore } from 'react';
 import { parseSentCaseFeedback, sentCaseFeedbackText } from '../caseFeedbackMessage';
-import { clip, copyText } from '../format';
+import { clip, copyText, formatCount, formatDuration } from '../format';
 import { useT, type MessageKey } from '../i18n';
 import { useFindReveal } from '../findReveal';
 import { engineAbortText, isEngineAbort } from '../engineAbortText';
@@ -9,6 +9,7 @@ import type {
   AssistantItem,
   NoticeItem,
   SessionResetItem,
+  TurnBenchmarkItem,
   TurnErrorItem,
   UserItem,
 } from '../state';
@@ -314,6 +315,24 @@ export const AssistantMessage = memo(function AssistantMessage({ item, canStage 
       {item.stopReason === 'length' && <div className="msg-note">{t('msg.lengthCut')}</div>}
       {(item.textTruncated || item.thinkingTruncated) && <div className="msg-note" data-testid="msg-truncated">{t('msg.truncated')}</div>}
       {renderMenu()}
+    </div>
+  );
+});
+
+/** A turn footer, not part of the assistant's answer or its copy action. */
+export const TurnBenchmark = memo(function TurnBenchmark({ item }: { item: TurnBenchmarkItem }) {
+  const t = useT();
+  const { durationMs, outputTokens, generationDurationMs } = item.benchmark;
+  if (!Number.isFinite(durationMs) || durationMs < 0) return null;
+  const tokens = typeof outputTokens === 'number' && Number.isSafeInteger(outputTokens) && outputTokens >= 0 ? outputTokens : undefined;
+  const rate = tokens !== undefined && typeof generationDurationMs === 'number' && Number.isFinite(generationDurationMs) && generationDurationMs > 0
+    ? tokens * 1000 / generationDurationMs : undefined;
+  const speed = rate !== undefined && Number.isFinite(rate) ? rate.toFixed(1) : undefined;
+  return (
+    <div className="turn-benchmark" data-testid="turn-benchmark" data-find-skip title={t('benchmark.details')}>
+      <span>{t('benchmark.elapsed', { time: formatDuration(durationMs) })}</span>
+      <span title={speed === undefined ? t('benchmark.unavailable') : undefined}>{t('benchmark.speed', { speed: speed ?? '—' })}</span>
+      {tokens !== undefined && <span>{t('benchmark.output', { count: formatCount(tokens) })}</span>}
     </div>
   );
 });

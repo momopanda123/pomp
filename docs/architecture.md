@@ -321,6 +321,7 @@ omp --mode rpc [--mode rpc-ui] --cwd <솔루션 루트> --approval-mode <always-
 ### `vs-state.json`과 pre-edit Hook
 
 - `POMP_STATE_DIR\vs-state.json`은 호스트가 원자적으로 갱신하는 VS 상태다(열린 문서·dirty 여부).
+- 일반 수정은 VS에 열려 있어도 저장된 파일이면 디스크 도구를 쓴다. `read_buffer`로 편집기 상태를 확인했더라도 디스크 편집 기준(TAG)은 `read`에서 받아야 한다. 미저장 변경이 확인된 파일은 아래 규칙으로 보호하며 자동 저장하지 않는다.
 - omp 측 pre-edit Hook은 이를 보고 **VS에서 수정 중(dirty)인 파일**에 대한 omp 내장 `edit`/`write`/`ast_edit`/`lsp` 변경을 차단한다.
 - 안내 문구는 그 대화에서 부를 수 있는 호스트 툴(`POMP_HOST_TOOLS` ∩ 세션의 켜진 도구, `xd://` 마운트 포함)에 따라 다르다:
   - `read_buffer`와 `edit_buffer_hashline`을 부를 수 있으면(기본 탭의 기본값): `read_buffer` → `edit_buffer_hashline`을 안내한다.
@@ -433,8 +434,8 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
 #### 버전 정의
 
 - `engines/omp/engine.props`가 버전, 패치 빌드 출처, 자산 이름, 크기, SHA-256과 고지 파일 SHA-256을 고정한다.
-- 현재 상위 omp **18.21.0**(커밋 `6f03614d761366972e80e84e25d1418ed678d2c7`)에 `engines/omp/pomp-v18.21.0.patch`와 GPT-6.2 지원 백포트 `engines/omp/gpt-6.2-v18.21.0.patch`(상위 `2dedb850ac86e73aadc385e5b9cf08eac096e475`)를
-  적용하고 `src/Pomp.McpServer`를 함께 넣은 빌드다. 크기 **254,009,856바이트**, SHA-256 `3a748b1bb3fbcb679109a9930bfa53ad222ba363bd1ab756cecdec64faca1b34`.
+- 현재 상위 omp **18.22.2**(커밋 `e1ae2cc998efd1ca151b46ebefc0e0dab6c23c63`)에 `engines/omp/pomp-v18.22.2.patch`를
+  적용하고 공급자 카탈로그를 다시 생성한 빌드다. 실행 파일의 크기와 SHA-256은 [`engine.props`](../engines/omp/engine.props)에서 확인한다.
 - 라이선스는 MIT(`engines/omp/LICENSE.upstream`).
 
 #### 빌드 (`build/build-omp.ps1`, `Pomp.Vsix.Common.targets`의 `PompPrepareOmpEngine`)
@@ -545,7 +546,7 @@ omp의 RPC 계약(`get_state`, `set_fast_mode`, `get_available_thinking_levels`,
 ### 에이전트·팀과 컴퓨터 사용
 
 구현 계약은 §8 "에이전트·팀 구현 계약"에 있고, 사용 안내는 `docs/agent-teams.md`에 있다.
-엔진의 Win32 `takeover` 클릭과 창 활성화에 소스 패치가 필요하다(`engines/omp/pomp-v18.21.0.patch`).
+엔진의 Win32 `takeover` 클릭과 창 활성화에 소스 패치가 필요하다(`engines/omp/pomp-v18.22.2.patch`).
 열린 대화 탭마다 별도 omp 프로세스를 실행한다. 다른 탭의 응답·승인·대기열은 유지되며 전환을 기다리지 않는다.
 같은 탭의 새 대화·기록 전환은 해당 엔진이 바쁠 때 보류하고, 컴퓨터 입력 제어는 탭 전체에서 한 곳만 허용한다.
 기록 목록에서 지난 대화를 열 때도 그 대화 상대의 탭을 선택한 뒤 해당 엔진만 전환한다. 다른 탭에서 열린 대화는 먼저 탭을 닫아야 삭제할 수 있다.

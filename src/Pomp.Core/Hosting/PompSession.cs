@@ -75,15 +75,6 @@ namespace Pomp.Hosting
         /// <summary>User profile home directory for agent roles (tests); defaults to user profile.</summary>
         public string? UserHome { get; set; }
 
-        /// <summary>Official Antigravity app/CLI lookup (tests); defaults to installed locations, PATH agy and Windows registration.</summary>
-        public Func<string?>? AntigravityInstallationLocator { get; set; }
-
-        /// <summary>ACP process launcher; independent of native OMP launcher injection.</summary>
-        public IOmpProcessLauncher? AcpLauncher { get; set; }
-
-        /// <summary>Official agy CLI lookup; never a desktop application executable.</summary>
-        public Func<string?>? AntigravityCliLocator { get; set; }
-
         /// <summary>User teams directory (tests); defaults to %APPDATA%\Pomp\teams.</summary>
         public string? UserTeamsDirectory { get; set; }
 
@@ -177,7 +168,7 @@ namespace Pomp.Hosting
         internal bool ConversationRunning { get { lock (_stateLock) return _info.IsStreaming || _info.HasPendingAsyncWork || _turns.Count > 0; } }
         internal bool ConversationWaiting => _ui.PendingRequestCount > 0;
         internal string ConversationRoot { get { lock (_stateLock) return _workingDirectory; } }
-        internal ConversationTabsStatePayload ConversationTabs => TabsView(includePlan: false);
+        internal ConversationTabsStatePayload GetConversationTabs(string root) => TabsView(includePlan: false, workspace: root);
         internal Task RunHistoryCommandAsync(JObject args, Func<string, string, bool>? ownedElsewhere = null) =>
             _commands.Enqueue(() => HandleRecentSessionsAsync(args, ownedElsewhere));
         internal void InitializeConversation(string root, string? id, string? file, ConversationPartnerPayload? partner)

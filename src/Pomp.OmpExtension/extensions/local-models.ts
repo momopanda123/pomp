@@ -99,14 +99,17 @@ export function modelOf(row: unknown, catalog: CatalogLookup = bundledCatalog): 
 	const value = row as Record<string, unknown>;
 	const id = [value.id, value.model, value.name].find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
 	if (!id || id.length > 200) return null;
+	const slash = id.indexOf("/");
+	const gatewayRow = slash > 0 && value.owned_by === id.slice(0, slash);
+	// The gateway lists all model kinds, but serves non-chat kinds on separate endpoints.
+	if (gatewayRow && typeof value.kind === "string" && value.kind !== "chat") return null;
 	const context = positive(value.max_model_len) ?? positive(value.context_length) ?? positive(value.context_window) ?? positive(value.max_context_length) ?? DEFAULT_CONTEXT;
 	const display = typeof value.display_name === "string" ? value.display_name.trim() : "";
 	const name = display.length > 0 && display.length <= 200 ? display : id;
 	const image = Array.isArray(value.input_modalities) && value.input_modalities.includes("image");
 	const output = positive(value.max_output_tokens);
 	const listed = effortsOf(value.reasoning_efforts);
-	const slash = id.indexOf("/");
-	const known = listed === undefined && slash > 0 && value.owned_by === id.slice(0, slash) ? catalog(id.slice(0, slash), id.slice(slash + 1)) : undefined;
+	const known = listed === undefined && gatewayRow ? catalog(id.slice(0, slash), id.slice(slash + 1)) : undefined;
 	const thinks = listed !== undefined ? listed.length > 0 : value.reasoning === true || known?.reasoning === true;
 	const efforts = listed ?? effortsOf(known?.thinking?.efforts) ?? [];
 	const defaultLevel = known?.thinking?.defaultLevel;

@@ -12,12 +12,7 @@ export interface SkillsStatePayload { skills: SkillInfo[]; diagnostics: string[]
 export const MASKED_ENV = '••••';
 /** `headers` (http/sse) are masked like `env`. `catalogId`: installed from the POMP catalog. */
 export interface McpServer { name: string; scope: ResourceScope; type: 'stdio' | 'http' | 'sse'; command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string>; enabled: boolean; error?: string; hash?: string; catalogId?: string }
-/** External app configuration only; configured never implies a live MCP connection or verified login. */
-export interface AntigravityMcpState {
-  installed: boolean; enabled: boolean; configured: boolean; canConfigure: boolean; canDisable: boolean;
-  applicationPath?: string; configPath?: string; workspaceRoot?: string; serverName?: string; configHash?: string; message?: string;
-}
-export interface McpStatePayload { servers: McpServer[]; restartRequired: boolean; message?: string; antigravity?: AntigravityMcpState }
+export interface McpStatePayload { servers: McpServer[]; restartRequired: boolean; message?: string }
 export type CatalogKind = 'skill' | 'mcp';
 export type CatalogNeed = 'network' | 'token' | 'browser' | 'node';
 /** One value asked at install (an MCP token, say); a secret never comes back to the page. */
@@ -44,7 +39,7 @@ export interface ToolsCommand { requestId: string; action: 'refresh' | 'set' | '
  */
 /** enable/disable: name (any source; kept in POMP's own overrides and merged into the engine's disabledExtensions, applied without a restart). reset: name (clears the overrides, back to the default). */
 export interface SkillsCommand { requestId: string; action: 'refresh' | 'create' | 'pick' | 'import' | 'delete' | 'open' | 'read' | 'update' | 'enable' | 'disable' | 'reset'; scope?: ResourceScope; name?: string; description?: string; body?: string; content?: string; expectedHash?: string; ticket?: string }
-export interface McpCommand { requestId: string; action: 'refresh' | 'save' | 'delete' | 'enable' | 'disable' | 'test' | 'restart' | 'antigravity-refresh' | 'antigravity-set'; scope?: ResourceScope; name?: string; server?: McpServer; expectedHash?: string; enabled?: boolean }
+export interface McpCommand { requestId: string; action: 'refresh' | 'save' | 'delete' | 'enable' | 'disable' | 'test' | 'restart'; scope?: ResourceScope; name?: string; server?: McpServer; expectedHash?: string }
 /** A top-level `.pomp/rules/*.mdc` file; `note` says when only the engine can read its frontmatter. */
 export interface RuleInfo { name: string; scope: ResourceScope; file: string; hash: string; description: string; alwaysApply: boolean; globs: string[]; note?: string; unreadable?: boolean }
 export interface RulesStatePayload { rules: RuleInfo[]; diagnostics: string[] }

@@ -165,7 +165,6 @@ Payload: `{ requestId, action: "set", live?, bookmarks? }`.
 - Host → UI: `{ requestId, ok, error? }`. A successful start reply means startup was requested, not that the microphone is ready.
 - The host dispatches `dictation_start { captureId }` and `dictation_stop` outside the chat command queue; speech never creates a prompt.
 - Repeated stops for one capture issue only one engine stop. Cancelling preparation is not a startup failure. The engine stop waits up to 120 seconds for its final text.
-- With an ACP conversation selected there is no engine dictation: `on: false` is ignored without an error, and `on: true` is answered with a failed `dictation/reply`.
 
 ### `dictation/state`
 
@@ -288,7 +287,7 @@ Host text the page shows says what happened, the current state or a reason.
 
 | type | payload | notes |
 |---|---|---|
-| `host/hello` | `{ version, vsVersion?, locale?, includeEditorContextByDefault, composerPredictions, wordCompletion, approvalMode, shortcuts }` | First message after `ui/ready`. See "host/hello" below. |
+| `host/hello` | `{ version, vsVersion?, locale?, includeEditorContextByDefault, composerPredictions, wordCompletion, showTurnBenchmarks, approvalMode, shortcuts }` | First message after `ui/ready`. See "host/hello" below. |
 | `host/editorFollow` | `{ live, bookmarks, requestId?, error? }` | Editor follow capability and applied settings. See "Host-internal messages". |
 | `bridge/state` | `{ state, message?, attempt?, nextRetryMs?, reason? }` | Engine connection state. See "bridge/state" below. |
 | `workspace/trustState` | `{ requestId?, root, required, trusted, fingerprint, files: [{ path, kind, detail? }], truncated?, error? }` | Workspace engine configuration needing trust. See "Workspace trust". |
@@ -305,7 +304,7 @@ Host text the page shows says what happened, the current state or a reason.
 | `chat/toolStart` | `{ toolCallId, toolName, args?, isHostTool }` | Collapsible tool card inside the current turn. |
 | `chat/toolUpdate` | `{ toolCallId, text }` | Progress text; replace, not append. |
 | `chat/toolEnd` | `{ toolCallId, toolName, isError, resultText?, durationMs? }` | `resultText` is already truncated by the host. |
-| `chat/turnEnd` | `{ promptId, status: "completed"\|"aborted"\|"error", error?: { code, message, retryable } }` | Re-enable input; show an error banner on `error`. |
+| `chat/turnEnd` | `{ promptId, status: "completed"\|"aborted"\|"error", error?: { code, message, retryable }, benchmark?: { durationMs, outputTokens?, generationDurationMs? } }` | Re-enable input; show an error banner on `error`, then the optional turn benchmark. |
 | `chat/notice` | `{ level: "info"\|"warning"\|"error", message }` | Inline system note in the transcript. |
 | `chat/advisorNotes` | `{ notes: [{ advisor, severity?, note }] }` | Advisor notes to the chat agent, one card. See "Advisors". |
 | `permission/request` | `{ requestId, source: "hostTool"\|"ompApproval", kind, toolName, title, message?, tasks?: [{ agent, task }], target?, diff?, timeoutMs?, canRemember }` | Approval card inside the transcript. See "Request cards". |
@@ -344,13 +343,15 @@ shows that the answer was cut.
   - the language option changes the effective locale. The option is Tools > Options > Pomp > General > Chat > Language: Automatic / 한국어 / English;
   - the approval mode changes;
   - the shortcuts change;
-  - a Chat option it carries changes (`includeEditorContextByDefault`, `composerPredictions`, `wordCompletion`).
+  - a Chat option it carries changes (`includeEditorContextByDefault`, `composerPredictions`, `wordCompletion`, `showTurnBenchmarks`).
 - Nothing else resets it. The page compares nothing; it applies what it gets.
 - `locale` is `ko-KR`/`en-US` for an explicit choice, else VS's UI culture.
 - `approvalMode` is omp's approval mode in effect: `alwaysAsk` \| `write` \| `yolo`.
   The composer's permission-mode chip shows it. `permission/mode` changes it.
 - `wordCompletion` is Tools > Options > Pomp > General > Chat > Word completion (default on; absent from an older host means on).
   While it is true, the page shows the rest of the word being typed and Tab inserts it. See "Word completion".
+- `showTurnBenchmarks` is Tools > Options > Pomp > General > Chat > Show turn benchmarks (default on).
+  False hides every benchmark footer without discarding measurements; a later true shows them again immediately.
 
 `shortcuts` come from Tools > Options > Pomp > General > Shortcuts.
 
@@ -507,6 +508,16 @@ Payload fields:
 - It shows the extension's routing brief, such as `<!-- pomp-team:… -->`, at the start of the user text.
 - Session titles, previews and archive pages leave it out.
 
+### Completed-turn benchmarks
+
+- `chat/turnEnd.benchmark` is optional. One footer belongs to the completed, stopped or failed prompt, not to each intermediate `chat/assistantEnd`.
+- `durationMs` is the host's monotonic elapsed time from prompt admission to termination, including tools and waits. Queue time before admission is excluded.
+- `outputTokens` sums reported assistant `usage.output` across the turn's model calls, including reasoning and tool arguments. Missing, zero-initialized, invalid or incomplete usage suppresses the aggregate rather than reporting a partial count.
+- `generationDurationMs` sums provider request durations, or host assistant-start-to-end intervals when the provider omits duration. Tool execution is excluded. The UI computes `outputTokens * 1000 / generationDurationMs` only with known usage and positive duration; otherwise it shows `—` for speed.
+- Measurements are never estimated from response length.
+- Retained transcript replay preserves the original measurements. Engine-history reconstruction without recorded timing omits the benchmark rather than timing the replay.
+- The footer is display metadata, excluded from answer-copy and conversation search. The host collects it regardless of the viewer preference.
+
 ### chat/assistantNarration
 
 - The thinking block that just ended was narration: prose the model addressed to the user that the provider sent as thinking.
@@ -554,7 +565,7 @@ It comes from the code editor or Solution Explorer's POMP menu: explain, review,
 - `send` sends it once, right away, if the chat can take a message. Otherwise the text stays in the input.
 - A page that was not ready gets it once, at the end of its `ui/ready` snapshot, if within a minute.
 - Text is bounded to 4000 characters. Reference paths are at most 1024 characters, target paths 4096; there is no file-count truncation. Oversized prefill payloads are refused.
-- A nonempty `requestFiles` preserves the draft and references, replaces only the target set, disables editor selection context and never auto-sends, even if `send` was set. ACP refuses it without changing drafts.
+- A nonempty `requestFiles` preserves the draft and references, replaces only the target set, disables editor selection context and never auto-sends, even if `send` was set.
 - Scope is conversation-local. Ordinary reference additions do not clear it; an explicit editor-context request does.
 
 ### work/open
@@ -723,7 +734,7 @@ Payload:
 - The prompt requests complete current contents, bounded reads as needed, and modifications limited to these targets. It omits active-selection context. `read_buffer` is preferred when available; disk-only recipients must disclose that unsaved changes are excluded.
 - This is task intent, not a sandbox or permission grant. Reference attachments are context, not extra targets.
 - Targets survive queue edit/reorder/dispatch, steering, direct delivery, cross-tab relay, history restoration and retry. Transcript metadata, relay records and run history carry `requestFiles: [{ path }]`.
-- Unsupported ACP and engine slash-command sends are rejected; correlated rejection restores the draft and scope.
+- Engine slash-command sends with whole-file targets are rejected; correlated rejection restores the draft and scope.
 
 **Targets**
 
@@ -1237,7 +1248,7 @@ between turns, the message starts a new child turn. Codex children use the same 
 - Conversation settings hold the tools to use and the screen-input control.
 - A skill row's **채팅에서 사용** action puts the command into the chat input. It does not send it.
 - Rules are ordered **지금 적용 중 → 규칙**. The first section holds the rules that apply to the next prompt.
-- MCP is ordered **MCP 서버 → 추가할 수 있는 서버**. Antigravity is an on/off row in the server table, included in search, pagination and counts; it is not a separate setup card.
+- MCP is ordered **MCP 서버 → 추가할 수 있는 서버**.
 - The code search index handles lexical refresh automatically.
 - It also rebuilds or stops the vector index automatically when the local embedding option changes.
 - Sub-screen chips show the item count. A count of 0 is dimmed but still clickable.
@@ -1257,7 +1268,7 @@ between turns, the message starts a new child turn. Codex children use the same 
 - Commands use the host serial queue shared with chat submissions.
 - Tool selection is refused while any of these is active: a reply, an inline request, a pending approval or question,
   or an uncertain session switch.
-- Native skill and MCP changes are refused in the same situations. Metadata refresh is still allowed. Independent Antigravity setup is allowed while streaming or before engine/provider login, without restarting the engine.
+- Skill and MCP changes are refused in the same situations. Metadata refresh is still allowed.
 - A change that arrives while busy is refused. It does not wait for idle and then apply silently.
 
 ### Main-conversation tools
@@ -1713,45 +1724,18 @@ savePolicy { policy: { requireReviewedEdits, requireSandbox,
 
 | type | payload | meaning |
 | --- | --- | --- |
-| `mcp/state` | `{ servers, restartRequired, message?, antigravity? }` | Native writable definitions and separate external-client setup status. |
-| `mcp/command` | see below | Manage native MCP servers or configure Antigravity's use of POMP tools. |
+| `mcp/state` | `{ servers, restartRequired, message? }` | Writable project and user server definitions. |
+| `mcp/command` | see below | Manage MCP servers used by POMP. |
 | `mcp/reply` | `{ requestId, ok, error?, output? }` | Result of one `mcp/command`. |
 
 ```
 mcp/state:   { servers: [{ name, scope: "project"|"user", type: "stdio"|"http"|"sse",
                            command?, args?, env?: { [name]: "••••" }, url?,
                            enabled, error?, hash? }],
-               restartRequired, message?, antigravity? }
-mcp/command: { requestId, action: "refresh"|"save"|"delete"|"enable"|"disable"|"test"|"restart"|"antigravity-refresh"|"antigravity-set",
-               scope?, name?, server?, expectedHash?, enabled? }
+               restartRequired, message? }
+mcp/command: { requestId, action: "refresh"|"save"|"delete"|"enable"|"disable"|"test"|"restart",
+               scope?, name?, server?, expectedHash? }
 ```
-
-**External Antigravity setup**
-
-- `antigravity` contains `{ installed, configured, enabled, canConfigure, canDisable, applicationPath?, configPath?, workspaceRoot?, serverName?, configHash?, message? }`.
-- `antigravity-refresh` probes the official desktop app or `agy` CLI, the actual IDE workspace, the verified bundled engine and shared `~/.gemini/config/mcp_config.json`. It never starts an application or reads OAuth credentials.
-- `antigravity-set` requires `enabled`, `name: serverName` and `expectedHash: configHash` from the snapshot. The host re-resolves the workspace and refuses stale, malformed or foreign entries unchanged.
-- Enabling atomically merges only that workspace's owned `pomp_<hash>` entry. Other servers and unknown fields are preserved. The registered arguments are `mcp-server --cwd <workspace> --allow-write --allow-exec`; the row discloses file/shell permissions and that cwd is not a sandbox.
-- Disabling removes only the owned workspace entry, even if the app or bundled engine is unavailable. Repeated off and identical on are byte-preserving no-ops.
-- These actions bypass the inference queue and engine-offline/busy gates, but retain UI inert/hidden/transition/pending guards. They do not set native `restartRequired`, restart the engine or alter provider settings.
-- Tools remains available before provider setup. The MCP section probes when shown; it never automatically enables the connection.
-- `enabled` means an owned entry exists; `configured` means it matches the current verified bundle. Neither proves login or a live connection. The official client may need an MCP reload or restart.
-
-**Official ACP conversation backend**
-
-- `conversation/backend { requestId, backend: "omp" | "antigravity-acp" }` selects an independent backend. `session/new` accepts the optional backend; absence preserves the selected backend. Existing native provider configuration is unchanged.
-- `backend/state { active, antigravity: { installed, canStart, executablePath?, workspaceRoot?, ompToolsAvailable, message? } }` precedes the selected child snapshot. Selection remains reachable before native login. An ACP authentication/startup failure keeps its owner selected so offered login methods remain accessible. The no-solution fallback folder is not a workspace for ACP (`canStart: false`); the backend the user last selected in a real workspace is selected again when a workspace returns. `message` is localized; the page derives its own wording from the flags.
-- `bridge/restart` with an ACP conversation selected reconnects that same conversation (`session/load` or `session/resume` with its id, never a new one); its queue stays paused. The page offers it as Reconnect after a startup failure or a CLI exit.
-- ACP image input is limited to 5 MiB of raw image bytes per prompt, and the encoded prompt size is checked before the turn is shown.
-- Public ACP conversation IDs are `antigravity-acp:<opaque agent ID>`. Only the unprefixed ID is sent to ACP. There is no fake native transcript file. Workspace metadata keeps ACP entries separate from the native main conversation.
-- `session/info.backend` and `capabilities` gate native UI, queue/steer/stop, images/editor context, plan read/edit/actions and history list/preview/resume/rename/delete/compact. Absent native capabilities preserve legacy behavior; absent ACP capabilities fail closed.
-- `acp/state { sessionId?, connected, authRequired, error?, authMethods, configOptions, permissions, commands?, ompTools? }` preserves official select groups/boolean options and opaque permission IDs/options. `ompTools.state: "configured"` confirms descriptor submission, not tool execution.
-- `acp/command { requestId, sessionId?, action: "set-config" | "permission" | "authenticate", configId?, value?, permissionRequestId?, optionId?, methodId? }` returns `acp/reply { requestId, ok, error? }`. Values must have been offered by the CLI; approvals require the exact selected session and still-pending request. Native remembered permission rules never authorize ACP requests.
-- The host launches only official `agy acp`, identifies as POMP, and passes the verified model-free OMP MCP descriptor to each new/load/resume operation. It does not change global MCP settings, extract OAuth tokens, automate a desktop, impersonate an IDE or invoke `agy -p`.
-- Ordinary busy sends remain local queue entries. Explicit steering sends additional `session/prompt` requests; all outstanding responses must settle before queue drain. `session/cancel` is a notification, not assumed completion. Stop cancels pending approvals, invalidates earlier admissions and pauses the queue. EOF/error never implicitly retries a prompt; failed preparation preserves queued input.
-- Transcript/tool/plan/config updates are scoped to the actual agent session ID. ACP drafts are keyed by backend plus conversation ID, including one-time null-ID startup migration. ACP plans are read-only and retain their own paging/search/stop scope even while another backend is selected.
-- History uses advertised list/load capabilities and host-issued workspace-bound IDs. Failed restoration reports a correlated history error and never silently creates a replacement. Current Antigravity ACP offers no delete/rename/compact API; tab close does not delete provider history.
-- Model names/configuration availability are not proof of authorized or successful inference. Live metadata verification and user-approved real-model verification are separate.
 
 **Listing and paths (native MCP management)**
 
@@ -2386,6 +2370,7 @@ While it runs, omp sends `extension_ui_request`s:
 | `input` | `title`, `placeholder` | Shown as `login.prompt`; answered with `answerPrompt`. |
 
 - An `input` example: "paste the authorization code".
+- For `antigravity-cli` the risk warning is a `consent` prompt. Only an explicit Yes answers it affirmatively. The provider then supplies the Google sign-in URL and an `authorizationCode` prompt. A raw code or callback URL with a `code` query parameter can be pasted; the callback URL is not opened.
 - A provider that needs a secret typed in a terminal answers with an error.
 - The page then offers `loginConsole`, the old console sign-in.
 
@@ -2401,7 +2386,7 @@ While it runs, omp sends `extension_ui_request`s:
   login: { state: "idle"|"running"|"succeeded"|"failed", provider?, message?,
            url?, instructions?,                       // open_url of the running sign-in (already opened in the browser)
            progress?,                                 // latest notify text
-           prompt?: { id, message, placeholder? } },  // the sign-in waits for this input
+           prompt?: { id, message, placeholder?, kind?: "consent"|"authorizationCode" } },
   apiKeyProviders: [{ id, label, envVar }],  // the only providers a key can be saved for (host allowlist)
   keys: [{ provider, envVar, savedUtc }],    // saved keys; the key itself never leaves the host
   models?: [{ provider, id, name? }], modelsError?, currentModel?: { provider, id },
@@ -2478,6 +2463,7 @@ UsageReport = { provider, account?, plan?,
 | `listProviders` | | Starts the auth helper if needed; fills `providers` or `providersError`. |
 | `login` | `provider` | RPC sign-in through the auth helper; one at a time. |
 | `answerPrompt` | `promptId`, `value?` | Answers `login.prompt`; ≤ 4096 characters. |
+| `answerPromptFromClipboard` | `promptId` | Explicit paste for the active Antigravity CLI code prompt only. Reads the Windows clipboard in the host, never returns it to the page. |
 | `cancelLogin` | | Cancels the running sign-in. |
 | `loginConsole` | `provider?` | Fallback: `omp login [provider]` in its own console window. |
 | `saveKey` | `provider`, `key` | Saves an encrypted API key. |

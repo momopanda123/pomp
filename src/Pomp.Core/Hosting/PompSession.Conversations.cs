@@ -142,11 +142,11 @@ namespace Pomp.Hosting
             throw new InvalidOperationException(PompLanguage.Pick("대화 상대를 찾을 수 없어요.", "Conversation partner was not found."));
         }
         internal void CheckConversationPartner(ConversationPartnerPayload partner) => ValidatePartner(partner);
-        private ConversationTabsStatePayload TabsView(bool includePlan = true)
+        private ConversationTabsStatePayload TabsView(bool includePlan = true, string? workspace = null)
         {
             ConversationTabsStatePayload state; string root;
             bool running; string? active;
-            lock (_stateLock) { root = _workingDirectory; active = _info.SessionId; running = _info.IsStreaming || _info.HasPendingAsyncWork || _turns.Count > 0;
+            lock (_stateLock) { root = workspace ?? _workingDirectory; active = _info.SessionId; running = _info.IsStreaming || _info.HasPendingAsyncWork || _turns.Count > 0;
                 state = new ConversationTabsStatePayload {
                     Root = root, SessionId = _partnerSession, Partner = CopyPartner(_partner), Message = _partnerMessage,
                     PendingAction = _pendingSessionAction, PendingRequestId = _pendingSessionRequestId,
@@ -157,7 +157,7 @@ namespace Pomp.Hosting
             string? Title(ConversationPartnerPayload partner) => partner.Kind == "agent" ? roles.FirstOrDefault(r => r.Name == partner.Id && !r.Shadowed && string.IsNullOrEmpty(r.Error))?.Title ?? partner.Id
                 : partner.Kind == "team" ? teams.FirstOrDefault(t => t.Id == partner.Id && !t.Shadowed && string.IsNullOrEmpty(t.Error))?.Title ?? partner.Id : null;
             state.Title = Title(state.Partner); state.Main = tabs.Main; state.MainRunning = running && active == tabs.Main;
-            state.Tabs = tabs.Conversations.Where(e => e.Open).Select(e => new ConversationTabPayload { SessionId = e.SessionId, Backend = e.Backend, Partner = CopyPartner(e.Partner), Title = e.Backend == "antigravity-acp" ? "Antigravity" : Title(e.Partner), IsRunning = running && active == e.SessionId }).ToList();
+            state.Tabs = tabs.Conversations.Where(e => e.Open).Select(e => new ConversationTabPayload { SessionId = e.SessionId, Partner = CopyPartner(e.Partner), Title = Title(e.Partner), IsRunning = running && active == e.SessionId }).ToList();
             if (includePlan && ConversationPlan is ConversationPlanPayload plan) state.Plans.Add(plan);
             return state;
         }

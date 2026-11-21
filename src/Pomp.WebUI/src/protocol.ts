@@ -52,6 +52,8 @@ export interface HostHelloPayload {
   composerPredictions: boolean;
   /** Word completion in the chat input (Tools > Options > Pomp > Chat); absent on an older host (= on). */
   wordCompletion?: boolean;
+  /** Show completed-turn performance in chat; on unless disabled in the host's Chat options. */
+  showTurnBenchmarks?: boolean;
   /** omp's approval mode in effect; absent on an older host (= alwaysAsk). Changed with `permission/mode`. */
   approvalMode?: ApprovalMode;
   /** The page's shortcuts (Tools > Options > Pomp > Shortcuts); absent keys keep {@link DEFAULT_SHORTCUTS}. */
@@ -117,6 +119,7 @@ export interface SetupLoginPrompt {
   id: string;
   message: string;
   placeholder?: string;
+  kind?: 'consent' | 'authorizationCode';
 }
 
 export interface SetupLogin {
@@ -290,6 +293,7 @@ export type SetupCommand = { requestId: string } & (
   | { action: 'login'; provider: string }
   | { action: 'loginConsole'; provider?: string }
   | { action: 'answerPrompt'; promptId: string; value?: string }
+  | { action: 'answerPromptFromClipboard'; promptId: string }
   | { action: 'saveKey'; provider: string; key: string }
   | { action: 'removeKey'; provider: string }
   /** Adds a local model server, or replaces the one with `id`; an empty `key` keeps its saved key. */
@@ -493,11 +497,8 @@ export interface EditorFollowState {
   error?: string;
 }
 
-import { normalizeAcpState, normalizeBackendState, type BackendId, type BackendState, type SessionCapabilities, type AcpState, type AcpCommand, type AcpReply } from './backend';
 
 export interface SessionInfoPayload {
-  backend?: BackendId;
-  capabilities?: SessionCapabilities;
   recoveryStatus?: 'ready' | 'restoring' | 'failed';
   recoveryMessage?: string;
   todoPhases?: AgentPlanPhase[];
@@ -705,10 +706,20 @@ export interface UiErrorInfo {
   clientMessageId?: string;
 }
 
+export interface TurnBenchmarkPayload {
+  /** Whole admitted turn, including tools and waits. */
+  durationMs: number;
+  /** Reported output tokens across all model calls; absent when coverage is incomplete. */
+  outputTokens?: number | null;
+  /** Summed model-call time, excluding tool execution; absent when unavailable. */
+  generationDurationMs?: number | null;
+}
+
 export interface TurnEndPayload {
   promptId: string;
   status: TurnStatus;
   error?: UiErrorInfo;
+  benchmark?: TurnBenchmarkPayload | null;
 }
 
 export interface NoticePayload {
@@ -833,7 +844,6 @@ export type SlashCommand = CommandInfo;
 export interface CommandsState { commands: SlashCommand[]; hidden?: number }
 
 export interface SessionEntry {
-  backend?: BackendId;
   /** Opaque host handle, not a file path supplied by the page. */
   id: string;
   sessionId?: string;
@@ -988,7 +998,6 @@ export function normalizeSessionHistory(payload: unknown): SessionHistoryState {
       const entrySessionId = protocolId(row.sessionId);
       const messageCount = protocolCount(row.messageCount);
       if (entrySessionId !== undefined) entry.sessionId = entrySessionId;
-      if (row.backend === 'omp' || row.backend === 'antigravity-acp') entry.backend = row.backend;
       if (name !== undefined) entry.name = name;
       if (modifiedUtc !== undefined) entry.modifiedUtc = modifiedUtc;
       if (visitedUtc !== undefined) entry.visitedUtc = visitedUtc;
@@ -1313,9 +1322,6 @@ export interface CaseFeedbackState {
   proposal?: CaseFeedbackProposal | null; error?: string; notice?: string;
 }
 export interface HostToUi extends ConversationHostToUi, ToolsHostToUi {
-  'backend/state': BackendState;
-  'acp/state': AcpState;
-  'acp/reply': AcpReply;
   'feedback/state': CaseFeedbackState;
   'feedback/imageResult': { requestId: string; proposalId: string; caseId: string; dataUrl?: string; error?: string };
   'workspace/goalState': GoalState;
@@ -1412,8 +1418,6 @@ type Empty = Record<string, never>;
 
 /** UI -> Host message types with their payloads. */
 export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
-  'conversation/backend': { requestId: string; backend: BackendId };
-  'acp/command': AcpCommand;
   'composer/predict': { requestId: string; sessionId: string; text: string };
   'feedback/image': { requestId: string; root: string; sessionId: string; proposalId: string; caseId: string };
   'feedback/command': { action: 'refresh' | 'open' | 'draft' | 'submit' | 'delete'; requestId: string; root: string; sessionId?: string; proposalId?: string; revision?: number; draftRevision?: number; selections?: CaseFeedbackSelection[] };
@@ -1494,7 +1498,7 @@ export interface UiToHost extends ConversationUiToHost, ToolsUiToHost {
   'permission/mode': { requestId: string; mode: ApprovalMode };
   'dialog/respond': { requestId: string; value?: string; confirmed?: boolean; cancelled?: boolean };
   /** `requestId` comes back in `session/newResult`. */
-  'session/new': { requestId: string; backend?: BackendId };
+  'session/new': { requestId: string };
   'session/recover': Record<string, never>;
   /** savePolicy: write `policy` (expectedHash null = the file must not exist yet); deletePolicy: remove the file (expectedHash required). */
   'permission/rules': { requestId: string; action: 'refresh' | 'revoke' | 'openPolicy' | 'createPolicy' | 'savePolicy' | 'deletePolicy' | 'untrust'; root?: string; sessionId?: string; scope?: 'session' | 'persistent'; key?: string; policy?: ProjectPolicyDraft; expectedHash?: string | null; workspace?: string };
@@ -1528,7 +1532,6 @@ declare global {
 
 /** Every known host message type; anything else is ignored (forward compatibility). */
 const HOST_TYPES: Record<HostMessageType, true> = {
-  'backend/state': true, 'acp/state': true, 'acp/reply': true,
   'tools/state': true, 'tools/reply': true,
   'skills/state': true, 'skills/reply': true,
   'mcp/state': true, 'mcp/reply': true,
@@ -1644,12 +1647,6 @@ function normalize(data: unknown): HostMessage | null {
   if (typeof type !== 'string' || !Object.hasOwn(HOST_TYPES, type)) return null;
   if (type === 'commands/state') return { type, id: protocolId(id, 256), payload: normalizeCommandsState(payload) };
   if (type === 'session/historyState') return { type, id: protocolId(id, 256), payload: normalizeSessionHistory(payload) };
-  if (type === 'backend/state') return { type, id: protocolId(id, 256), payload: normalizeBackendState(payload) };
-  if (type === 'acp/state') return { type, id: protocolId(id, 256), payload: normalizeAcpState(payload) };
-  if (type === 'acp/reply') {
-    const reply = protocolRecord(payload), requestId = protocolId(reply.requestId, 256);
-    return requestId ? { type, id: protocolId(id, 256), payload: { requestId, ok: reply.ok === true, error: protocolText(reply.error, 4000) } } : null;
-  }
   return {
     type,
     id: typeof id === 'string' ? id : undefined,

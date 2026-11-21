@@ -20,7 +20,6 @@ export const workViews = ['progress', 'review', 'codeReview'] as const;
 export type WorkView = typeof workViews[number];
 export type RequestedWorkView = WorkView | 'plan' | 'workflow' | 'history' | 'terminal';
 export interface WorkTabProps {
-  native?: boolean;
   locale: string; plans: ConversationPlan[]; workspaceKey: string; sessionId?: string;
   connected: boolean; busy: boolean; newSessionPending?: boolean; inert?: boolean; attention: WorkAttention;
   requestedView?: RequestedWorkView; onViewChange?: (view: WorkView) => void;
@@ -35,7 +34,7 @@ export function workViewAttention(view: WorkView, attention: WorkAttention): num
 export function initialWorkView(attention: WorkAttention): WorkView {
   return workViews.find(view => workViewAttention(view, attention) > 0) ?? 'review';
 }
-export function WorkTab({ native = true, locale, plans, workspaceKey, sessionId, connected, busy, newSessionPending = false, inert = false,
+export function WorkTab({ locale, plans, workspaceKey, sessionId, connected, busy, newSessionPending = false, inert = false,
   requestedView, onViewChange, onContinue, onSolve, onOpenWorkflows }: WorkTabProps) {
   useWorkScope(workspaceKey, sessionId);
   const snapshot = useWorkSnapshot();
@@ -48,9 +47,6 @@ export function WorkTab({ native = true, locale, plans, workspaceKey, sessionId,
   const t = useT();
   const [changes, setChanges] = useState<'pending' | 'applied'>('pending');
   const inactive = (item: WorkView) => inert || view !== item;
-  if (!native) return <div className="tools-tab" data-testid="work-tab" inert={inert || undefined}>
-    <ConversationPlans root={workspaceKey} plans={plans} activeSessionId={sessionId} locale={locale} inert={inert} />
-  </div>;
   return <div className="tools-tab" data-testid="work-tab" inert={inert || undefined}>
     <ViewChips prefix="work" label={t('work.view.nav')} active={view} onChange={change} inert={inert}
       views={workViews.map(id => ({ id, label: t(`work.view.${id}`), badge: counts[id] }))} />

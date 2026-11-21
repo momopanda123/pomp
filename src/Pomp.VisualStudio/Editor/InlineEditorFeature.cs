@@ -135,8 +135,7 @@ namespace Pomp.VisualStudio.Editor
                 var request = new InlineRequest { Prefix = snapshot.GetText(Math.Max(0, position - 3200), Math.Min(position, 3200)),
                     Suffix = snapshot.GetText(position, Math.Min(800, snapshot.Length - position)), Language = view.TextBuffer.ContentType.TypeName };
                 CancelPending(); pending = new CancellationTokenSource(); var token = pending.Token;
-                if (services.ActiveSession is not IInlineAssistant assistant)
-                { services.Logger.Debug("Inline suggestion not requested: the selected conversation's backend has no inline assistant."); return; }
+                IInlineAssistant assistant = services.ActiveSession;
                 _ = services.JoinableTaskFactory.RunAsync(async () =>
                 {
                     try
@@ -213,10 +212,7 @@ namespace Pomp.VisualStudio.Editor
                 var spans = view.GetMultiSelectionBroker().AllSelections.Select(selection => selection.Extent.SnapshotSpan).ToArray();
                 if (spans.Length == 0) spans = new[] { new SnapshotSpan(snapshot, view.Caret.Position.BufferPosition.Position, 0) };
                 // A question only needs the editor context; an edit needs a saved document and bounded selections.
-                ITextDocument? document = null;
-                // "Propose an edit" also needs a backend with an inline assistant: without one the typed instruction would be discarded.
-                var canEdit = services.ActiveSession is IInlineAssistant
-                    && documents.TryGetTextDocument(view.TextBuffer, out document) && snapshot.Length <= 500000 && spans.Length <= 5 && spans.All(s => s.Length <= 24000);
+                var canEdit = documents.TryGetTextDocument(view.TextBuffer, out var document) && snapshot.Length <= 500000 && spans.Length <= 5 && spans.All(s => s.Length <= 24000);
                 if (main == PromptAction.Edit && !canEdit) return false;
                 Clear(); CancelPending(); debounce.Stop();
                 var point = view.Caret.Position.BufferPosition; var line = view.GetTextViewLineContainingBufferPosition(point); var bounds = line.GetCharacterBounds(point);
@@ -244,8 +240,7 @@ namespace Pomp.VisualStudio.Editor
                 if (document == null) return true;
                 if (view.TextSnapshot != snapshot) { SetStatus(PompLanguage.Pick("POMP: 코드가 바뀌어 질문을 취소했어요.", "POMP: the code changed, so the question was cancelled.")); return true; }
                 CancelEdit(); editRequest = new CancellationTokenSource(); var token = editRequest.Token;
-                if (services.ActiveSession is not IInlineAssistant assistant)
-                { SetStatus(PompLanguage.Pick("POMP: 이 대화에서는 수정 제안을 쓸 수 없어요.", "POMP: edit proposals are not available in this conversation.")); return true; }
+                IInlineAssistant assistant = services.ActiveSession;
                 SetStatus(PompLanguage.Pick("POMP: 질문의 수정 제안을 준비하는 중", "POMP: preparing an edit proposal for the question"));
                 _ = services.JoinableTaskFactory.RunAsync(async () =>
                 {

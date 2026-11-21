@@ -16,7 +16,7 @@ using Pomp.Ui;
 
 namespace Pomp.Hosting
 {
-    /// <summary>One UI with independent backend-owned conversations. Plans address their owner explicitly.</summary>
+    /// <summary>One chat UI with independent OMP conversations. Plans address their owner explicitly.</summary>
     public sealed partial class PompConversationHost : IPompSession, IEditorSessionContextSource
     {
         private readonly object _gate = new object();
@@ -29,14 +29,12 @@ namespace Pomp.Hosting
         private readonly PompSessionOptions _options;
         private readonly ConversationTabStore _tabs;
         private readonly SerialQueue _tabCommands;
-        private readonly Dictionary<IConversationSession, Channel> _channels = new Dictionary<IConversationSession, Channel>();
+        private readonly Dictionary<PompSession, Channel> _channels = new Dictionary<PompSession, Channel>();
         private IUiChannel? _page;
-        private IConversationSession _active;
+        private PompSession _active;
         private string _root = "";
         private bool _disposed;
         private long _tabsPublication;
-        // The backend last made active in a real workspace; a workspace that returns after "no solution" starts with it.
-        private string _selectedBackend = "omp";
         // Editor features create the host before the chat is shown: solution events start nothing until a start was requested.
         private bool _startRequested;
         // What the host's own origin check found for _originRoot; the first native child of that root tells the user.
@@ -75,37 +73,23 @@ namespace Pomp.Hosting
             catch (Exception ex) { _logger.Warn("Could not subscribe to workspace changes: " + ex.Message); }
         }
 
-        public IConversationSession ActiveSession { get { lock (_gate) return _active; } }
+        public PompSession ActiveSession { get { lock (_gate) return _active; } }
         public EditorSessionContext EditorSessionContext => ActiveSession.EditorSessionContext;
-        /// <summary>Invalidates optional editor capabilities even when the previous conversation offered none.</summary>
+        /// <summary>Rebinds editor features when the selected conversation changes.</summary>
         public event EventHandler? ActiveSessionChanged;
 
-        private IConversationSession CreateChild(string backend = "omp")
+        private PompSession CreateChild()
         {
-            IConversationSession session = backend == "omp"
-                ? new PompSession(_settings, _environment, _adapters, _registry(), _logger, _launcher, _options, managedWorkspace: true, credentialEpoch: _credentialEpoch)
-                : backend == "antigravity-acp"
-                    ? new AcpConversationSession(_settings, _environment, _adapters, _logger, _options)
-                    : throw new ArgumentException(PompLanguage.Pick("알 수 없는 대화 연결 방식이에요.", "Unknown conversation backend."));
+            var session = new PompSession(_settings, _environment, _adapters, _registry(), _logger, _launcher, _options, managedWorkspace: true, credentialEpoch: _credentialEpoch);
             session.ConversationStateChanged += OnConversationStateChanged;
-            if (session is PompSession native) { native.RelayHost = this; native.RelayChanged += OnRelayChanged; }
+            session.RelayHost = this;
+            session.RelayChanged += OnRelayChanged;
             _channels.Add(session, new Channel(this, session));
             return session;
         }
 
         private void OnConversationStateChanged(object? sender, EventArgs e)
         {
-            if (sender is IConversationSession owner && owner.BackendId != "omp" && owner.ConversationId is string id
-                && !string.IsNullOrEmpty(owner.ConversationRoot))
-            {
-                try
-                {
-                    lock (_gate)
-                        if (!_disposed && _channels.ContainsKey(owner)) _tabs.ObserveBackend(owner.ConversationRoot, id, owner.BackendId);
-                }
-                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException)
-                { _logger.Warn("Backend conversation ownership could not be saved: " + ex.Message); }
-            }
             PublishTabs();
             if (!(sender is PompSession session)) return;
             // A background tab whose run just ended may still have the old accounts and model servers.
@@ -120,8 +104,8 @@ namespace Pomp.Hosting
         /// </summary>
         private void OnCredentialsAdvanced(object? sender, EventArgs e)
         {
-            PompSession[] sessions; IConversationSession active;
-            lock (_gate) { if (_disposed) return; sessions = _channels.Keys.OfType<PompSession>().ToArray(); active = _active; }
+            PompSession[] sessions; PompSession active;
+            lock (_gate) { if (_disposed) return; sessions = _channels.Keys.ToArray(); active = _active; }
             Task.Run(() =>
             {
                 foreach (var session in sessions)
@@ -136,14 +120,14 @@ namespace Pomp.Hosting
         private void OnModelListsChanged(object? sender, EventArgs e)
         {
             PompSession[] sessions;
-            lock (_gate) { if (_disposed) return; sessions = _channels.Keys.OfType<PompSession>().ToArray(); }
+            lock (_gate) { if (_disposed) return; sessions = _channels.Keys.ToArray(); }
             Task.Run(() => { foreach (var session in sessions) session.ForgetModelList(sender); }).Forget(_logger, "refresh the other tabs' model lists");
         }
 
         public void AttachUi(IUiChannel channel)
         {
             if (channel == null) throw new ArgumentNullException(nameof(channel));
-            IConversationSession active; Channel proxy;
+            PompSession active; Channel proxy;
             lock (_gate)
             {
                 if (_disposed) throw new ObjectDisposedException(nameof(PompConversationHost));
@@ -152,16 +136,14 @@ namespace Pomp.Hosting
                 _page = channel;
                 channel.MessageReceived += Receive;
                 active = _active; proxy = _channels[active];
-                proxy.DeferReady();
             }
             active.DetachUi(proxy);
             active.AttachUi(proxy);
-            ReleaseReadyAsync(active, proxy, channel).Forget(_logger, "attached backend readiness");
         }
 
         public void DetachUi(IUiChannel channel)
         {
-            IConversationSession active; Channel proxy;
+            PompSession active; Channel proxy;
             lock (_gate)
             {
                 if (!ReferenceEquals(_page, channel)) return;
@@ -174,40 +156,24 @@ namespace Pomp.Hosting
         private void Receive(object? sender, UiMessage message)
         {
             lock (_gate) if (_disposed || !ReferenceEquals(sender, _page)) return;
-            if (message.Type == UiMessageTypes.UiReady)
+            if (message.Type == UiMessageTypes.SessionNew && message.Payload.GetString("backend") is string ownerKind && ownerKind != "omp")
             {
-                IConversationSession owner; Channel channel; IUiChannel page;
-                lock (_gate)
-                {
-                    owner = _active; channel = _channels[owner]; page = _page!;
-                    if (channel.ReadyDeferred) return;
-                }
-                ReleaseReadyAsync(owner, channel, page).Forget(_logger, "backend readiness");
+                Reply(UiMessageTypes.SessionNewResult, (string?)message.Payload?["requestId"],
+                    PompLanguage.Pick("이 대화는 OMP 대화가 아니에요.", "This is not an OMP conversation."));
                 return;
             }
-            if (message.Type == "conversation/backend" || message.Type == UiMessageTypes.SessionNew)
+            if (message.Type == UiMessageTypes.SessionNew)
             {
                 var owner = ActiveSession;
-                _tabCommands.Enqueue(() => HandleBackendAsync(message, owner));
-                return;
-            }
-            if (message.Type == "acp/command")
-            {
-                var id = (string?)message.Payload?["sessionId"];
-                if (id == null && (string?)message.Payload?["action"] == "permission")
+                _tabCommands.Enqueue(() =>
                 {
-                    Reply("acp/reply", (string?)message.Payload?["requestId"] ?? "", PompLanguage.Pick("승인 응답에 어느 ACP 대화인지가 빠졌어요.", "A permission reply must identify its ACP conversation."));
-                    return;
-                }
-                IConversationSession? owner;
-                Channel? channel;
-                lock (_gate)
-                {
-                    owner = _active.BackendId == "antigravity-acp" && (id == null || _active.ConversationId == id) ? _active : null;
-                    channel = owner == null ? null : _channels[owner];
-                }
-                if (channel == null) Reply("acp/reply", (string?)message.Payload?["requestId"] ?? "", PompLanguage.Pick("이 ACP 대화는 더 이상 선택되어 있지 않아요.", "The ACP conversation is no longer selected."));
-                else channel.Deliver(message);
+                    Channel? channel;
+                    lock (_gate) channel = !_disposed && ReferenceEquals(owner, _active) ? _channels[owner] : null;
+                    if (channel == null) Reply(UiMessageTypes.SessionNewResult, (string?)message.Payload?["requestId"],
+                        PompLanguage.Pick("요청한 대화가 더 이상 선택되어 있지 않아요.", "The requesting conversation is no longer selected."));
+                    else channel.Deliver(message);
+                    return Task.CompletedTask;
+                });
                 return;
             }
             if (message.Type == UiMessageTypes.AgentPlan || message.Type == UiMessageTypes.AgentPlanPage ||
@@ -235,7 +201,7 @@ namespace Pomp.Hosting
                     // Keep tab open/close/history switches serialized until recycling has finished.
                     await owner.RunHistoryCommandAsync(message.Payload ?? new JObject(), (id, path) =>
                     {
-                        IConversationSession[] sessions;
+                        PompSession[] sessions;
                         lock (_gate) sessions = _channels.Keys.Where(session => !ReferenceEquals(session, owner)).ToArray();
                         return sessions.Any(session => session.ConversationId == id ||
                             string.Equals(session.ConversationFile, path, StringComparison.OrdinalIgnoreCase));
@@ -247,7 +213,7 @@ namespace Pomp.Hosting
                 && Pomp.Protocol.OmpApprovalModeExtensions.TryParseUiValue((string?)message.Payload?["mode"], out var wantedMode)
                 && wantedMode != _settings.ApprovalMode)
             {
-                IConversationSession[] others; IUiChannel? target;
+                PompSession[] others; IUiChannel? target;
                 lock (_gate) { if (_disposed) return; others = _channels.Keys.Where(session => !ReferenceEquals(session, _active)).ToArray(); target = _page; }
                 if (others.Any(session => session.ConversationRunning))
                 {
@@ -260,7 +226,7 @@ namespace Pomp.Hosting
                     return;
                 }
             }
-            IConversationSession active; Channel proxy;
+            PompSession active; Channel proxy;
             lock (_gate) { if (_disposed) return; active = _active; proxy = _channels[active]; }
             proxy.Deliver(message);
         }
@@ -268,7 +234,7 @@ namespace Pomp.Hosting
         {
             CancellationTokenSource old, next, debounce;
             CancellationTokenSource? pending;
-            IConversationSession[] sessions;
+            PompSession[] sessions;
             lock (_gate)
             {
                 if (_disposed || !_startRequested) return;
@@ -290,9 +256,7 @@ namespace Pomp.Hosting
                 await _tabCommands.Enqueue(async () =>
                 {
                     var root = await WorkspaceRootAsync(epoch).ConfigureAwait(false);
-                    var realRoot = await _environment.GetWorkspaceRootAsync(epoch).ConfigureAwait(false);
-                    var hasWorkspace = IsRealWorkspace(realRoot);
-                    IConversationSession[] old; IConversationSession previous, replacement; IConversationSession? created = null;
+                    PompSession[] old; PompSession previous, replacement; PompSession? created = null;
                     IUiChannel? page; Channel oldProxy, newProxy;
                     lock (_gate)
                     {
@@ -300,7 +264,6 @@ namespace Pomp.Hosting
                         if (SameRoot(root, _root) && SameRoot(_active.ConversationRoot, root))
                         {
                             foreach (var session in _channels.Keys) session.UnfreezeWorkspace();
-                            PublishBackendStateAsync().Forget(_logger, "workspace backend readiness");
                             return;
                         }
                         old = _channels.Keys.ToArray();
@@ -312,18 +275,13 @@ namespace Pomp.Hosting
                         lock (_gate)
                         {
                             epoch.ThrowIfCancellationRequested();
-                            // The folder used when nothing is open is never a project for ACP; a real one returns to the user's backend.
-                            replacement = created = CreateChild(hasWorkspace ? _selectedBackend : "omp");
+                            replacement = created = CreateChild();
                         }
-                        var saved = _tabs.Read(root);
-                        var savedId = replacement.BackendId == "omp" ? saved.Main
-                            : saved.Conversations.LastOrDefault(entry => entry.Backend == replacement.BackendId && entry.Open)?.SessionId;
-                        var savedFile = replacement.BackendId == "omp" && savedId != null ? SavedFileOrNull(root, savedId) : null;
-                        if (replacement.BackendId == "omp" && savedFile == null) savedId = null;
-                        replacement.InitializeConversation(root, savedId, savedFile, null);
+                        var savedId = _tabs.Read(root).Main;
+                        var savedFile = savedId == null ? null : SavedFileOrNull(root, savedId);
+                        replacement.InitializeConversation(root, savedFile == null ? null : savedId, savedFile, null);
                         HandOrigin(replacement, root);
-                        // ACP setup/authentication failures must be visible on its selected page.
-                        if (replacement.BackendId == "omp") await replacement.EnsureStartedAsync(epoch).ConfigureAwait(false);
+                        await replacement.EnsureStartedAsync(epoch).ConfigureAwait(false);
                         lock (_gate)
                         {
                             epoch.ThrowIfCancellationRequested();
@@ -347,7 +305,6 @@ namespace Pomp.Hosting
                         previous.DetachUi(oldProxy);
                         try
                         {
-                            await PublishBackendStateAsync().ConfigureAwait(false);
                             await page.PostAsync(new UiMessage(UiMessageTypes.SessionNewResult, new SessionNewResultPayload { Status = "completed" })).ConfigureAwait(false);
                         }
                         catch (Exception ex) { _logger.Warn("Could not announce the workspace conversation: " + ex.Message); }
@@ -355,49 +312,17 @@ namespace Pomp.Hosting
                     }
                     foreach (var session in old) RemoveChild(session);
                     PublishTabs();
-                    if (replacement.BackendId != "omp")
-                    {
-                        try { await replacement.EnsureStartedAsync(epoch).ConfigureAwait(false); }
-                        catch (Exception ex) when (!(ex is OperationCanceledException)) { _logger.Warn("The workspace backend could not start: " + ex.Message); }
-                    }
                 }).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { }
             catch (Exception ex) { _logger.Warn("Changing the conversation workspace failed: " + ex.Message); }
         }
-        private async Task HandleOpenHistoryTabAsync(JObject args, IConversationSession current)
+        private async Task HandleOpenHistoryTabAsync(JObject args, PompSession current)
         {
             string root;
             lock (_gate) { root = _root; }
             var handle = (string?)args["id"];
-            if (handle?.StartsWith("antigravity-acp:", StringComparison.Ordinal) == true
-                || (string?)args["backend"] == "antigravity-acp")
-            {
-                var requestId = (string?)args["requestId"] ?? "";
-                try
-                {
-                    if (handle == null || !handle.StartsWith("antigravity-acp:", StringComparison.Ordinal)
-                        || !SameRoot((string?)args["root"] ?? "", root))
-                        throw new InvalidOperationException(PompLanguage.Pick("ACP 대화 기록의 작업 영역이나 대화가 바뀌었어요.", "The ACP history workspace or identity changed."));
-                    if (current is not AcpConversationSession acp)
-                        throw new InvalidOperationException(PompLanguage.Pick("기록을 연 ACP 대화가 더 이상 선택되어 있지 않아요.", "The ACP history owner is no longer selected."));
-                    handle = acp.ResolveHistoryId(args);
-                    await ActivateAsync(root, handle, null, requestId, "antigravity-acp").ConfigureAwait(false);
-                    await ActiveSession.RunHistoryCommandAsync(new JObject { ["action"] = "refresh", ["requestId"] = requestId }).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    Reply(UiMessageTypes.SessionNewResult, requestId, ex.Message);
-                    await current.RunHistoryCommandAsync(new JObject { ["action"] = "refresh", ["requestId"] = requestId }).ConfigureAwait(false);
-                }
-                return;
-            }
-            if (current.BackendId != "omp")
-            {
-                await current.RunHistoryCommandAsync(args).ConfigureAwait(false);
-                return;
-            }
-            if (handle != null && args["root"]?.Type == JTokenType.String && SameRoot((string)args["root"]!, root))
+            if (args.GetString("backend") is null or "omp" && handle != null && args["root"]?.Type == JTokenType.String && SameRoot((string)args["root"]!, root))
             {
                 var store = new RecentSessionStore(_environment.DataDirectory, root);
                 try
@@ -457,11 +382,6 @@ namespace Pomp.Hosting
             try { return string.Equals(Path.GetFullPath(a).TrimEnd('\\', '/'), Path.GetFullPath(b).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase); }
             catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException) { return false; }
         }
-        /// <summary>The folder the environment reports when nothing is open is POMP's own fallback, never a project for ACP.</summary>
-        private bool IsRealWorkspace(string? path) =>
-            !string.IsNullOrWhiteSpace(path) && Path.IsPathRooted(path) && Directory.Exists(path)
-            && !SameRoot(path!, Path.Combine(_environment.DataDirectory, "workspace"));
-
         /// <summary>
         /// Data recorded for another folder is rebased before the host reads any store of <paramref name="root"/>
         /// (the engine start of a child would be too late for the saved-conversation lookup). A failure only costs the saved conversation.
@@ -478,20 +398,19 @@ namespace Pomp.Hosting
         }
 
         /// <summary>The native child that starts in a reconciled root reports the change to the user, as its own check would have.</summary>
-        private void HandOrigin(IConversationSession child, string root)
+        private void HandOrigin(PompSession child, string root)
         {
-            if (!(child is PompSession native)) return;
             WorkspaceOrigin.Outcome origin;
             lock (_gate)
             {
                 if (_origin == null || !SameRoot(_originRoot, root)) return;
                 origin = _origin; _origin = null;
             }
-            native.AdoptWorkspaceOrigin(origin);
+            child.AdoptWorkspaceOrigin(origin);
         }
 
         /// <summary>
-        /// Start, workspace switch and backend selection treat an unreadable session store as "nothing saved".
+        /// Start and workspace switch treat an unreadable session store as "nothing saved".
         /// A tab activation keeps the error, because a null there forgets the tab.
         /// </summary>
         private string? SavedFileOrNull(string root, string id)
@@ -511,7 +430,7 @@ namespace Pomp.Hosting
             var root = await WorkspaceRootAsync(token).ConfigureAwait(false);
             // Before the first store read of this root, and never under _gate.
             if (first) await ReconcileOriginAsync(root, token).ConfigureAwait(false);
-            IConversationSession? initialized = null;
+            PompSession? initialized = null;
             lock (_gate)
             {
                 if (_disposed) throw new ObjectDisposedException(nameof(PompConversationHost));
@@ -525,13 +444,12 @@ namespace Pomp.Hosting
             }
             if (initialized != null) HandOrigin(initialized, root);
             await ActiveSession.EnsureStartedAsync(token).ConfigureAwait(false);
-            await PublishBackendStateAsync().ConfigureAwait(false);
         }
 
         public async Task RestartAsync(CancellationToken token)
         {
             PompSession[] sessions;
-            lock (_gate) { if (_disposed) throw new ObjectDisposedException(nameof(PompConversationHost)); sessions = _channels.Keys.OfType<PompSession>().ToArray(); }
+            lock (_gate) { if (_disposed) throw new ObjectDisposedException(nameof(PompConversationHost)); sessions = _channels.Keys.ToArray(); }
             // Settings affect all engines, not just the selected conversation. Every restart restores its own session.
             foreach (var session in sessions) await session.RestartAsync(token).ConfigureAwait(false);
             PublishTabs();
@@ -553,8 +471,7 @@ namespace Pomp.Hosting
                 {
                     var partner = args["partner"]?.ToObject<ConversationPartnerPayload>() ?? throw new ArgumentException(PompLanguage.Pick("대화 상대가 비어 있어요.", "The conversation partner is empty."));
                     if (partner.Kind != "agent" && partner.Kind != "team") throw new ArgumentException(PompLanguage.Pick("대화 상대가 올바르지 않아요.", "The conversation partner is invalid."));
-                    if (current is not PompSession native) throw new InvalidOperationException(PompLanguage.Pick("에이전트·팀 대화는 OMP 연결에서만 열 수 있어요.", "Agent and team conversations require the OMP backend."));
-                    native.CheckConversationPartner(partner);
+                    current.CheckConversationPartner(partner);
                     var id = _tabs.OpenSession(root, partner) ?? MostRecent(root, partner);
                     if (id == current.ConversationId) throw new InvalidOperationException(PompLanguage.Pick("이미 열려 있는 탭이에요.", "That tab is already open."));
                     await ActivateAsync(root, id, partner, requestId).ConfigureAwait(false);
@@ -570,10 +487,10 @@ namespace Pomp.Hosting
                         partner = entry.Partner;
                     }
                     else id = snapshot.Main;
-                    if (id == current.ConversationId || (id == null && current.BackendId == "omp" && _tabs.Get(root, current.ConversationId).Kind == "main"))
+                    if (id == current.ConversationId || (id == null && _tabs.Get(root, current.ConversationId).Kind == "main"))
                         throw new InvalidOperationException(PompLanguage.Pick("이미 열려 있는 탭이에요.", "That tab is already open."));
-                    await ActivateAsync(root, id, partner, requestId, id == null ? "omp" : _tabs.Backend(root, id),
-                        existing: id == null ? UnstartedNative(root) : null, selectBeforeStart: id == null && partner == null).ConfigureAwait(false);
+                    await ActivateAsync(root, id, partner, requestId, existing: id == null ? UnstartedSession(root) : null,
+                        selectBeforeStart: id == null && partner == null).ConfigureAwait(false);
                 }
                 else if (action == "close")
                 {
@@ -583,7 +500,7 @@ namespace Pomp.Hosting
                     if (current.ConversationId == id)
                     {
                         switching = true;
-                        await ActivateAsync(root, snapshot.Main, null, requestId, existing: snapshot.Main == null ? UnstartedNative(root) : null,
+                        await ActivateAsync(root, snapshot.Main, null, requestId, existing: snapshot.Main == null ? UnstartedSession(root) : null,
                             selectBeforeStart: snapshot.Main == null).ConfigureAwait(false);
                     }
                     if (target != null && !ReferenceEquals(target, ActiveSession)) RemoveChild(target);
@@ -616,31 +533,33 @@ namespace Pomp.Hosting
             return handle == null ? null : store.Resolve(root, handle, null);
         }
 
-        private IConversationSession? Find(string root, string id)
+        private PompSession? UnstartedSession(string root)
+        {
+            lock (_gate) return _channels.Keys.FirstOrDefault(session => session.ConversationId == null
+                && (string.IsNullOrEmpty(session.ConversationRoot) || SameRoot(session.ConversationRoot, root)));
+        }
+
+        private PompSession? Find(string root, string id)
         {
             lock (_gate) return _channels.Keys.FirstOrDefault(session => SameRoot(session.ConversationRoot, root) && session.ConversationId == id);
         }
 
         private async Task ActivateAsync(string root, string? id, ConversationPartnerPayload? partner, string? requestId,
-            string backend = "omp", IConversationSession? existing = null, bool selectBeforeStart = false)
+            PompSession? existing = null, bool selectBeforeStart = false)
         {
             CancellationToken epoch;
             lock (_gate) { if (_disposed) throw new ObjectDisposedException(nameof(PompConversationHost)); epoch = _workspaceEpoch.Token; }
-            var (destination, created) = await OpenChildAsync(root, id, partner, backend, existing, selectBeforeStart, epoch).ConfigureAwait(false);
+            var (destination, created) = await OpenChildAsync(root, id, partner, existing, selectBeforeStart, epoch).ConfigureAwait(false);
             if (epoch.IsCancellationRequested)
             {
                 if (created) RemoveChild(destination);
                 epoch.ThrowIfCancellationRequested();
             }
-            IConversationSession previous; IUiChannel? page; Channel oldProxy, newProxy;
-            var realWorkspace = IsRealWorkspace(root);
+            PompSession previous; IUiChannel? page; Channel oldProxy, newProxy;
             try
             {
-                if (destination.ConversationId is string destinationId)
-                {
-                    if (backend == "omp" && partner != null) _tabs.Observe(root, destinationId, created ? partner : null);
-                    else if (backend != "omp") _tabs.ObserveBackend(root, destinationId, backend);
-                }
+                if (partner != null && destination.ConversationId is string destinationId)
+                    _tabs.Observe(root, destinationId, created ? partner : null);
                 lock (_gate)
                 {
                     if (_disposed) throw new ObjectDisposedException(nameof(PompConversationHost));
@@ -652,7 +571,6 @@ namespace Pomp.Hosting
                         destination.AttachUi(newProxy);
                     }
                     _active = destination;
-                    if (realWorkspace) _selectedBackend = backend;
                 }
             }
             catch
@@ -666,7 +584,6 @@ namespace Pomp.Hosting
                 if (!ReferenceEquals(previous, destination)) previous.DetachUi(oldProxy);
                 try
                 {
-                    await PublishBackendStateAsync().ConfigureAwait(false);
                     await page.PostAsync(new UiMessage(UiMessageTypes.SessionNewResult, new SessionNewResultPayload { RequestId = requestId, Status = "completed" })).ConfigureAwait(false);
                 }
                 catch (Exception ex) { _logger.Warn("Could not announce the active conversation: " + ex.Message); }
@@ -677,10 +594,10 @@ namespace Pomp.Hosting
             {
                 // Keep setup/error UI reachable when authentication or startup fails after selection.
                 try { await destination.EnsureStartedAsync(epoch).ConfigureAwait(false); }
-                catch (Exception ex) when (!(ex is OperationCanceledException)) { _logger.Warn("The selected backend could not start: " + ex.Message); }
+                catch (Exception ex) when (!(ex is OperationCanceledException)) { _logger.Warn("The selected conversation could not start: " + ex.Message); }
             }
             // The tab left behind may still run with accounts or model servers from before a change.
-            if (previous is PompSession native) native.RestartIfCredentialsStale();
+            previous.RestartIfCredentialsStale();
         }
 
         /// <summary>
@@ -688,25 +605,15 @@ namespace Pomp.Hosting
         /// <paramref name="partner"/>, for that agent or team. The child is not selected and gets no page: a conversation can work in the
         /// background. With <paramref name="startLater"/> the caller starts the engine after selecting it.
         /// </summary>
-        private async Task<(IConversationSession Session, bool Created)> OpenChildAsync(string root, string? id, ConversationPartnerPayload? partner,
-            string backend, IConversationSession? existing, bool startLater, CancellationToken epoch)
+        private async Task<(PompSession Session, bool Created)> OpenChildAsync(string root, string? id, ConversationPartnerPayload? partner,
+            PompSession? existing, bool startLater, CancellationToken epoch)
         {
-            IConversationSession? destination = existing ?? (id == null ? null : Find(root, id));
+            var destination = existing ?? (id == null ? null : Find(root, id));
             epoch.ThrowIfCancellationRequested();
-            if (backend == "antigravity-acp")
-            {
-                var realRoot = await _environment.GetWorkspaceRootAsync(epoch).ConfigureAwait(false);
-                if (!IsRealWorkspace(realRoot) || !SameRoot(realRoot!, root))
-                    throw new InvalidOperationException(PompLanguage.Pick("Antigravity ACP를 시작하려면 먼저 솔루션이나 폴더를 열어 주세요.", "Open a real workspace before starting Antigravity ACP."));
-                if (id != null && !id.StartsWith("antigravity-acp:", StringComparison.Ordinal))
-                    throw new InvalidOperationException(PompLanguage.Pick("ACP 대화 식별자가 올바르지 않아요.", "Invalid ACP conversation identity."));
-            }
-            if (destination != null && destination.BackendId != backend)
-                throw new InvalidOperationException(PompLanguage.Pick("대화의 연결 방식은 바꿀 수 없어요.", "A conversation cannot change backend."));
             if (destination != null) return (destination, false);
-            var file = backend == "omp" && id != null ? SavedFile(root, id) : null;
-            if (backend == "omp" && id != null && file == null) { _tabs.Remove(root, id); id = null; }
-            lock (_gate) destination = CreateChild(backend);
+            var file = id == null ? null : SavedFile(root, id);
+            if (id != null && file == null) { _tabs.Remove(root, id); id = null; }
+            lock (_gate) destination = CreateChild();
             try
             {
                 destination.InitializeConversation(root, id, file, partner);
@@ -723,13 +630,14 @@ namespace Pomp.Hosting
             return (destination, true);
         }
 
-        private void RemoveChild(IConversationSession child)
+        private void RemoveChild(PompSession child)
         {
             Channel? proxy;
             lock (_gate) { if (!_channels.TryGetValue(child, out proxy)) return; _channels.Remove(child); }
             child.DetachUi(proxy);
             child.ConversationStateChanged -= OnConversationStateChanged;
-            if (child is PompSession native) { native.RelayChanged -= OnRelayChanged; StopRelaysTo(native); }
+            child.RelayChanged -= OnRelayChanged;
+            StopRelaysTo(child);
             child.Dispose();
         }
 
@@ -780,20 +688,11 @@ namespace Pomp.Hosting
 
         private void PublishTabs()
         {
-            IUiChannel? page; IConversationSession active; IConversationSession[] sessions; string root; long publication;
+            IUiChannel? page; PompSession active; PompSession[] sessions; string root; long publication;
             lock (_gate) { page = _page; active = _active; sessions = _channels.Keys.ToArray(); root = _root; publication = ++_tabsPublication; }
             if (page == null || root.Length == 0) return;
-            var metadata = _tabs.Read(root);
-            var state = active.ConversationTabs;
-            state.Backend = active.BackendId;
-            state.Main = metadata.Main;
+            var state = active.GetConversationTabs(root);
             state.SessionId = active.ConversationId;
-            state.Tabs = metadata.Conversations.Where(entry => entry.Open).Select(entry =>
-            {
-                var nativeTab = state.Tabs.FirstOrDefault(tab => tab.SessionId == entry.SessionId);
-                return new ConversationTabPayload { SessionId = entry.SessionId, Backend = entry.Backend, Partner = entry.Partner,
-                    Title = entry.Backend == "antigravity-acp" ? "Antigravity" : nativeTab?.Title };
-            }).ToList();
             var live = sessions.Where(session => SameRoot(session.ConversationRoot, root)).ToArray();
             var running = new HashSet<string>(live.Where(session => session.ConversationRunning).Select(session => session.ConversationId).OfType<string>(), StringComparer.Ordinal);
             // An approval or question of a tab that is not on screen: the tab strip marks it.
@@ -801,8 +700,7 @@ namespace Pomp.Hosting
             state.MainRunning = state.Main != null && running.Contains(state.Main);
             state.MainWaiting = state.Main != null && waiting.Contains(state.Main);
             foreach (var tab in state.Tabs) { tab.IsRunning = running.Contains(tab.SessionId); tab.Waiting = waiting.Contains(tab.SessionId); }
-            state.Plans = sessions.Where(session => SameRoot(session.ConversationRoot, root))
-                .Select(session => session.ConversationPlan).OfType<ConversationPlanPayload>().ToList();
+            state.Plans = live.Select(session => session.ConversationPlan).OfType<ConversationPlanPayload>().ToList();
             lock (_gate)
             {
                 // Concurrent engine updates must not publish an older projection after a newer one.
@@ -812,7 +710,7 @@ namespace Pomp.Hosting
             }
         }
 
-        private Task PostFromChildAsync(IConversationSession session, UiMessage message, CancellationToken token)
+        private Task PostFromChildAsync(PompSession session, UiMessage message, CancellationToken token)
         {
             IUiChannel? page;
             lock (_gate) page = !_disposed && ReferenceEquals(session, _active) ? _page : null;
@@ -822,7 +720,7 @@ namespace Pomp.Hosting
 
         public void Dispose()
         {
-            IConversationSession[] children;
+            PompSession[] children;
             lock (_gate)
             {
                 if (_disposed) return;
@@ -845,11 +743,10 @@ namespace Pomp.Hosting
         private sealed class Channel : IUiChannel
         {
             private readonly PompConversationHost _owner;
-            private readonly IConversationSession _session;
+            private readonly PompSession _session;
             private bool _deferReady;
-            public Channel(PompConversationHost owner, IConversationSession session) { _owner = owner; _session = session; }
+            public Channel(PompConversationHost owner, PompSession session) { _owner = owner; _session = session; }
             public bool IsReady { get { lock (_owner._gate) return !_deferReady && _owner._page?.IsReady == true; } }
-            public bool ReadyDeferred { get { lock (_owner._gate) return _deferReady; } }
             public event EventHandler<UiMessage>? MessageReceived;
             public void DeferReady() { lock (_owner._gate) _deferReady = true; }
             public void AllowReady()

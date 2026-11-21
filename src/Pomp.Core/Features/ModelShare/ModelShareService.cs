@@ -135,7 +135,7 @@ namespace Pomp.Features.ModelShare
                 int generation;
                 lock (_lock)
                 {
-                    if (_disposed || !_share.Enabled) return;
+                    if (_disposed || !_share.Enabled || _state == "starting" || _state == "on") return;
                     generation = ++_generation;
                     SetStateLocked("starting", null);
                 }
@@ -155,7 +155,7 @@ namespace Pomp.Features.ModelShare
             lock (_lock)
             {
                 ThrowIfDisposed();
-                if (enabled == _share.Enabled && (enabled ? _state == "on" || _state == "starting" : _state == "off")) return;
+                if (enabled && _share.Enabled && (_state == "on" || _state == "starting")) return;
             }
 
             await ApplyAsync(share => share.WithEnabled(enabled), token).ConfigureAwait(false);
@@ -193,11 +193,14 @@ namespace Pomp.Features.ModelShare
             lock (_lock)
             {
                 ThrowIfDisposed();
-                var client = _share.Clients.FirstOrDefault(item => string.Equals(item.Name, clientName, StringComparison.Ordinal));
-                if (client == null) throw new ProviderSetupException(SetupText.Get("연결된 PC 목록에 그 이름이 없습니다.", "No connected PC has that name."));
-                var next = _share.WithClients(_share.Clients.Where(item => !ReferenceEquals(item, client)).ToList());
-                SaveLocked(next);
-                remaining = next.Clients.Count;
+                using (_run == null ? AcquireStoreLocked() : null)
+                {
+                    var client = _share.Clients.FirstOrDefault(item => string.Equals(item.Name, clientName, StringComparison.Ordinal));
+                    if (client == null) throw new ProviderSetupException(SetupText.Get("연결된 PC 목록에 그 이름이 없습니다.", "No connected PC has that name."));
+                    var next = _share.WithClients(_share.Clients.Where(item => !ReferenceEquals(item, client)).ToList());
+                    SaveLocked(next);
+                    remaining = next.Clients.Count;
+                }
             }
 
             _logger.Info("Model sharing: a connected PC was removed (" + remaining.ToString(CultureInfo.InvariantCulture) + " left).");
@@ -227,12 +230,15 @@ namespace Pomp.Features.ModelShare
                 lock (_lock)
                 {
                     ThrowIfDisposed();
-                    var next = change(_share);
-                    SaveLocked(next);
+                    using (_run == null ? AcquireStoreLocked() : null)
+                    {
+                        var next = change(_share);
+                        SaveLocked(next);
+                        start = next.Enabled;
+                    }
                     stop = _run;
                     _run = null;
                     generation = ++_generation;
-                    start = next.Enabled;
                     SetStateLocked(start ? "starting" : "off", null);
                 }
 
@@ -257,6 +263,23 @@ namespace Pomp.Features.ModelShare
                 {
                     if (_disposed || generation != _generation || !_share.Enabled) return;
                     run = new Run();
+                    try
+                    {
+                        // The first resource is released last, after the gateway, front and certificate.
+                        run.Attach(AcquireStoreLocked());
+                        if (!_share.Enabled)
+                        {
+                            SetStateLocked("off", null);
+                            run.Stop();
+                            return;
+                        }
+                    }
+                    catch (ProviderSetupException ex)
+                    {
+                        SetStateLocked("failed", ex.Message);
+                        run.Stop();
+                        return;
+                    }
                     _run = run;
                 }
 
@@ -360,12 +383,7 @@ namespace Pomp.Features.ModelShare
         private async Task<int?> StartRunAsync(Run run)
         {
             var token = run.Token;
-            try { Directory.CreateDirectory(_folder); }
-            catch (Exception ex)
-            {
-                _logger.Warn("The model share folder could not be created: " + ex.GetType().Name);
-                throw new ProviderSetupException(SetupText.Get("POMP 데이터 폴더를 준비하지 못했습니다.", "The POMP data folder could not be prepared."));
-            }
+            token.ThrowIfCancellationRequested();
 
             var addresses = Addresses(true);
             ModelShareSettings share;
@@ -434,7 +452,7 @@ namespace Pomp.Features.ModelShare
             return models;
         }
 
-        /// <summary>Polls <paramref name="url"/> until it answers 200 (at most <paramref name="timeout"/>); with <paramref name="countModels"/> returns <c>data.length</c>.</summary>
+        /// <summary>Polls <paramref name="url"/> until it answers 200 (at most <paramref name="timeout"/>); optionally counts models available to chat.</summary>
         private async Task<int?> WaitReadyAsync(Run run, ModelShareProcess process, string url, string bearer, bool countModels, TimeSpan timeout, CancellationToken token)
         {
             var deadline = DateTime.UtcNow + timeout;
@@ -477,13 +495,15 @@ namespace Pomp.Features.ModelShare
             }
         }
 
-        private static int? CountModels(string text)
+        internal static int? CountModels(string text)
         {
             try
             {
                 using (var reader = new JsonTextReader(new StringReader(text)) { DateParseHandling = DateParseHandling.None })
                 {
-                    return (JToken.Load(reader) as JObject)?["data"] is JArray data ? data.Count : (int?)null;
+                    if (!((JToken.Load(reader) as JObject)?["data"] is JArray data)) return null;
+                    // omp omits kind for chat; embeddings, images, etc. require a different route.
+                    return data.OfType<JObject>().Count(row => row["kind"]?.Type != JTokenType.String || (string?)row["kind"] == "chat");
                 }
             }
             catch (JsonException) { return null; }
@@ -610,6 +630,33 @@ namespace Pomp.Features.ModelShare
         }
 
         // ---- files ------------------------------------------------------------------------------------------------------
+
+        // A second VS process has its own _lock and may have read settings before a PC was paired or revoked.
+        // Lease the directory before touching either file or the identity, and base every new owner's changes on disk.
+        private FileStream AcquireStoreLocked()
+        {
+            FileStream lease;
+            try
+            {
+                Directory.CreateDirectory(_folder);
+                lease = new FileStream(Path.Combine(_folder, "host.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException ex) when ((ex.HResult & 0xffff) == 32 || (ex.HResult & 0xffff) == 33)
+            {
+                _logger.Warn("Model sharing is being managed by another Visual Studio instance.");
+                throw new ProviderSetupException(SetupText.Get(
+                    "다른 Visual Studio 창에서 모델 공유를 관리하고 있습니다. 해당 창에서 공유 설정을 변경하거나 공유를 끈 뒤 다시 시도하세요.",
+                    "Another Visual Studio instance manages model sharing. Use that instance to change settings, or turn sharing off there and try again."));
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                _logger.Warn("The model share folder could not be locked: " + ex.GetType().Name);
+                throw new ProviderSetupException(SaveFailedText());
+            }
+
+            _share = ModelShareSettings.Read(_settingsPath, _logger);
+            return lease;
+        }
 
         /// <summary>Writes settings and the gateway clients file and adopts <paramref name="next"/>; caller holds <see cref="_lock"/>.</summary>
         private void SaveLocked(ModelShareSettings next)
@@ -938,8 +985,20 @@ namespace Pomp.Features.ModelShare
             }
 
             _disposeCts.Cancel();
-            run?.Stop();
+            if (run != null)
+            {
+                run.CancelStart();
+                StopAfterTransitionAsync(run).Forget(_logger, "model share shutdown");
+            }
             _expiry.Dispose();
+        }
+
+        // A cancelled start may still be writing the identity. Keep its lease until it leaves the transition.
+        private async Task StopAfterTransitionAsync(Run run)
+        {
+            await _transition.WaitAsync().ConfigureAwait(false);
+            try { run.Stop(); }
+            finally { _transition.Release(); }
         }
 
         /// <summary>The current one-time code (secret + pin text); <see cref="Failures"/> changes under the service lock.</summary>

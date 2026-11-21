@@ -1,16 +1,14 @@
-import type { BackendId } from './backend';
 export interface ConversationPartner { kind: 'main' | 'agent' | 'team'; id?: string }
 /** An open agent or team tab: its own conversation. `waiting`: an approval or question of that tab waits for the user. */
-export interface ConversationTab { sessionId: string; partner: ConversationPartner; title?: string; isRunning?: boolean; waiting?: boolean; backend?: BackendId }
+export interface ConversationTab { sessionId: string; partner: ConversationPartner; title?: string; isRunning?: boolean; waiting?: boolean }
 /** Live plan metadata; task pages remain on the engine that owns this conversation. */
 export interface ConversationPlan {
-  backend?: BackendId; editable?: boolean; canContinue?: boolean; canRun?: boolean; canStop?: boolean;
   sessionId: string; title: string; partner: ConversationPartner; ready: boolean;
   isStreaming: boolean; hasPendingAsyncWork: boolean;
   planTaskCount: number; planOpenCount: number; planRevision?: string;
 }
 /** The current conversation's partner and the workspace's chat tabs; `main` is the Default (POMP) tab's conversation. */
-export interface TabsState { root: string; backend?: BackendId; plans: ConversationPlan[]; sessionId?: string | null; partner: ConversationPartner; title?: string; message?: string; main?: string | null; tabs: ConversationTab[];
+export interface TabsState { root: string; plans: ConversationPlan[]; sessionId?: string | null; partner: ConversationPartner; title?: string; message?: string; main?: string | null; tabs: ConversationTab[];
   pendingAction?: 'open' | 'activate' | 'close' | 'new'; pendingRequestId?: string; pendingPartner?: ConversationPartner; pendingSessionId?: string; mainRunning?: boolean; mainWaiting?: boolean }
 export interface CommandReply { requestId: string; ok: boolean; error?: string }
 export interface QueueItem {

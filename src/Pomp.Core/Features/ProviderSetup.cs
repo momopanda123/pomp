@@ -134,6 +134,9 @@ namespace Pomp.Features
                     case "answerPrompt":
                         await AnswerPromptAsync(request).ConfigureAwait(false);
                         break;
+                    case "answerPromptFromClipboard":
+                        await AnswerPromptAsync(request, fromClipboard: true).ConfigureAwait(false);
+                        break;
                     case "cancelLogin":
                         CancelLogin();
                         break;
@@ -228,7 +231,7 @@ namespace Pomp.Features
         /// Sharing commands only touch <see cref="ModelShareService"/>, which serializes its own work: starting the shared servers may take
         /// seconds and must not hold up the other setup commands. Connecting to another PC saves a server and is queued like the rest.
         /// </summary>
-        private static bool RunsUnqueued(string? action) => action == "refresh" || action == "answerPrompt" || action == "cancelLogin" || action == "listUsage"
+        private static bool RunsUnqueued(string? action) => action == "refresh" || action == "answerPrompt" || action == "answerPromptFromClipboard" || action == "cancelLogin" || action == "listUsage"
             || action == "shareEnable" || action == "shareConfigure" || action == "shareNewCode" || action == "shareRevoke";
 
         public void Publish(string? requestId = null, string? error = null)
